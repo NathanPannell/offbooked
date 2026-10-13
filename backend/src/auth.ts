@@ -1,0 +1,75 @@
+import type { FastifyRequest } from "fastify";
+import type { Ctx } from "./context.ts";
+import { sha256 } from "./crypto.ts";
+import { HttpError, notFound, unauthorized } from "./errors.ts";
+import { inviteExpiresAt, parseInviteToken } from "./invite.ts";
+import { enforce, LIMITS } from "./ratelimit.ts";
+import { productionRows, type ProductionRow } from "./views.ts";
+
+export interface Director {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export const SESSION_DAYS = 30;
+
+function credential(req: FastifyRequest, scheme: "Bearer" | "Invite"): string | null {
+  const header = req.headers.authorization;
+  if (!header) return null;
+  const [given, value] = header.split(/\s+/, 2);
+  return given?.toLowerCase() === scheme.toLowerCase() && value ? value : null;
+}
+
+export async function requireDirector(ctx: Ctx, req: FastifyRequest): Promise<Director> {
+  const token = credential(req, "Bearer");
+  if (!token) throw unauthorized("Sign in to continue.");
+  const [user] = await ctx.sql<Director[]>`
+    select u.id, u.email, u.name from sessions s join users u on u.id = s.user_id
+    where s.token_hash = ${sha256(token)} and s.expires_at > now()`;
+  if (!user) throw unauthorized("Your session has ended. Sign in again.");
+  return user;
+}
+
+// Archived productions stay readable by their owner; other people's productions are 404.
+export async function ownedProduction(ctx: Ctx, user: Director, productionId: string): Promise<ProductionRow> {
+  const [p] = await productionRows(ctx.sql, { ownerId: user.id, id: productionId, includeArchived: true });
+  if (!p) throw notFound("Production not found.");
+  return p;
+}
+
+export interface ActorSession {
+  actor: { id: string; name: string; firstName: string | null; email: string | null; tokenVersion: number; createdAt: Date };
+  production: { id: string; title: string; performanceDate: string | null; directorName: string };
+  characterIds: string[];
+}
+
+// The invite token is the actor's only credential. Unknown or forged tokens are 401; tokens that
+// were real but are now expired, reset or archived are 410 with enough context for a friendly page.
+export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<ActorSession> {
+  const token = credential(req, "Invite");
+  const parsed = token ? parseInviteToken(ctx.config.inviteSecret, token) : null;
+  await enforce(ctx.sql, ctx.log, `invite-ip:${req.ip}`, LIMITS.inviteIp);
+  if (!parsed) throw unauthorized("This link isn't valid. Ask your director for a new one.");
+  const [row] = await ctx.sql<
+    { id: string; name: string; firstName: string | null; email: string | null; tokenVersion: number; createdAt: Date; productionId: string; title: string; performanceDate: string | null; archivedAt: Date | null; directorName: string | null }[]
+  >`
+    select a.id, a.name, a.first_name, a.email, a.token_version, a.created_at, p.id as production_id, p.title,
+      p.performance_date::text as performance_date, p.archived_at, u.name as director_name
+    from actors a join productions p on p.id = a.production_id join users u on u.id = p.owner_id
+    where a.id = ${parsed.actorId}`;
+  if (!row) throw unauthorized("This link isn't valid. Ask your director for a new one.");
+  const directorName = row.directorName || "Your director";
+  const gone = (message: string) => new HttpError(410, "invite_expired", message, { directorName, productionTitle: row.title });
+  if (row.archivedAt) throw gone("This production has wrapped, so this link no longer works.");
+  if (parsed.tokenVersion !== row.tokenVersion) throw gone("This link was replaced with a new one. Ask your director for the latest link.");
+  if (inviteExpiresAt(row.performanceDate, row.createdAt) < new Date()) throw gone("This link has expired. Ask your director for a new one.");
+  await enforce(ctx.sql, ctx.log, `invite:${row.id}`, LIMITS.inviteActor);
+  const chars = await ctx.sql<{ characterId: string }[]>`select character_id from actor_characters where actor_id = ${row.id}`;
+  await ctx.sql`update actors set last_active_at = now() where id = ${row.id}`;
+  return {
+    actor: { id: row.id, name: row.name, firstName: row.firstName, email: row.email, tokenVersion: row.tokenVersion, createdAt: row.createdAt },
+    production: { id: row.productionId, title: row.title, performanceDate: row.performanceDate, directorName },
+    characterIds: chars.map((c) => c.characterId),
+  };
+}

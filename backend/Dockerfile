@@ -8,6 +8,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
+COPY backend/migrations ./migrations
 COPY backend/src ./src
 
 ENV NODE_ENV=production PORT=8080

@@ -1,0 +1,31 @@
+// Objects are written once and never deleted (keep-forever policy), so there is no delete.
+export interface Storage {
+  put(key: string, body: Buffer, contentType: string): Promise<void>;
+  get(key: string): Promise<Buffer>;
+  exists(key: string): Promise<boolean>;
+  signedUrl(key: string, ttlSeconds?: number): Promise<string>;
+}
+
+export const AUDIO_URL_TTL_SECONDS = 3600;
+
+const CONTENT_TYPES: Record<string, string> = {
+  webm: "audio/webm",
+  m4a: "audio/mp4",
+  mp4: "audio/mp4",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+  flac: "audio/flac",
+  pdf: "application/pdf",
+  txt: "text/plain; charset=utf-8",
+};
+
+export function contentTypeForKey(key: string): string {
+  const ext = key.slice(key.lastIndexOf(".") + 1).toLowerCase();
+  return CONTENT_TYPES[ext] ?? "application/octet-stream";
+}
+
+export function assertSafeKey(key: string): void {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/.test(key) || key.includes("..") || key.includes("//")) {
+    throw new Error(`Unsafe storage key: ${key}`);
+  }
+}

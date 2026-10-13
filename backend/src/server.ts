@@ -1,9 +1,48 @@
 import { buildApp } from "./app.ts";
+import { loadConfig } from "./config.ts";
+import { createCtx } from "./context.ts";
+import { createSql, migrate } from "./db.ts";
+import { recoverScriptParses } from "./parse/job.ts";
+import { pruneRateLimits } from "./ratelimit.ts";
+import { recoverRenders, startRenderWorker } from "./render/queue.ts";
 
-const app = buildApp({ revision: process.env.APP_REVISION ?? process.env.RAILWAY_GIT_COMMIT_SHA });
+const config = loadConfig();
+const sql = createSql(config.databaseUrl);
+const revision = process.env.APP_REVISION ?? process.env.RAILWAY_GIT_COMMIT_SHA;
 const port = Number(process.env.PORT ?? 8080);
 
-app.listen({ port, host: "0.0.0.0" }).catch((err) => {
+const renderKick = { kick: () => {} };
+let app: ReturnType<typeof buildApp> | undefined;
+const log = {
+  info: (obj: object, msg?: string) => app?.log.info(obj, msg),
+  warn: (obj: object, msg?: string) => app?.log.warn(obj, msg),
+  error: (obj: object, msg?: string) => app?.log.error(obj, msg),
+};
+const ctx = createCtx(config, sql, log, { renderWorker: renderKick });
+app = buildApp({ revision, ctx });
+
+try {
+  await migrate(sql, log);
+  await recoverRenders(ctx);
+  await recoverScriptParses(ctx);
+  await app.listen({ port, host: "0.0.0.0" });
+} catch (err) {
   app.log.error(err);
   process.exit(1);
-});
+}
+
+const worker = startRenderWorker(ctx);
+renderKick.kick = worker.kick;
+const prune = setInterval(() => pruneRateLimits(sql).catch((err) => log.error({ err }, "rate limit prune failed")), 3_600_000);
+prune.unref();
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, async () => {
+    app.log.info({ signal }, "shutting down");
+    await app.close();
+    await worker.stop();
+    await ctx.jobs.idle();
+    await sql.end({ timeout: 5 });
+    process.exit(0);
+  });
+}
