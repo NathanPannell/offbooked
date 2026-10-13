@@ -85,6 +85,15 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
   });
   app.addContentTypeParser(/^audio\//, { parseAs: "buffer", bodyLimit: MAX_TAKE_BYTES }, (_req, raw, done) => done(null, raw));
 
+  // API responses depend on the Authorization header, not the URL, so browsers must never reuse them.
+  // Signed file URLs set their own caching.
+  app.addHook("onSend", async (req, reply) => {
+    if (req.url.startsWith("/api/") && !req.url.startsWith("/api/files/") && !reply.hasHeader("cache-control")) {
+      reply.header("Cache-Control", "no-store");
+      reply.header("Vary", "Authorization, Origin");
+    }
+  });
+
   app.register(async (api) => {
     authRoutes(api, ctx);
     productionRoutes(api, ctx);

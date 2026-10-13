@@ -1,0 +1,41 @@
+import { request, type Auth } from "./client";
+import type { ActorLine, Invite, PracticeResult, RunThrough, Section, SttResult, Take } from "./types";
+
+export interface TakeUploadResult {
+  take: Take;
+  linesRecorded: number;
+  linesTotal: number;
+}
+
+/** All calls scoped to one actor's invite token. */
+export function actorApi(token: string) {
+  const auth: Auth = { kind: "invite", token };
+  return {
+    invite: () => request<Invite>("/invite", { auth }),
+    start: (firstName: string) => request<void>("/invite/start", { auth, json: { firstName } }),
+    lines: () => request<{ sections: Section[]; lines: ActorLine[] }>("/invite/lines", { auth }),
+    putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal) =>
+      request<TakeUploadResult>(`/invite/lines/${lineId}/take`, {
+        method: "PUT",
+        auth,
+        body: audio,
+        signal,
+        headers: {
+          "Content-Type": (audio.type || "application/octet-stream").split(";")[0],
+          "X-Take-Id": takeId,
+          "X-Duration-Ms": String(Math.round(durationMs)),
+        },
+      }),
+    postStt: (takeId: string, result: SttResult) =>
+      request<void>(`/invite/takes/${takeId}/stt`, { auth, json: result }),
+    contact: (email: string) => request<void>("/invite/contact", { auth, json: { email } }),
+    runthrough: () => request<RunThrough>("/invite/runthrough", { auth }),
+    practice: (results: PracticeResult[]) =>
+      request<{ practice: { id: string; avgAccuracy: number; createdAt: string } }>("/invite/practice", {
+        auth,
+        json: { mode: "my_part", results },
+      }),
+  };
+}
+
+export type ActorApi = ReturnType<typeof actorApi>;
