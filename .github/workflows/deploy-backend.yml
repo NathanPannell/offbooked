@@ -1,0 +1,49 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - railway.json
+      - .github/workflows/deploy-backend.yml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+      RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+      API_URL: ${{ vars.API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g @railway/cli
+      - name: Set revision
+        run: >
+          railway variable set "APP_REVISION=${GITHUB_SHA}" --skip-deploys
+          --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID"
+      - name: Deploy
+        run: >
+          railway up --ci
+          --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_SERVICE_ID"
+      - name: Verify deployed revision
+        run: |
+          for i in $(seq 1 30); do
+            body=$(curl -fsS "$API_URL/health" || true)
+            echo "$body"
+            if echo "$body" | grep -q "\"revision\":\"${GITHUB_SHA}\""; then exit 0; fi
+            sleep 10
+          done
+          echo "Deployed /health never reported ${GITHUB_SHA}" >&2
+          exit 1
