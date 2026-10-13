@@ -1,4 +1,4 @@
-# Castpals
+# Offbooked
 
 Remote line recording and run-through playback for theatre casts. A director uploads a script, shares one link per actor, each actor records their lines on their phone, and the server stitches everything into a lyrics-style run-through. The MVP backlog is in GitHub issues; #1 lists every credential and decision.
 
@@ -22,7 +22,7 @@ npm run typecheck
 
 ## Backend hosting (Railway)
 
-- Workspace `eee14ab1-1ec2-442b-a659-9af6d97ba0c2`, project `castpals` (`08b6cf6f-a52b-441d-81f2-bdb5621029df`).
+- Workspace `eee14ab1-1ec2-442b-a659-9af6d97ba0c2`, project `offbooked` (`08b6cf6f-a52b-441d-81f2-bdb5621029df`).
 - Environment `production` (`409aeebb-d5ed-4e8c-ae02-fb6403bb81d1`), service `api` (`63b9f8b1-d6d8-4ae6-8b4f-85ce3830259a`).
 - URL: https://api-production-c2bf5.up.railway.app
 - The service has no Railway Git integration. Deploys run from GitHub Actions on push to `main` with `railway up`. The workflow sets `APP_REVISION` to the commit and waits until `/health` reports it.

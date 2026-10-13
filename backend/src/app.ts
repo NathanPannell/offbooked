@@ -21,7 +21,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
   app.get("/health", async (_req, reply) => {
     const ffmpeg = await probe();
     reply.code(ffmpeg ? 200 : 503);
-    return { ok: Boolean(ffmpeg), service: "castpals-api", revision: opts.revision ?? "dev", ffmpeg };
+    return { ok: Boolean(ffmpeg), service: "offbooked-api", revision: opts.revision ?? "dev", ffmpeg };
   });
 
   return app;
