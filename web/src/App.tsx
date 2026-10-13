@@ -1,0 +1,39 @@
+import { lazy, Suspense } from "react";
+import { BrowserRouter, Route, Routes } from "react-router";
+import { Loading } from "./components/Loading";
+import { ToastProvider } from "./components/Toast";
+import { Landing } from "./routes/Landing";
+import { NotFound } from "./routes/NotFound";
+
+const SignIn = lazy(() => import("./routes/director/SignIn"));
+const Verify = lazy(() => import("./routes/director/Verify"));
+const DirectorLayout = lazy(() => import("./routes/director/DirectorLayout"));
+const Productions = lazy(() => import("./routes/director/Productions"));
+const NewProduction = lazy(() => import("./routes/director/NewProduction"));
+const ProductionPage = lazy(() => import("./routes/director/ProductionPage"));
+const InvitePage = lazy(() => import("./routes/actor/InvitePage"));
+const InvitePlay = lazy(() => import("./routes/actor/InvitePlay"));
+
+export function App() {
+  return (
+    <ToastProvider>
+      <BrowserRouter>
+        <Suspense fallback={<Loading />}>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/signin" element={<SignIn />} />
+            <Route path="/auth/verify" element={<Verify />} />
+            <Route path="/app" element={<DirectorLayout />}>
+              <Route index element={<Productions />} />
+              <Route path="new" element={<NewProduction />} />
+              <Route path="p/:id" element={<ProductionPage />} />
+            </Route>
+            <Route path="/i/:token" element={<InvitePage />} />
+            <Route path="/i/:token/play" element={<InvitePlay />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </BrowserRouter>
+    </ToastProvider>
+  );
+}
