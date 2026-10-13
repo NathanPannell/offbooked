@@ -5,6 +5,7 @@ Remote line recording and run-through playback for theatre casts. A director upl
 ## Layout
 
 - `backend/`: Node 24 + Fastify API and, later, the ffmpeg render worker. TypeScript runs through Node's type stripping, so there is no build step. `tsc` is for typechecking only.
+- `web/`: the public site at offbooked.com. For now a static page; the director and actor app will replace it.
 - `railway.json`: Railway build and health check config for the backend.
 - `.github/workflows/`: `ci.yml` (typecheck and tests), `deploy-backend.yml` (deploys `main` to Railway).
 
@@ -24,10 +25,17 @@ npm run typecheck
 
 - Workspace `eee14ab1-1ec2-442b-a659-9af6d97ba0c2`, project `offbooked` (`08b6cf6f-a52b-441d-81f2-bdb5621029df`).
 - Environment `production` (`409aeebb-d5ed-4e8c-ae02-fb6403bb81d1`), service `api` (`63b9f8b1-d6d8-4ae6-8b4f-85ce3830259a`).
-- URL: https://api-production-c2bf5.up.railway.app
+- URL: https://api.offbooked.com (custom domain, CNAME in Vercel DNS). Railway's own URL https://api-production-c2bf5.up.railway.app also works.
 - The service has no Railway Git integration. Deploys run from GitHub Actions on push to `main` with `railway up`. The workflow sets `APP_REVISION` to the commit and waits until `/health` reports it.
 - GitHub environment `production` holds the secret `RAILWAY_API_TOKEN` (the workspace token from the Windows user environment) and the variables `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_SERVICE_ID`, `API_URL`.
 - To deploy by hand, run `railway up --ci -p <project> -e <environment> -s <service>` with `RAILWAY_API_TOKEN` set from the Windows user environment. Never print the token.
+
+## Web hosting (Vercel) and DNS
+
+- `offbooked.com` was bought through Vercel and uses Vercel DNS, in team `nathanpannells-projects` (`team_CJ0RWNsNJK6vDQy2raakV6cZ`). The Vercel MCP connector cannot see this team; use `VERCEL_TOKEN` from the Windows user environment.
+- Vercel project `offbooked` (`prj_6C9NIcC5InImQXSAZWflMJhYFJYx`), root directory `web`, Git-linked to this repo. A push to `main` deploys production; PR branches get preview deployments.
+- Domains: `offbooked.com` (production), `www.offbooked.com` redirects to it with a 308.
+- DNS records for the backend: `api` CNAME to Railway's target and the `_railway-verify.api` TXT record. Don't remove them.
 
 ## Product rules that shape the code
 
