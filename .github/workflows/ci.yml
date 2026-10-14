@@ -40,3 +40,16 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  docker:
+    # Builds the Railway image and checks Piper can synthesize inside it, since the TTS
+    # binary and voices are only exercised in the container.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the backend image
+        run: docker build -f backend/Dockerfile -t offbooked-api .
+      - name: Piper speaks inside the image
+        run: |
+          docker run --rm --entrypoint sh offbooked-api -c \
+            'echo "To be, or not to be." | /opt/piper/piper -q -m /opt/piper/voices/en_GB-alan-medium.onnx -f /tmp/t.wav && test -s /tmp/t.wav && ls -la /tmp/t.wav && ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/t.wav'
