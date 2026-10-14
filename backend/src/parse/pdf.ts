@@ -29,7 +29,7 @@ export async function extractPdfText(data: Uint8Array): Promise<{ text: string; 
   }
   if (result.totalPages > MAX_PDF_PAGES) throw new ScriptInputError(`This PDF has ${result.totalPages} pages. The limit is ${MAX_PDF_PAGES}.`);
 
-  const pages = result.items.map((items) => pageLines(items.filter((i) => i.str.trim() && i.dir !== "ttb")));
+  const pages = result.items.map((items) => pageLines(dropOverprints(items.filter((i) => i.str.trim() && i.dir !== "ttb"))));
   const visibleChars = pages.flat().reduce((n, l) => n + l.text.replace(/\s/g, "").length, 0);
   if (visibleChars < Math.max(50, result.totalPages * 25)) {
     throw new ScriptInputError("This PDF looks like scanned images, so there is no text to read. Paste the script text instead.");
@@ -40,6 +40,26 @@ export async function extractPdfText(data: Uint8Array): Promise<{ text: string; 
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return { text, pages: result.totalPages };
+}
+
+// Some PDFs fake bold type by drawing the same text several times a fraction of a point apart.
+// An item that sits inside another item's box and whose text that item already contains is a
+// duplicate print, not more words.
+export function dropOverprints<T extends Item>(items: T[]): T[] {
+  const tol = 1.5;
+  const sorted = [...items].sort((a, b) => b.str.length - a.str.length);
+  const kept: T[] = [];
+  for (const it of sorted) {
+    const dup = kept.some(
+      (k) =>
+        Math.abs(k.y - it.y) <= tol &&
+        it.x >= k.x - tol &&
+        it.x + it.width <= k.x + k.width + tol &&
+        k.str.includes(it.str.trim()),
+    );
+    if (!dup) kept.push(it);
+  }
+  return items.filter((it) => kept.includes(it));
 }
 
 // Groups items into visual lines (top to bottom, left to right). A page is only read as two
@@ -70,9 +90,20 @@ function toLine(row: Item[]): PageLine {
   let end = -Infinity;
   for (const item of row) {
     const gap = item.x - end;
-    if (text && gap > (item.fontSize || 10) * 0.15 && !/\s$/.test(text) && !/^\s/.test(item.str)) text += " ";
-    text += item.str;
-    end = item.x + item.width;
+    let str = item.str;
+    // An item that starts inside the previous one and repeats its last letters is a kerning
+    // split ("MARLO" + "OW" + "W. Yes"); keep only the new letters.
+    if (text && gap < -(item.fontSize || 10) * 0.2) {
+      for (let k = Math.min(str.length, 6); k > 0; k--) {
+        if (text.endsWith(str.slice(0, k))) {
+          str = str.slice(k);
+          break;
+        }
+      }
+    }
+    if (text && gap > (item.fontSize || 10) * 0.15 && !/\s$/.test(text) && !/^\s/.test(str)) text += " ";
+    text += str;
+    end = Math.max(end, item.x + item.width);
   }
   return { text: text.replace(/\s+/g, " ").trim(), y: row[0]!.y, height: Math.max(...row.map((i) => i.height || i.fontSize || 10)) };
 }
@@ -97,21 +128,25 @@ function columnSplit(rows: Item[][]): number | null {
 const PAGE_NUMBER_RE = /^(?:page\s*)?[\divxlc]{1,6}(?:\s*(?:of|\/)\s*\d{1,4})?\.?$/i;
 const headerKey = (s: string) => s.toLowerCase().replace(/\d+/g, "#").replace(/\s+/g, " ").trim();
 
-// Removes page numbers and text that repeats at the top or bottom of many pages.
+// Removes page numbers and text that repeats at the top or bottom of many pages. Text that also
+// turns up in the body of pages is kept: in screenplays a character cue often lands at a page edge.
 function dropRunningHeaders(pages: PageLine[][]): PageLine[][] {
   const edge = (lines: PageLine[], i: number) => i < 2 || i >= lines.length - 2;
-  const counts = new Map<string, number>();
+  const edgeCounts = new Map<string, number>();
+  const bodyCounts = new Map<string, number>();
   for (const lines of pages) {
-    const seen = new Set<string>();
-    lines.forEach((l, i) => {
-      if (edge(lines, i)) seen.add(headerKey(l.text));
-    });
-    for (const key of seen) counts.set(key, (counts.get(key) ?? 0) + 1);
+    const atEdge = new Set<string>();
+    const inBody = new Set<string>();
+    lines.forEach((l, i) => (edge(lines, i) ? atEdge : inBody).add(headerKey(l.text)));
+    for (const key of atEdge) edgeCounts.set(key, (edgeCounts.get(key) ?? 0) + 1);
+    for (const key of inBody) bodyCounts.set(key, (bodyCounts.get(key) ?? 0) + 1);
   }
   const threshold = Math.max(3, pages.length * 0.4);
-  return pages.map((lines) =>
-    lines.filter((l, i) => !(edge(lines, i) && (PAGE_NUMBER_RE.test(l.text) || (counts.get(headerKey(l.text)) ?? 0) >= threshold))),
-  );
+  const isHeader = (key: string) => {
+    const atEdge = edgeCounts.get(key) ?? 0;
+    return atEdge >= threshold && (bodyCounts.get(key) ?? 0) < atEdge * 0.5;
+  };
+  return pages.map((lines) => lines.filter((l, i) => !(edge(lines, i) && (PAGE_NUMBER_RE.test(l.text) || isHeader(headerKey(l.text))))));
 }
 
 // Inserts a blank line where the vertical gap is clearly larger than normal line spacing.

@@ -1,0 +1,10 @@
+{
+  "title": "The Proposal",
+  "author": "Anton Chekhov (tr. Julius West)",
+  "format": "pdf",
+  "sourceUrl": "https://www.gutenberg.org/cache/epub/7986/pg7986-images.html (text); PDF generated",
+  "license": "Public domain (1916 translation); generated PDF has no added rights",
+  "description": "GENERATED: no public-domain screenplay-format play PDF was found, so this was typeset from the Gutenberg text with screenplain 0.12 (Fountain to PDF, Courier 12pt, US letter). Title page; character cues centred in caps on their own line above an indented dialogue column; delivery directions as (parentheticals) on their own lines inside the dialogue block; actions full width; page numbers top right ('2.'); 'CURTAIN.' as a right-aligned transition.",
+  "goldenMethod": "chekhov_proposal_screenplay.py parses the Gutenberg HTML once and writes both the Fountain file and golden.json from the same element list (speech text = dialogue lines, parentheticals and actions counted as directions). verify.py: 197/197 verbatim, cue before every speech.",
+  "sourceSha256": "9b87e7238961568422b859352018ccd90d8648da50706c74f8ceea0f93b364cc"
+}

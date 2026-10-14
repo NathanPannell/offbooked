@@ -1,17 +1,26 @@
 import { canonicalName } from "./heuristic.ts";
 import type { ParsedLine, StructuredScript } from "./types.ts";
 
-const letters = (s: string) => s.replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+const words = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+const JOINT = /[/&,+]|AND|BOTH|ALL/i;
 
-// "HAM" abbreviates "HAMLET"; "LADY M" abbreviates "LADY MACBETH".
+// "HAM" abbreviates "HAMLET"; "LADY M" abbreviates "LADY MACBETH". A whole-word prefix is not an
+// abbreviation ("KING" is not "KING HENRY"), and nothing merges into a joint cue like "HORATIO/MARCELLUS".
 export function isAbbreviation(short: string, long: string): boolean {
-  const s = letters(short);
-  const l = letters(long);
-  if (s.length < 2 || s === l) return false;
-  if (l.startsWith(s)) return true;
-  const sw = s.split(" ");
-  const lw = l.split(" ");
-  return sw.length === lw.length && sw.every((w, i) => lw[i]!.startsWith(w));
+  if (JOINT.test(long) || JOINT.test(short)) return false;
+  const sw = words(short);
+  const lw = words(long);
+  if (!sw.length || sw.join(" ").length < 2 || sw.length > lw.length) return false;
+  if (!sw.every((w, i) => lw[i]!.startsWith(w))) return false;
+  return sw.some((w, i) => w.length < lw[i]!.length) && sw.length === lw.length;
+}
+
+// "LADY" could be "LADY MACBETH": a whole-word prefix is never merged, only flagged when ambiguous.
+function isWordPrefix(short: string, long: string): boolean {
+  if (JOINT.test(long) || JOINT.test(short)) return false;
+  const sw = words(short);
+  const lw = words(long);
+  return sw.length > 0 && sw.length < lw.length && sw.every((w, i) => lw[i] === w);
 }
 
 export interface CharacterResolution {
@@ -31,8 +40,9 @@ export function resolveCharacters(lines: ParsedLine[]): CharacterResolution {
   const names = [...counts.keys()];
   for (const name of names) {
     const targets = names.filter((other) => other !== name && isAbbreviation(name, other));
-    if (targets.length === 1) mergeInto.set(name, targets[0]!);
-    else if (targets.length > 1) ambiguous.set(name, targets);
+    const wider = names.filter((other) => other !== name && isWordPrefix(name, other));
+    if (targets.length === 1 && !wider.length) mergeInto.set(name, targets[0]!);
+    else if (targets.length + wider.length > 1) ambiguous.set(name, [...targets, ...wider]);
   }
   const finalName = (name: string): string => {
     let n = name;
@@ -50,7 +60,7 @@ export function resolveCharacters(lines: ParsedLine[]): CharacterResolution {
   for (const [abbrev, full] of mergeInto) {
     const target = finalName(full);
     addAlias(target, abbrev);
-    if (letters(abbrev).length < 3) doubtful.set(`${abbrev}->${target}`, `Merged ${abbrev} into ${target}; check this is the same character`);
+    if (words(abbrev).join("").length < 3) doubtful.set(`${abbrev}->${target}`, `Merged ${abbrev} into ${target}; check this is the same character`);
   }
   for (const l of lines) {
     if (l.kind !== "dialogue" || !l.speaker) continue;

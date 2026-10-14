@@ -1,0 +1,11 @@
+{
+  "title": "A Doll's House",
+  "author": "Henrik Ibsen (tr. R. Farquharson Sharp)",
+  "format": "docx",
+  "sourceUrl": "https://www.gutenberg.org/cache/epub/2542/pg2542-images.html (converted)",
+  "license": "Public domain in the USA; Project Gutenberg License applies to the file (trademark terms)",
+  "description": "CONVERTED: no downloadable DOCX of a public-domain non-Shakespeare play was found, so Gutenberg's HTML was opened in Microsoft Word and saved as .docx (word_convert.ps1). Keeps the Gutenberg header, contents table, dramatis personae and licence. Each speech is one paragraph with the cue ('NORA.') and the speech separated by a soft line break; [bracketed] italic directions inline and as paragraphs; the opening direction spans two paragraphs; 'DOCTOR RANK.' once for 'RANK.'.",
+  "goldenMethod": "gutenberg_dollshouse.py on the same HTML that was converted. verify.py: 1290/1292 >=95% verbatim in the DOCX text; spot-checked by hand.",
+  "sourceSha256": "25a7fcdb63a12c51504c5a384a904c6b35bfa31f7a8ab77214f9b6debc8d6a4c",
+  "sourceNote": "sha256 is of the downloaded HTML; source.docx is Word's conversion"
+}

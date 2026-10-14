@@ -8,7 +8,7 @@ import { createCtx, type Ctx } from "../context.ts";
 import { createSql, migrate } from "../db.ts";
 import { LogMailer } from "../email/mailer.ts";
 import { silentLog } from "../log.ts";
-import type { ChunkParser } from "../parse/llm.ts";
+import type { Labeler } from "../parse/label.ts";
 
 process.env.NODE_ENV = "test";
 
@@ -23,7 +23,7 @@ export interface TestApp {
 }
 
 // Each test file gets its own throwaway schema, migrated from scratch and dropped afterwards.
-export async function createTestApp(opts: { chunkParser?: ChunkParser | null; env?: Record<string, string> } = {}): Promise<TestApp> {
+export async function createTestApp(opts: { labeler?: Labeler | null; env?: Record<string, string> } = {}): Promise<TestApp> {
   const url = process.env.DATABASE_URL!;
   const schema = `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const admin = createSql(url, { max: 1 });
@@ -50,7 +50,7 @@ export async function createTestApp(opts: { chunkParser?: ChunkParser | null; en
     ...opts.env,
   });
   const mailer = new LogMailer(silentLog);
-  const ctx = createCtx(config, sql, silentLog, { mailer, chunkParser: opts.chunkParser ?? null });
+  const ctx = createCtx(config, sql, silentLog, { mailer, labeler: opts.labeler ?? null });
   const app = buildApp({ ctx, probeFfmpeg: async () => "ffmpeg test" });
   await app.ready();
   return {

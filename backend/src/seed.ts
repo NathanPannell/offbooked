@@ -26,7 +26,7 @@ const CAST = [
 
 const config = loadConfig();
 const sql = createSql(config.databaseUrl, { max: 4 });
-const ctx = createCtx(config, sql, consoleLog, { chunkParser: null });
+const ctx = createCtx(config, sql, consoleLog, { labeler: null });
 
 try {
   await migrate(sql, consoleLog);
