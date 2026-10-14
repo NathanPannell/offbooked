@@ -6,7 +6,9 @@ import { badRequest, notFound } from "../errors.ts";
 import { body, idOf, idParam, requiredEmail, requiredString } from "../input.ts";
 import { cueViews, previousCue, warmCues } from "../lineaudio.ts";
 import { scheduleRender } from "../render/queue.ts";
+import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
 import { runThrough } from "../runthrough.ts";
+import { TTS_PRIORITY } from "../tts/service.ts";
 import { acceptTake, MAX_TAKE_BYTES } from "../takes.ts";
 import { castRows, linesOf, lineView, sectionsOf, sectionView, takeColumns, takeView, type LineRow, type TakeRow } from "../views.ts";
 
@@ -143,6 +145,18 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get("/api/invite/runthrough", async (req) => {
     const s = await requireActor(ctx, req);
     return runThrough(ctx, s.production, s.characterIds);
+  });
+
+  // Line-by-line playback for the run-through: any dialogue line in the actor's production, like
+  // /api/invite/runthrough.
+  app.get("/api/invite/lines/:lineId/audio", async (req) => {
+    const s = await requireActor(ctx, req);
+    return oneLineAudio(ctx, s.production.id, idOf(req.params, "lineId"), playPriority((req.query as { prefetch?: string }).prefetch));
+  });
+
+  app.post("/api/invite/lines/audio/warm", async (req) => {
+    const s = await requireActor(ctx, req);
+    return { lines: await lineAudio(ctx, s.production.id, warmIds(req.body), { priority: TTS_PRIORITY.prefetch }) };
   });
 
   app.post("/api/invite/practice", async (req) => {

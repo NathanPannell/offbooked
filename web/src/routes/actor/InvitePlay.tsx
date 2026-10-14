@@ -23,7 +23,7 @@ export default function InvitePlay() {
         <span className="actor-header-spacer" />
       </header>
       <main className="page page-player">
-        <RunThroughPlayer load={load} onPracticeDone={savePractice} initialMode={params.get("mode") === "mine" ? "mine" : "full"} />
+        <RunThroughPlayer load={load} audio={api.lineAudio} onPracticeDone={savePractice} initialMode={params.get("mode") === "mine" ? "mine" : "full"} />
       </main>
     </div>
   );

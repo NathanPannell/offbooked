@@ -4,6 +4,8 @@ import type {
   CastMember,
   Character,
   Line,
+  LineAudio,
+  LineAudioApi,
   LineKind,
   Production,
   Render,
@@ -41,6 +43,12 @@ export const productions = {
   runthrough: (id: string) => request<RunThrough>(`/productions/${id}/runthrough`, { auth: director }),
   render: (id: string) =>
     request<{ render: Render }>(`/productions/${id}/render`, { method: "POST", auth: director }),
+  /** Line-by-line audio for the run-through player. */
+  lineAudio: (id: string): LineAudioApi => ({
+    line: (lineId, opts = {}) =>
+      request<LineAudio>(`/productions/${id}/lines/${lineId}/audio${opts.prefetch ? "?prefetch=1" : ""}`, { auth: director, signal: opts.signal }),
+    warm: (lineIds) => request<{ lines: LineAudio[] }>(`/productions/${id}/lines/audio/warm`, { auth: director, json: { lineIds } }),
+  }),
 };
 
 export const script = {

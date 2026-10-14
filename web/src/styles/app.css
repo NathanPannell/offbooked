@@ -3505,6 +3505,25 @@
   border-top: 2px solid var(--ink);
 }
 
+/* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
+.player-waiting {
+  position: fixed;
+  left: 50%;
+  bottom: calc(86px + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 26;
+  margin: 0;
+  padding: 3px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--bg);
+  white-space: nowrap;
+}
+
+.player-waiting:empty {
+  display: none;
+}
+
 .play-button {
   display: grid;
   place-items: center;

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { open, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { RENDER_SETTINGS } from "./plan.ts";
@@ -41,16 +41,49 @@ export async function probeSamples(file: string): Promise<number> {
 const trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05";
 const loudnorm = `loudnorm=I=${RENDER_SETTINGS.loudnessI}:TP=-1.5:LRA=11`;
 
-// Decode, trim leading and trailing silence, loudness-normalize, 48 kHz mono FLAC.
-export async function normalizeTake(input: string, output: string): Promise<number> {
-  await ffmpeg(["-i", input, "-vn", "-af", `${trim},areverse,${trim},areverse,${loudnorm}`, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output]);
-  let samples = await probeSamples(output);
+// The length a FLAC file's STREAMINFO declares, in samples at the render rate, or null when the
+// header doesn't say (then ffprobe measures it). Saves an ffprobe run for every clip we make.
+export async function flacSamples(file: string): Promise<number | null> {
+  const handle = await open(file, "r");
+  try {
+    const buf = Buffer.alloc(42);
+    const { bytesRead } = await handle.read(buf, 0, 42, 0);
+    if (bytesRead < 42 || buf.toString("latin1", 0, 4) !== "fLaC" || (buf[4]! & 0x7f) !== 0) return null;
+    const info = buf.subarray(8); // STREAMINFO
+    const rate = (info[10]! << 12) | (info[11]! << 4) | (info[12]! >> 4);
+    const total = (info[13]! & 0x0f) * 2 ** 32 + info.readUInt32BE(14);
+    return rate === RATE && total > 0 ? total : null;
+  } finally {
+    await handle.close();
+  }
+}
+
+const measure = async (flac: string) => (await flacSamples(flac)) ?? (await probeSamples(flac));
+
+// Decode, trim leading and trailing silence, loudness-normalize, 48 kHz mono FLAC. With `m4a`, the
+// same ffmpeg run also writes the AAC file that browsers play line by line (about 50 ms extra).
+// Returns the FLAC's length in samples.
+export async function normalizeClip(input: string, output: string, m4a?: string): Promise<number> {
+  const run = (filters: string) =>
+    ffmpeg(
+      m4a
+        ? ["-i", input, "-vn", "-filter_complex", `${filters},aresample=${RATE},asplit[f][a]`,
+           "-map", "[f]", "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output,
+           "-map", "[a]", "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", m4a]
+        : ["-i", input, "-vn", "-af", filters, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output],
+    );
+  await run(`${trim},areverse,${trim},areverse,${loudnorm}`);
+  let samples = await measure(output);
   if (samples < RATE / 20) {
     // Nearly everything was below the silence threshold; keep the take untrimmed instead.
-    await ffmpeg(["-i", input, "-vn", "-af", loudnorm, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output]);
-    samples = await probeSamples(output);
+    await run(loudnorm);
+    samples = await measure(output);
   }
   return samples;
+}
+
+export function normalizeTake(input: string, output: string): Promise<number> {
+  return normalizeClip(input, output);
 }
 
 export async function makeSilence(samples: number, output: string): Promise<void> {
