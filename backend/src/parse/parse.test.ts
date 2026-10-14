@@ -447,3 +447,16 @@ test("line breaks and indentation are kept as printed", () => {
   assert.equal(out[0]!.text, "Full fathom five thy father lies;\n  Of his bones are coral made;\nThose are pearls that were his eyes.");
   assert.equal(joinLines(["some-", "thing"]), "something");
 });
+
+test("progress is reported as chunks finish, ending with every line labelled", async () => {
+  const counter = { calls: 0 };
+  const seen: { chunksDone: number; linesDone: number; linesTotal: number; speeches: number }[] = [];
+  const long = Array.from({ length: 6 }, () => SEED_SCENE).join("\n\n");
+  await parseScriptText(long, { labeler: fakeLabeler(counter), log: silentLog, onProgress: (p) => seen.push(p) });
+  assert.ok(seen.length >= 2);
+  assert.equal(seen[0]!.chunksDone, 0);
+  const last = seen[seen.length - 1]!;
+  assert.equal(last.linesDone, last.linesTotal);
+  assert.ok(last.speeches > 100);
+  for (let i = 1; i < seen.length; i++) assert.ok(seen[i]!.chunksDone >= seen[i - 1]!.chunksDone);
+});

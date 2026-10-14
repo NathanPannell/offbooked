@@ -3,11 +3,12 @@ import { ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { HttpError, badRequest, conflict } from "../errors.ts";
 import { body, idOf, optionalDate, requiredString } from "../input.ts";
-import { MAX_SCRIPT_CHARS } from "../parse/pipeline.ts";
+import { MAX_SCRIPT_CHARS, pageIndex, prepareText } from "../parse/pipeline.ts";
 import { startScriptParse, type ScriptSource } from "../parse/job.ts";
-import { ScriptInputError } from "../parse/pdf.ts";
+import { PAGE_BREAK, ScriptInputError } from "../parse/pdf.ts";
 import { decodeText, detectSourceKind, type SourceKind } from "../parse/source.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
+import { contentTypeForKey } from "../storage/storage.ts";
 import { charactersOf, characterView, linesOf, lineView, productionRows, productionView, sectionsOf, sectionView } from "../views.ts";
 
 export const MAX_PDF_BYTES = 20 * 1024 * 1024;
@@ -107,5 +108,46 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
       lines: lines.map(lineView),
       flaggedCount: lines.filter((l) => l.flagged).length,
     };
+  });
+
+  // The original upload and the prepared text, for reviewing a line next to where it came from.
+  const latestReadyScript = async (productionId: string) => {
+    const [row] = await ctx.sql<{ sourceKind: SourceKind; storageKey: string; rawText: string | null }[]>`
+      select source_kind, storage_key, raw_text from scripts where production_id = ${productionId} and status = 'ready'
+      order by created_at desc limit 1`;
+    if (!row) throw new HttpError(404, "not_found", "There's no script for this production yet.");
+    return row;
+  };
+
+  app.get("/api/productions/:id/script/source", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const q = req.query as { line?: string; context?: string };
+    const line = Number(q.line);
+    if (!Number.isInteger(line) || line < 1) throw badRequest("line must be a positive whole number.");
+    const context = Math.min(200, Math.max(5, Number(q.context) || 40));
+    const script = await latestReadyScript(p.id);
+    const docLines = prepareText(script.rawText ?? "").text.split("\n");
+    const pageOf = pageIndex(docLines);
+    const from = Math.max(1, line - context);
+    const to = Math.min(docLines.length, line + context);
+    const lines: { n: number; text: string; page: number | null }[] = [];
+    for (let n = from; n <= to; n++) {
+      const text = docLines[n - 1]!;
+      if (text === PAGE_BREAK) continue;
+      lines.push({ n, text, page: pageOf(n) });
+    }
+    const pageCount = pageOf(docLines.length);
+    return { kind: script.sourceKind, pageCount, from, lines };
+  });
+
+  app.get("/api/productions/:id/script/file", async (req, reply) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const script = await latestReadyScript(p.id);
+    const data = await ctx.storage.get(script.storageKey);
+    reply.header("Content-Type", contentTypeForKey(script.storageKey));
+    reply.header("Cache-Control", "private, max-age=300");
+    return reply.send(data);
   });
 }

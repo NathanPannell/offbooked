@@ -59,8 +59,15 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       }
     }
     if (kind !== "dialogue") characterId = null;
-    if (kind === "dialogue" && !characterId) throw badRequest("Pick a character for a dialogue line.");
-    const text = b.text === undefined ? line.text : requiredString(b, "text", MAX_LINE_CHARS);
+    let text = b.text === undefined ? line.text : requiredString(b, "text", MAX_LINE_CHARS);
+    if (kind === "dialogue" && !characterId) {
+      // Turning a direction or heading into dialogue in one tap: take the speaker from a cue at
+      // the start of the text, else the speaker of the dialogue line before it.
+      const guess = await guessSpeaker(sql, line.productionId, line.seq, text);
+      if (!guess) throw badRequest("Pick a character for a dialogue line.");
+      characterId = guess.characterId;
+      text = guess.text;
+    }
     await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = false, flag_reason = null, updated_at = now()
               where id = ${line.id}`;
     return { line: await selectLine(sql, line.id) };
@@ -188,4 +195,28 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     });
     return { characters: (await charactersOf(sql, from.productionId)).map(characterView) };
   });
+}
+
+// A speaker for a line being turned into dialogue: a character whose name or alias opens the text
+// ("HAMLET. To be" → HAMLET, text "To be"), else whoever spoke the dialogue line before it.
+async function guessSpeaker(sql: Sql, productionId: string, seq: number, text: string): Promise<{ characterId: string; text: string } | null> {
+  const characters = await sql<{ id: string; name: string; aliases: string[] }[]>`
+    select id, name, aliases from characters where production_id = ${productionId}`;
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const named = characters
+    .flatMap((c) => [c.name, ...c.aliases].map((n) => ({ id: c.id, n: n.replace(/[.:]+$/, "") })))
+    .filter((x) => x.n.length >= 2)
+    .sort((a, b) => b.n.length - a.n.length);
+  for (const { id, n } of named) {
+    const m = new RegExp(`^\\s*${escape(n)}(?:\\s*[.:]\\s*|\\s+(?=[\\p{Lu}"“'(\\[]))`, "iu").exec(text);
+    if (m && text.slice(m[0].length).trim()) return { characterId: id, text: text.slice(m[0].length).trim() };
+  }
+  const [previous] = await sql<{ characterId: string }[]>`
+    select character_id from lines where production_id = ${productionId} and seq < ${seq} and kind = 'dialogue' and character_id is not null
+    order by seq desc limit 1`;
+  if (previous) return { characterId: previous.characterId, text };
+  const [next] = await sql<{ characterId: string }[]>`
+    select character_id from lines where production_id = ${productionId} and seq > ${seq} and kind = 'dialogue' and character_id is not null
+    order by seq limit 1`;
+  return next ? { characterId: next.characterId, text } : null;
 }
