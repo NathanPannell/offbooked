@@ -80,16 +80,25 @@ export type ParseProgress = Partial<LabelProgress> & { stage?: "reading" | "labe
 function progressWriter(ctx: Ctx, scriptId: string) {
   let state: ParseProgress = {};
   let lastWrite = 0;
+  let trailing: ReturnType<typeof setTimeout> | null = null;
   let pending: Promise<unknown> = Promise.resolve();
+  const write = () => {
+    if (trailing) clearTimeout(trailing);
+    trailing = null;
+    lastWrite = Date.now();
+    const snapshot = JSON.stringify(state);
+    pending = pending
+      .then(() => ctx.sql`update scripts set progress = ${snapshot}::jsonb where id = ${scriptId}`)
+      .catch((err: unknown) => ctx.log.warn({ err: String(err), scriptId }, "could not save parse progress"));
+    return pending;
+  };
   return {
     set(update: ParseProgress, force = false): Promise<unknown> {
       state = { ...state, ...update };
-      if (!force && Date.now() - lastWrite < 1000) return pending;
-      lastWrite = Date.now();
-      const snapshot = JSON.stringify(state);
-      pending = pending
-        .then(() => ctx.sql`update scripts set progress = ${snapshot}::jsonb where id = ${scriptId}`)
-        .catch((err: unknown) => ctx.log.warn({ err: String(err), scriptId }, "could not save parse progress"));
+      const wait = 700 - (Date.now() - lastWrite);
+      if (force || wait <= 0) return write();
+      // Within the throttle window: save the latest state once the window ends.
+      trailing ??= setTimeout(() => void write(), wait);
       return pending;
     },
   };

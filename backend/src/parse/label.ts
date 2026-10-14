@@ -24,6 +24,8 @@ export interface LabelRequest {
   from: number; // first line to label (1-based)
   to: number; // last line to label (inclusive)
   knownSpeakers: string[];
+  // Called with each complete row as the model streams it, for live progress.
+  onRows?: (rows: Segment[]) => void;
 }
 
 export interface LabelUsage {
@@ -111,6 +113,17 @@ export function createClaudeLabeler(apiKey: string): Labeler {
         { role: "user", content: prompt },
       ],
     });
+    if (req.onRows) {
+      let buffer = "";
+      stream.on("text", (delta) => {
+        buffer += delta;
+        const end = buffer.lastIndexOf("\n");
+        if (end < 0) return;
+        const rows = parseRows(buffer.slice(0, end));
+        buffer = buffer.slice(end + 1);
+        if (rows.length) req.onRows!(rows);
+      });
+    }
     const message = await stream.finalMessage();
     if (message.stop_reason === "refusal") throw new Error("Claude declined to label this excerpt");
     if (message.stop_reason === "max_tokens") throw new Error("Claude ran out of output tokens on this excerpt");
