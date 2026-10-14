@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   abLoopTarget,
+  audioSourceOf,
+  audioSourceTag,
   abRange,
   buildSegments,
   gapMs,
@@ -90,5 +92,22 @@ describe("my part gaps", () => {
     const mine = new Set(["b"]);
     expect(myGapSegmentAt(segments, mine, 4000)).toBeNull();
     expect(myGapSegmentAt(segments, mine, 5000)).toBeNull();
+  });
+});
+
+describe("audio source", () => {
+  it("uses the server's source, or derives it from recorded", () => {
+    expect(audioSourceOf({ recorded: true, source: "standin" })).toBe("standin");
+    expect(audioSourceOf({ recorded: false, source: "tts" })).toBe("tts");
+    expect(audioSourceOf({ recorded: true })).toBe("actor");
+    expect(audioSourceOf({ recorded: false })).toBe("none");
+    expect(audioSourceOf(undefined)).toBe("none");
+  });
+
+  it("tags everything but the cast's own takes", () => {
+    expect(audioSourceTag("actor")).toBeNull();
+    expect(audioSourceTag("standin")).toBe("stand-in");
+    expect(audioSourceTag("tts")).toBe("TTS");
+    expect(audioSourceTag("none")).toBe("silent");
   });
 });

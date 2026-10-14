@@ -1,73 +1,100 @@
+/*
+  Offbooked design tokens. Light only: a clean white page, chunky type, one loud warm accent and a
+  sunny highlight, with "sticker" edges (2px ink borders and hard offset shadows) on the things you press.
+*/
+
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  --bg: #faf7f2;
-  --bg-sunk: #f2ede4;
+  /* Paper */
+  --bg: #ffffff;
+  --paper: #f7f7f5; /* quiet sections, cues, the source pane: used sparingly */
+  --paper-deep: #eeede9; /* pressed and selected states */
   --card: #ffffff;
+  --page: #ffffff; /* the script page itself */
+
+  /* Ink. Every text colour passes AA on --bg, --paper and --card. */
   --ink: #1d1a16;
-  --muted: #6b645a;
-  --dim: #b8b0a3;
-  --line: #e8e2d8;
-  --line-strong: #d6cdbf;
+  --ink-soft: #3e3933;
+  --muted: #66625b; /* 5.9:1 on white */
+  --faint: #8e8a83; /* icons and large text only */
+  --dim: #cbc8c2; /* past lines in the player, never body text */
 
-  --accent: #c2410c;
-  --accent-hover: #a8380a;
-  --accent-ink: #ffffff;
-  --accent-soft: #fdeee4;
-  --curtain: #7a1f1f;
-  --spot: #fff4d6;
+  /* Rules */
+  --line: #ebeae6;
+  --line-strong: #d6d4ce;
+  --edge: #1d1a16; /* sticker borders */
 
-  --good: #15803d;
-  --good-soft: #e3f4e8;
-  --check: #a16207;
-  --check-soft: #fbf0d4;
-  --bad: #b91c1c;
-  --bad-soft: #fbe5e5;
+  /* One loud warm accent, and a sunny highlight. Accent is a fill: text on it is ink. */
+  --accent: #f0542d;
+  --accent-hover: #e2431c;
+  --accent-ink: #1d1a16;
+  --accent-text: #b8361a; /* accent as text or icon on white: 6:1 */
+  --accent-soft: #ffe7dc;
+  --accent-line: #f6b9a3;
+  --sun: #f7c325;
+  --sun-soft: #fff1c2;
+  --marker: #ffe58a; /* the highlighter swipe */
 
-  --focus-ring: 0 0 0 3px rgba(194, 65, 12, 0.35);
-  --shadow-sm: 0 1px 2px rgba(29, 26, 22, 0.06);
-  --shadow: 0 1px 2px rgba(29, 26, 22, 0.05), 0 8px 24px rgba(29, 26, 22, 0.07);
-  --shadow-lg: 0 18px 50px rgba(29, 26, 22, 0.18);
+  /* Flags and states */
+  --flag: #8a5400;
+  --flag-soft: #fff1c2;
+  --flag-line: #ecc75a;
+  --good: #23704a;
+  --good-soft: #e1f3e6;
+  --check: #8a5400;
+  --check-soft: #fff1c2;
+  --bad: #b42318;
+  --bad-soft: #fde8e4;
+  --rec: #e0301e;
+
+  /* Type */
+  --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; /* the script */
+  --font-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-md: 18px;
+  --text-lg: 21px;
+  --text-xl: 28px;
+  --text-2xl: clamp(30px, 5.5vw, 42px);
+  --text-3xl: clamp(42px, 9vw, 76px);
+
+  /* Spacing: 4px steps */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
 
   --radius-sm: 8px;
-  --radius: 14px;
-  --radius-lg: 22px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --border: 2px solid var(--edge);
+  --sticker: 4px 4px 0 var(--edge);
+  --sticker-sm: 3px 3px 0 var(--edge);
+  --sticker-lg: 6px 6px 0 var(--edge);
+  --shadow-sm: 0 1px 2px rgba(29, 26, 22, 0.06);
+  --shadow: 0 2px 4px rgba(29, 26, 22, 0.05), 0 10px 24px rgba(29, 26, 22, 0.07);
+  --shadow-lg: 0 4px 8px rgba(29, 26, 22, 0.06), 0 24px 56px rgba(29, 26, 22, 0.16);
 
-  --tap: 48px;
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink);
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --fast: 140ms;
+  --medium: 240ms;
+
+  --tap: 44px;
+  --header-h: 60px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141210;
-    --bg-sunk: #0f0d0b;
-    --card: #1d1a17;
-    --ink: #f3eee6;
-    --muted: #a39b8f;
-    --dim: #5a544b;
-    --line: #2c2823;
-    --line-strong: #3b362f;
-
-    --accent: #fb923c;
-    --accent-hover: #fdba74;
-    --accent-ink: #1d1209;
-    --accent-soft: #2e1d10;
-    --curtain: #d9776b;
-    --spot: #2a2416;
-
-    --good: #4ade80;
-    --good-soft: #13281a;
-    --check: #facc15;
-    --check-soft: #2b2510;
-    --bad: #f87171;
-    --bad-soft: #301616;
-
-    --focus-ring: 0 0 0 3px rgba(251, 146, 60, 0.45);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
-    --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.6);
-  }
 }

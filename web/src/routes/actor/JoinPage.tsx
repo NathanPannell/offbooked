@@ -1,0 +1,220 @@
+import { ArrowRight, Check } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Navigate, useNavigate, useParams } from "react-router";
+import { ApiError, errorMessage } from "../../api/client";
+import { join } from "../../api/join";
+import type { JoinInfo } from "../../api/types";
+import { Brand } from "../../components/Brand";
+import { CharacterName } from "../../components/CharacterName";
+import { InAppBanner } from "../../components/InAppBanner";
+import { Loading } from "../../components/Loading";
+import { joinNames, plural } from "../../lib/format";
+import { recallJoin, rememberJoin } from "../../lib/joinMemory";
+
+const RETRY_MS = 10_000;
+
+/** The whole-cast link: see the parts, pick yours, give a first name, start recording. */
+export default function JoinPage() {
+  const { token = "" } = useParams();
+  const remembered = useMemo(() => recallJoin(token), [token]);
+  if (remembered) return <Navigate to={`/i/${remembered.inviteToken}`} replace />;
+  return <Join token={token} />;
+}
+
+function Join({ token }: { token: string }) {
+  const navigate = useNavigate();
+  const [info, setInfo] = useState<JoinInfo | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    join.get(token).then(
+      (result) => {
+        if (cancelled) return;
+        setInfo(result);
+        setError(null);
+        // Drop any pick someone else has taken since.
+        setPicked((p) => new Set([...p].filter((id) => result.characters.some((c) => c.id === id && !c.takenBy))));
+      },
+      (err) => !cancelled && setError(err),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [token, attempt]);
+
+  const notReady = error instanceof ApiError && error.status === 409;
+  useEffect(() => {
+    if (!notReady) return;
+    const id = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS);
+    return () => clearTimeout(id);
+  }, [notReady, attempt]);
+
+  if (!info && !error) return <Loading />;
+
+  if (error && !info) {
+    const body = error instanceof ApiError ? error.body : null;
+    const director = typeof body?.directorName === "string" ? body.directorName : null;
+    const title = typeof body?.productionTitle === "string" ? body.productionTitle : null;
+    if (notReady) {
+      return (
+        <JoinMessage title={title ? `${title} is nearly ready` : "Nearly ready"}>
+          <p>
+            {director ?? "Your director"} is still preparing the script. This page checks again by itself, so you can leave it open.
+          </p>
+          <div className="row waiting" role="status">
+            <span className="spinner" aria-hidden="true" /> Checking every few seconds…
+          </div>
+        </JoinMessage>
+      );
+    }
+    if (error instanceof ApiError && error.status === 410) {
+      return (
+        <JoinMessage title="This show has wrapped">
+          <p>{title ? `${title} has closed, so this link no longer works.` : "This link no longer works."}</p>
+        </JoinMessage>
+      );
+    }
+    if (error instanceof ApiError && error.status === 404) {
+      return (
+        <JoinMessage title="This link doesn't work">
+          <p>It may have been reset, or it's missing a few characters. Ask your director for the cast link again.</p>
+        </JoinMessage>
+      );
+    }
+    return (
+      <JoinMessage title="We couldn't open this">
+        <p role="alert">{errorMessage(error)}</p>
+        <button type="button" className="btn btn-primary" onClick={() => setAttempt((n) => n + 1)}>
+          Try again
+        </button>
+      </JoinMessage>
+    );
+  }
+
+  const data = info!;
+  const chosen = data.characters.filter((c) => picked.has(c.id));
+  const lines = chosen.reduce((n, c) => n + c.lineCount, 0);
+  const open = data.characters.filter((c) => !c.takenBy);
+
+  const toggle = (id: string) =>
+    setPicked((p) => {
+      const next = new Set(p);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const claim = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!chosen.length || !name.trim()) return;
+    setBusy(true);
+    setClaimError(null);
+    try {
+      const { inviteToken } = await join.claim(token, { characterIds: chosen.map((c) => c.id), firstName: name.trim() });
+      rememberJoin(token, { inviteToken, firstName: name.trim(), characterNames: chosen.map((c) => c.name) });
+      navigate(`/i/${inviteToken}`, { replace: true });
+    } catch (err) {
+      setBusy(false);
+      if (err instanceof ApiError && err.code === "character_taken") {
+        setClaimError("Someone just picked one of those. We've updated the list: choose again.");
+        setAttempt((n) => n + 1);
+      } else if (err instanceof ApiError && err.status === 409) {
+        setError(err);
+        setInfo(null);
+      } else {
+        setClaimError(errorMessage(err));
+      }
+    }
+  };
+
+  return (
+    <main className="join">
+      <InAppBanner />
+      <header className="join-head">
+        <Brand to={null} />
+        <p className="eyebrow">{data.production.directorName} invited you</p>
+        <h1 className="display">{data.production.title}</h1>
+        <p className="lede">Which part are you playing? Pick yours (or more than one, if you're doubling).</p>
+      </header>
+
+      <form className="join-form" onSubmit={claim}>
+        <fieldset className="role-cards">
+          <legend className="sr-only">Characters</legend>
+          {data.characters.map((c) => {
+            const taken = !!c.takenBy;
+            const on = picked.has(c.id);
+            return (
+              <label key={c.id} className={`role-card ${on ? "is-picked" : ""} ${taken ? "is-taken" : ""}`}>
+                <input type="checkbox" checked={on} disabled={taken} onChange={() => toggle(c.id)} className="sr-only" />
+                <span className="role-check" aria-hidden="true">
+                  {on && <Check size={14} strokeWidth={3.5} />}
+                </span>
+                <span className="role-name">
+                  <CharacterName name={c.name} />
+                </span>
+                <span className="role-meta small">{taken ? `Taken by ${c.takenBy}` : plural(c.lineCount, "line")}</span>
+              </label>
+            );
+          })}
+        </fieldset>
+        {open.length === 0 && <p className="notice">Every part has been claimed. If one of them is yours, ask your director for your own link.</p>}
+
+        <div className={`join-dock ${chosen.length ? "is-ready" : ""}`}>
+          {chosen.length > 0 ? (
+            <>
+              <p className="join-summary">
+                You're <strong>{joinNames(chosen.map((c) => c.name))}</strong> · <span className="nums">{plural(lines, "line")}</span>
+              </p>
+              <label className="field">
+                <span>Your first name</span>
+                <input
+                  className="input input-lg"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoComplete="given-name"
+                  enterKeyHint="go"
+                  maxLength={60}
+                  required
+                />
+              </label>
+              {claimError && (
+                <p className="field-error" role="alert">
+                  {claimError}
+                </p>
+              )}
+              <button className="btn btn-primary btn-lg btn-block" disabled={busy || !name.trim()}>
+                {busy ? "Getting your lines…" : "Start recording"} <ArrowRight size={18} aria-hidden="true" />
+              </button>
+              <p className="small muted consent">Your recordings are shared with the cast and director. No account needed.</p>
+            </>
+          ) : (
+            <p className="join-summary muted">Tap your character to begin.</p>
+          )}
+          {claimError && !chosen.length && (
+            <p className="field-error" role="alert">
+              {claimError}
+            </p>
+          )}
+        </div>
+      </form>
+    </main>
+  );
+}
+
+function JoinMessage({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <main className="page page-narrow center-page join-message">
+      <Brand to="/" />
+      <div className="sticker message-card stack">
+        <h1 className="display">{title}</h1>
+        {children}
+      </div>
+    </main>
+  );
+}

@@ -25,19 +25,19 @@ export default function NewProduction() {
 
   return (
     <main className="page page-narrow">
-      <form className="card stack" onSubmit={submit}>
+      <form className="sticker form-card stack" onSubmit={submit}>
         <div className="stack" style={{ gap: 6 }}>
-          <p className="eyebrow">New production</p>
+          <p className="eyebrow">Step 1 · New production</p>
           <h1 className="display">What are you putting on?</h1>
         </div>
         <label className="field">
           <span>Title</span>
-          <input className="input input-lg" required autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Hamlet" />
+          <input className="input input-lg" required autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Hamlet, or Our Town (spring)" />
         </label>
         <label className="field">
-          <span>Performance date (optional)</span>
+          <span>Opening night (optional)</span>
           <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <span className="field-hint">Actor links stay valid until two weeks after this date.</span>
+          <span className="field-hint">Cast links keep working until two weeks after this.</span>
         </label>
         {error && (
           <p className="field-error" role="alert">

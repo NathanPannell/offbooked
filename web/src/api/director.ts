@@ -1,4 +1,5 @@
-import { request, type Auth } from "./client";
+import { API_URL, request, type Auth } from "./client";
+import type { TakeUploadResult } from "./actor";
 import type {
   CastMember,
   Character,
@@ -8,8 +9,10 @@ import type {
   Render,
   RunThrough,
   Script,
+  ScriptSource,
   ScriptStatus,
   Section,
+  SectionLine,
   User,
 } from "./types";
 
@@ -42,6 +45,14 @@ export const productions = {
 
 export const script = {
   get: (productionId: string) => request<Script>(`/productions/${productionId}/script`, { auth: director }),
+  /** The prepared source text around a source line, for showing where a script line came from. */
+  source: (productionId: string, line: number, context = 40, signal?: AbortSignal) =>
+    request<ScriptSource>(`/productions/${productionId}/script/source?line=${line}&context=${context}`, {
+      auth: director,
+      signal,
+    }),
+  /** The original upload. Needs the director Authorization header (see `directorHeaders`). */
+  fileUrl: (productionId: string) => `${API_URL}/api/productions/${productionId}/script/file`,
   uploadFile: (productionId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -102,4 +113,31 @@ export const cast = {
     request<{ member: CastMember }>(`/cast/${actorId}/reset-link`, { method: "POST", auth: director }),
   nudged: (actorId: string) =>
     request<{ member: CastMember }>(`/cast/${actorId}/nudged`, { method: "POST", auth: director }),
+};
+
+/** The one link the whole cast can use to pick their characters. */
+export const joinLink = {
+  get: (productionId: string) => request<{ joinUrl: string }>(`/productions/${productionId}/join-link`, { auth: director }),
+  reset: (productionId: string) =>
+    request<{ joinUrl: string }>(`/productions/${productionId}/join-link/reset`, { method: "POST", auth: director }),
+};
+
+/** Director stand-in recordings, scene by scene. */
+export const standins = {
+  sectionLines: (productionId: string, sectionId: string) =>
+    request<{ section: Section; lines: SectionLine[] }>(`/productions/${productionId}/sections/${sectionId}/lines`, {
+      auth: director,
+    }),
+  putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal) =>
+    request<TakeUploadResult>(`/lines/${lineId}/take`, {
+      method: "PUT",
+      auth: director,
+      body: audio,
+      signal,
+      headers: {
+        "Content-Type": (audio.type || "application/octet-stream").split(";")[0],
+        "X-Take-Id": takeId,
+        "X-Duration-Ms": String(Math.round(durationMs)),
+      },
+    }),
 };

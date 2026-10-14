@@ -58,21 +58,26 @@ npm run typecheck
 
 ## Web
 
-Vite + React 19 + TypeScript + React Router in `web/`, plain CSS with tokens in `src/styles/tokens.css`. Code against `docs/api.md` through the typed client in `src/api/`.
+Vite + React 19 + TypeScript + React Router in `web/`, plain CSS with tokens in `src/styles/tokens.css` (light only; there is no dark mode). Code against `docs/api.md` through the typed client in `src/api/` (`director.ts`, `actor.ts`, `join.ts`).
 
 ```bash
 cd web
 npm install
 npm run dev        # http://localhost:5173, API at VITE_API_URL
-npm test           # Vitest: scoring, timing map, upload queue, browser detection
+npm test           # Vitest: scoring, timing map, upload queue, browser detection, flag navigation, join memory, parse progress, source matching, next step
 npm run typecheck
 npm run build      # tsc, then vite build to dist/ (what Vercel runs)
 ```
 
 - Env: `VITE_API_URL` (dev default `http://localhost:8080`, production builds default to `https://api.offbooked.com`). `VITE_STT_MODEL` picks the on-device speech model: `moonshine-tiny` (default), `whisper-tiny.en`, or `off`.
-- Routes: `/` landing, `/signin`, `/auth/verify?token=`, `/app` productions, `/app/new`, `/app/p/:id?tab=script|cast|play`, `/i/:token` actor welcome, recording and wrapped, `/i/:token/play` run-through (`?mode=mine` opens my-part mode).
+- Routes: `/` landing (with a playable demo voiced by the browser's speech synthesis), `/signin`, `/auth/verify?token=`, `/app` productions, `/app/new`, `/app/p/:id?tab=script|cast|play` (no `tab` opens the next step), `/app/p/:id/record?section=` director stand-in recording, `/join/:token` the whole-cast link, `/i/:token` actor welcome, recording and wrapped, `/i/:token/play` run-through (`?mode=mine` opens my-part mode).
+- Look: white page, Bricolage Grotesque for headings and UI, Newsreader for script text, DM Mono for micro-labels (Google Fonts in `index.html`). One orange accent (`--accent`, a fill: text on it is ink; use `--accent-text` for accent-coloured text) and a yellow highlight (`--sun`). Pressable things are "stickers": 2px ink border and a hard offset shadow. Keep 44px targets and AA contrast, and respect reduced motion.
+- Script text keeps its line breaks and indentation: anything that shows `Line.text` (review, cue lines, recording cards, run-through, editor) uses `white-space: pre-wrap`.
+- Director flow: each production shows one next step (`routes/director/nextStep.ts`). Script review is one continuous script page: flagged lines are highlighted in place with a one-tap approve (approvals are sent after a few seconds so Undo can cancel them), a sticky "n of m to check" navigator (J/K, Enter approves, E edits), and an inline editor. The original sits beside it on wide screens and in a bottom sheet on phones (`SourcePane.tsx`): PDFs render with pdf.js (`PdfPage.tsx`, lazy loaded, fetched with the director header and range requests off) and the line is highlighted from the text layer; DOCX and text show `/script/source` with the line's source lines highlighted. Parse progress polls every 1.5 s.
+- Cast: the cast link (`/join/:token`) is the main way people join; per-actor links are in each row's menu. The join page remembers the claimed invite per join link in localStorage (`offbooked.join.<token>`, `src/lib/joinMemory.ts`), so reopening it goes straight to `/i/<invite>`.
 - The director session token lives in localStorage (`offbooked.session`). Actor calls use the token from the URL.
-- Takes are written to IndexedDB before upload and retried with backoff (`src/upload/`), keyed by a client UUID sent as `X-Take-Id`.
+- Takes are written to IndexedDB before upload and retried with backoff (`src/upload/`), keyed by a client UUID sent as `X-Take-Id`. Queue items have a `kind`: `invite` (actor takes, the default) or `director` (stand-in takes, `token` is the production ID). The actor recorder and the stand-in recorder share `audio/useTakeRecorder.ts`, `components/RecordDock.tsx` and `routes/actor/LineCard.tsx`.
+- The run-through marks each line's audio with a small tag from `TimingEntry.source` (`TTS`, `stand-in`, `silent`; nothing for the cast's own takes).
 - On-device accuracy (`src/stt/`, see `docs/on-device-stt.md`): transformers.js runs in a module worker that is created only after the first take uploads, and is disposed when the recording or practice screen closes. No COOP/COEP headers.
 - `web/vercel.json` rewrites every non-asset path to `index.html`. The mic is only requested from a record tap, never on load.
 

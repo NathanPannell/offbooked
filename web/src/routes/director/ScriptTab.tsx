@@ -1,10 +1,10 @@
-import { FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "../../api/client";
 import { script as scriptApi } from "../../api/director";
 import type { Production, Script } from "../../api/types";
 import { Loading } from "../../components/Loading";
 import { useInterval, useResource } from "../../lib/useResource";
+import { ParseProgressView } from "./ParseProgressView";
 import { ScriptReview } from "./ScriptReview";
 import { ScriptUpload } from "./ScriptUpload";
 
@@ -19,10 +19,11 @@ export function ScriptTab({
 }) {
   const script = useResource<Script>(() => scriptApi.get(production.id), production.id);
   const [replacing, setReplacing] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
   const status = script.data?.status;
   const previousStatus = useRef(status);
 
-  useInterval(() => void script.reload(), 2500, status === "parsing");
+  useInterval(() => void script.reload(), 1500, status === "parsing");
 
   useEffect(() => {
     if (previousStatus.current === "parsing" && status && status !== "parsing") onChanged();
@@ -42,21 +43,7 @@ export function ScriptTab({
   }
 
   const data = script.data;
-  if (data.status === "parsing") {
-    return (
-      <div className="card stack parsing" aria-live="polite">
-        <FileText size={32} className="accent-icon" aria-hidden="true" />
-        <h2>Reading your script…</h2>
-        <p className="muted">
-          We're sorting it into scenes, characters and lines. This usually takes under a minute. You can leave this page;
-          it keeps going.
-        </p>
-        <div className="progress progress-indeterminate" role="progressbar" aria-label="Parsing script">
-          <span />
-        </div>
-      </div>
-    );
-  }
+  if (data.status === "parsing") return <ParseProgressView progress={data.progress} fileName={fileName} />;
 
   if (data.status === "none" || data.status === "failed" || replacing) {
     return (
@@ -65,9 +52,10 @@ export function ScriptTab({
         failure={data.status === "failed" ? data.error || "We couldn't read that script." : null}
         canCancel={replacing}
         onCancel={() => setReplacing(false)}
-        onStarted={() => {
+        onStarted={(name) => {
           setReplacing(false);
-          script.setData((s) => ({ ...s!, status: "parsing", error: null }));
+          setFileName(name);
+          script.setData((s) => ({ ...s!, status: "parsing", error: null, progress: null }));
           onChanged();
         }}
       />
@@ -79,6 +67,7 @@ export function ScriptTab({
       production={production}
       script={data}
       reload={script.reload}
+      setScript={script.setData}
       onReplace={() => setReplacing(true)}
       onDone={onDone}
     />

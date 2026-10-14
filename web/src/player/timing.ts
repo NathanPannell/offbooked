@@ -1,4 +1,4 @@
-import type { TimingEntry } from "../api/types";
+import type { AudioSource, TimingEntry } from "../api/types";
 
 // Pure navigation over the render's timing map. All times are milliseconds into the render.
 
@@ -88,4 +88,24 @@ export function myGapSegmentAt(
   if (!segment || !mine.has(segment.lineId)) return null;
   // After a gap, playback resumes from the segment's end, which must not trigger it again.
   return ms < segment.endMs - 1 ? segment : null;
+}
+
+/** Where a line's audio comes from. Older servers only say whether it was recorded. */
+export function audioSourceOf(entry: Pick<TimingEntry, "recorded" | "source"> | undefined): AudioSource {
+  if (!entry) return "none";
+  return entry.source ?? (entry.recorded ? "actor" : "none");
+}
+
+/** The small tag shown beside a line in the run-through, or null for the cast's own recording. */
+export function audioSourceTag(source: AudioSource): string | null {
+  switch (source) {
+    case "actor":
+      return null;
+    case "standin":
+      return "stand-in";
+    case "tts":
+      return "TTS";
+    case "none":
+      return "silent";
+  }
 }
