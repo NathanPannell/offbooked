@@ -418,3 +418,25 @@ test("a heading without a printed number gets no invented number", () => {
   const out = assembleSegments(parseRows("1 H act=1\n2 H act=1 scene=1\n3 H act=2 scene=1"), ["FIRST ACT", "SCENE", "Scene the First"]);
   assert.deepEqual(out.map((l) => [l.act, l.scene]), [["1", null], [null, null], [null, "1"]]);
 });
+
+test("a speech with its cue and a delivery note, labelled as a direction, is turned back into a speech", async () => {
+  const { learnCues, lineCue, repairCues } = await import("./cues.ts");
+  const lines = ["LORD FANCOURT (aside to JACK). You know, you're placing me in a terribly", "false position.", "LORD FANCOURT takes flowers out of his dress."];
+  const book = learnCues(parseRows("1 S LORD FANCOURT BABBERLEY | LORD FANCOURT\n1 S LORD FANCOURT BABBERLEY | LORD FANCOURT\n1 S LORD FANCOURT BABBERLEY | LORD FANCOURT"));
+  assert.equal(lineCue(lines[2]!, book, ""), null, "a direction that names the character is not a cue");
+  const out = assembleSegments(repairCues(parseRows("1-2 D\n3 D"), lines, book), lines, { parenDirections: true });
+  assert.deepEqual(out.map((l) => [l.kind, l.speaker, l.text]), [
+    ["stage_direction", null, "(aside to JACK)"],
+    ["dialogue", "LORD FANCOURT BABBERLEY", "You know, you're placing me in a terribly false position."],
+    ["stage_direction", null, "LORD FANCOURT takes flowers out of his dress."],
+  ]);
+});
+
+test("a speech that carries on after a direction closing on the next line keeps its speaker", () => {
+  const lines = ['CHARLEY (writing). "Yours sincerely, Charles Wykeham. (Blots and folds', "letter.) Splendid, Jack, you're a genius!"];
+  const out = assembleSegments(parseRows("1 S CHARLEY | CHARLEY\n2 D"), lines, { parenDirections: true });
+  assert.deepEqual(out.filter((l) => l.kind === "dialogue").map((l) => [l.speaker, l.text]), [
+    ["CHARLEY", '"Yours sincerely, Charles Wykeham.'],
+    ["CHARLEY", "Splendid, Jack, you're a genius!"],
+  ]);
+});

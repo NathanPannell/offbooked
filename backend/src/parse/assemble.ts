@@ -24,6 +24,10 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
   // A cue with no words after it ("NORA." on its own line) whose speech the model then labelled
   // as a direction because it opens with one ("_In a low voice._—Where is she?").
   let orphan: Orphan | null = null;
+  const lastDialogue = (): { speaker: string; cue: string } | null => {
+    const l = out.findLast((x) => x.kind === "dialogue" && x.speaker);
+    return l ? { speaker: l.speaker!, cue: l.speakerAsWritten ?? l.speaker! } : null;
+  };
   const texts = segments.map((sg) => (sg.type === "skip" ? "" : joinLines(lines.slice(sg.from - 1, sg.to))));
   for (const [index, seg] of segments.entries()) {
     if (seg.type === "skip") continue;
@@ -35,10 +39,16 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
     if (!text) continue;
     const pending = orphan as Orphan | null; // (a cast: TypeScript narrows the loop variable to null)
     orphan = null;
+    const lastSpeech = index > 0 && segments[index - 1]!.type !== "skip" ? lastDialogue() : null;
     if (seg.type === "direction") {
       const pieces = pending ? splitDirections(text, seg.inlineDirections, parens, around).map(asDirectionIfWrapped) : [];
       if (pending && pieces.some((p) => !p.direction)) {
         emitSpeech(out, pieces, { speaker: pending.speaker, cue: pending.cue, note: pending.note ?? seg.note, continuation: false });
+      } else if (!pending && lastSpeech && around.openedBefore && spokenAfterClose(text, seg.inlineDirections, parens, around)) {
+        // "letter.) Splendid, Jack!" after "…Wykeham. (Blots and folds": the direction closes and
+        // the same speech carries on.
+        const rest = splitDirections(text, seg.inlineDirections, parens, around).map(asDirectionIfWrapped);
+        emitSpeech(out, rest, { speaker: lastSpeech.speaker, cue: lastSpeech.cue, note: seg.note ?? CARRY_NOTE, continuation: false });
       } else if (pending) {
         // A cue, then "(Aside)" on its own line: the cue is still waiting for its speech.
         out.push(line("stage_direction", null, null, text, seg.note));
@@ -106,6 +116,12 @@ export function bracketBalance(text: string, parens: boolean): { openAtEnd: bool
     }
   }
   return { openAtEnd: depth > 0, closesFirst };
+}
+
+const CARRY_NOTE = "This speech carries on after a stage direction; check the speaker";
+
+function spokenAfterClose(text: string, inline: string[], parens: boolean, around: { closesNext?: boolean; openedBefore?: boolean }): boolean {
+  return splitDirections(text, inline, parens, around).map(asDirectionIfWrapped).some((p) => !p.direction);
 }
 
 // "(Aside)" alone is a direction even in scripts whose parentheses are otherwise spoken.

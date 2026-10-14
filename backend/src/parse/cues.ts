@@ -68,6 +68,8 @@ export function lineCue(line: string, book: CueBook, prevLine: string | null): s
     }
     // "BARNARDO Who's there?": a capitalised cue followed by a capitalised word.
     if (isCaps(cue) && /^[\s.:]+["“‘'(\[]?[\p{Lu}]/u.test(rest)) return cue;
+    // "LORD FANCOURT (aside to JACK). You know…": a cue, a delivery note, then the speech.
+    if (/^\s*[([][^)\]]{1,80}[)\]][\s.:,]+\S/.test(rest)) return cue;
   }
   return null;
 }
@@ -123,6 +125,11 @@ function claimOrphanCues(segments: Segment[], lines: string[], book: CueBook): S
     const cue = seg.type === "direction" || seg.type === "skip" ? lineCue(first, book, seg.from > 1 ? lines[seg.from - 2]! : null) : null;
     const cueOnly = cue !== null && first.length <= cue.length + 45 && !/[a-z].*[.!?]\s*\S/.test(first.slice(cue.length));
     const speechFollows = next !== undefined && (next.type === "continue" || next.type === "speech");
+    if (cue && !cueOnly && seg.type === "direction") {
+      // A whole speech, cue and all, that the model called a direction.
+      out.push({ ...seg, type: "speech", speaker: book.speakerOf.get(cue)!, cue, note: seg.note ?? REPAIR_NOTE });
+      continue;
+    }
     if (!cue || !cueOnly || (seg.type === "skip" && !speechFollows)) {
       out.push(seg);
       continue;
