@@ -24,14 +24,19 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
   // A cue with no words after it ("NORA." on its own line) whose speech the model then labelled
   // as a direction because it opens with one ("_In a low voice._—Where is she?").
   let orphan: Orphan | null = null;
-  for (const seg of segments) {
+  const texts = segments.map((sg) => (sg.type === "skip" ? "" : joinLines(lines.slice(sg.from - 1, sg.to))));
+  for (const [index, seg] of segments.entries()) {
     if (seg.type === "skip") continue;
-    const text = joinLines(lines.slice(seg.from - 1, seg.to));
+    const text = texts[index]!;
+    const around = {
+      closesNext: bracketBalance(texts[index + 1] ?? "", parens).closesFirst,
+      openedBefore: bracketBalance(texts[index - 1] ?? "", parens).openAtEnd,
+    };
     if (!text) continue;
     const pending = orphan as Orphan | null; // (a cast: TypeScript narrows the loop variable to null)
     orphan = null;
     if (seg.type === "direction") {
-      const pieces = pending ? splitDirections(text, seg.inlineDirections, parens).map(asDirectionIfWrapped) : [];
+      const pieces = pending ? splitDirections(text, seg.inlineDirections, parens, around).map(asDirectionIfWrapped) : [];
       if (pending && pieces.some((p) => !p.direction)) {
         emitSpeech(out, pieces, { speaker: pending.speaker, cue: pending.cue, note: pending.note ?? seg.note, continuation: false });
       } else if (pending) {
@@ -54,10 +59,12 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
       // The printed heading wins over the model's numbers when it can be read.
       const printed = actOrScene(text);
       const parsed = printed ?? parseHeading(text);
+      // A heading with no number in it ("SCENE" above a setting) gets no number from the model.
+      const numbered = printed !== null || HAS_NUMBER.test(text);
       out.push({
         ...line("heading", null, null, text, seg.note),
-        act: printed ? printed.act : (seg.act ?? parsed?.act ?? null),
-        scene: printed ? printed.scene : (seg.scene ?? parsed?.scene ?? null),
+        act: printed ? printed.act : numbered ? (seg.act ?? parsed?.act ?? null) : (parsed?.act ?? null),
+        scene: printed ? printed.scene : numbered ? (seg.scene ?? parsed?.scene ?? null) : (parsed?.scene ?? null),
       });
     } else {
       // A first line that is exactly the cue the model reported is a cue line, even when the name
@@ -72,7 +79,7 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
         out.push(line("stage_direction", null, null, cueDirection, null));
         body = joinLines(lines.slice(seg.from, seg.to));
       }
-      const pieces = splitDirections(body, seg.inlineDirections, parens);
+      const pieces = splitDirections(body, seg.inlineDirections, parens, around);
       // Words labelled as continuing a speech, after a cue that is still waiting, are that cue's.
       const owner = seg.type === "continue" && pending ? pending : null;
       const speaker: string | null = seg.type === "speech" ? seg.speaker : (owner?.speaker ?? null);
@@ -83,6 +90,22 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
   }
   if (orphan) out.push({ ...line("dialogue", orphan.speaker, orphan.cue, "", orphan.note), cueOnly: true });
   return out;
+}
+
+// Whether a block's text leaves a bracket open at its end, or closes one it didn't open.
+export function bracketBalance(text: string, parens: boolean): { openAtEnd: boolean; closesFirst: boolean } {
+  const openers = parens ? "[(" : "[";
+  const closers = parens ? "])" : "]";
+  let depth = 0;
+  let closesFirst = false;
+  for (const ch of text) {
+    if (openers.includes(ch)) depth++;
+    else if (closers.includes(ch)) {
+      if (depth === 0) closesFirst = true;
+      else depth--;
+    }
+  }
+  return { openAtEnd: depth > 0, closesFirst };
 }
 
 // "(Aside)" alone is a direction even in scripts whose parentheses are otherwise spoken.
@@ -124,6 +147,8 @@ function emitSpeech(
   }
   return !first;
 }
+
+const HAS_NUMBER = /\d|\b[IVXLC]+\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final)\b/i;
 
 // An act or scene number heading ("ACT II", "FIRST ACT", "Scene 3"), not a slugline or a prologue.
 function actOrScene(text: string): { act: string | null; scene: string | null } | null {
@@ -260,7 +285,12 @@ const EMPHASIS = /(?<![\p{L}\p{N}])_([^_\n]{1,200})_(?![\p{L}\p{N}])/gu;
 // Cuts stage directions out of a speech: the ones the model pointed at, plus anything in
 // square brackets or in _underscores_ (plain-text italics, as Project Gutenberg prints directions).
 // The spoken text either side stays with the speaker.
-export function splitDirections(text: string, inline: string[], parenDirections = false): Piece[] {
+export function splitDirections(
+  text: string,
+  inline: string[],
+  parenDirections = false,
+  around: { closesNext?: boolean; openedBefore?: boolean } = {},
+): Piece[] {
   const spans: [number, number][] = [];
   let searchFrom = 0;
   for (const d of inline) {
@@ -271,24 +301,27 @@ export function splitDirections(text: string, inline: string[], parenDirections 
   }
   for (const m of text.matchAll(BRACKETED)) spans.push([m.index, m.index + m[0].length]);
   if (parenDirections) for (const m of text.matchAll(PARENTHESES)) spans.push([m.index, m.index + m[0].length]);
-  // A direction opened at the end of a speech and closed in a later block ("… mad. [She sits
-  // down"), or closed at the start of one ("apologizes]. Beg pardon"). Square brackets always;
-  // parentheses only in scripts that use them for directions.
+  // A direction opened at the end of a speech and closed in the next block ("… mad. [She sits
+  // down" / "on the plinth.]"), or closed at the start of a speech after being opened in the
+  // block before. Only when the neighbouring block confirms it: OCR text has stray brackets.
   const openers = parenDirections ? "[(" : "[";
   const closers = parenDirections ? "])" : "]";
-  for (let i = text.length - 1; i >= 0; i--) {
-    if (closers.includes(text[i]!)) break;
-    if (openers.includes(text[i]!) && text.length - i <= 400) {
-      spans.push([i, text.length]);
-      break;
+  if (around.closesNext) {
+    for (let i = text.length - 1; i >= 0; i--) {
+      if (closers.includes(text[i]!)) break;
+      if (openers.includes(text[i]!)) {
+        spans.push([i, text.length]);
+        break;
+      }
     }
   }
-  // Only for text that starts mid-sentence: a stray "]" in OCR text must not swallow a speech.
-  for (let i = 0; /^[\p{Ll}]/u.test(text) && i < Math.min(text.length, 150); i++) {
-    if (openers.includes(text[i]!)) break;
-    if (closers.includes(text[i]!)) {
-      spans.push([0, i + 1]);
-      break;
+  if (around.openedBefore) {
+    for (let i = 0; i < text.length; i++) {
+      if (openers.includes(text[i]!)) break;
+      if (closers.includes(text[i]!)) {
+        spans.push([0, i + 1]);
+        break;
+      }
     }
   }
   spans.sort((a, b) => a[0] - b[0]);

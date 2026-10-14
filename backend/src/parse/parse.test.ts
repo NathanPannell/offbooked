@@ -363,10 +363,11 @@ test("parentheses are directions only in scripts that use them that way", async 
   const glaspell = ["HALE. We'll be right out. (Exit Hale.)", "MRS PETERS. (Crossing.) Oh!", "HALE. (Looks.) Well.", "MRS HALE. I see."];
   const rows = parseRows("1 S HALE | HALE. >> (Exit Hale.)\n2 S MRS PETERS | MRS PETERS. >> (Crossing.)\n3 S HALE | HALE. >> (Looks.)\n4 S MRS HALE | MRS HALE.");
   assert.equal(usesParenDirections(rows, glaspell), true);
-  assert.deepEqual(splitDirections("We'll be right out, Mr. Hale. (Exit Hale door rear. Sheriff follows", [], true).map((p) => p.direction), [false, true]);
+  assert.deepEqual(splitDirections("We'll be right out, Mr. Hale. (Exit Hale door rear. Sheriff follows", [], true, { closesNext: true }).map((p) => p.direction), [false, true]);
   assert.deepEqual(splitDirections("We'll be right out (I think", [], false).map((p) => p.direction), [false]);
-  assert.deepEqual(splitDirections("Trod into the mad. [She sits down on the", [], false).map((p) => p.direction), [false, true]);
-  assert.deepEqual(splitDirections("her way and apologizes]. Beg pardon, miss.", [], false), [
+  assert.deepEqual(splitDirections("Trod into the mad. [She sits down on the", [], false, { closesNext: true }).map((p) => p.direction), [false, true]);
+  assert.deepEqual(splitDirections("Trod into the mad. [Pok and more words", [], false).map((p) => p.direction), [false], "an OCR bracket with no close nearby stays");
+  assert.deepEqual(splitDirections("her way and apologizes]. Beg pardon, miss.", [], false, { openedBefore: true }), [
     { text: "her way and apologizes]", direction: true },
     { text: "Beg pardon, miss.", direction: false },
   ]);
@@ -411,4 +412,9 @@ test("OCR noise and old spellings don't swallow speeches", () => {
 test("a spoken first line reported as the cue is not dropped", () => {
   const out = assembleSegments(parseRows("1-2 S NATALYA | Yes, Miss."), ["Yes, Miss.", "Do sit down."]);
   assert.equal(out[0]!.text, "Yes, Miss. Do sit down.");
+});
+
+test("a heading without a printed number gets no invented number", () => {
+  const out = assembleSegments(parseRows("1 H act=1\n2 H act=1 scene=1\n3 H act=2 scene=1"), ["FIRST ACT", "SCENE", "Scene the First"]);
+  assert.deepEqual(out.map((l) => [l.act, l.scene]), [["1", null], [null, null], [null, "1"]]);
 });

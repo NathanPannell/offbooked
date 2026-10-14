@@ -2,7 +2,7 @@ import { canonicalName } from "./heuristic.ts";
 import type { ParsedLine, StructuredScript } from "./types.ts";
 
 const words = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim().split(" ").filter(Boolean);
-const JOINT = /[/&,+]|AND|BOTH|ALL/i;
+const JOINT = /[/&,+]|\bAND\b|\bBOTH\b|\bALL\b/i;
 
 // "HAM" abbreviates "HAMLET"; "LADY M" abbreviates "LADY MACBETH". A whole-word prefix is not an
 // abbreviation ("KING" is not "KING HENRY"), and nothing merges into a joint cue like "HORATIO/MARCELLUS".

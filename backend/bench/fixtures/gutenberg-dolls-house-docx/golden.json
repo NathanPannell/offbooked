@@ -30,15 +30,15 @@
       "aliases": []
     },
     {
-      "name": "RANK",
+      "name": "DOCTOR RANK",
       "aliases": [
-        "DOCTOR RANK"
+        "RANK"
       ]
     },
     {
-      "name": "CHILDREN",
+      "name": "THE CHILDREN",
       "aliases": [
-        "THE CHILDREN"
+        "CHILDREN"
       ]
     },
     {
@@ -995,7 +995,7 @@
       "text": "Really! Perhaps he does; I don’t know anything about it. But don’t let us think of business; it is so tiresome."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "No, my dear fellow, I won’t disturb you; I would rather go in to your wife for a little while. I beg your pardon; I am afraid I am disturbing you too."
     },
     {
@@ -1003,7 +1003,7 @@
       "text": "No, not at all. Doctor Rank, Mrs Linde."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I have often heard Mrs Linde’s name mentioned here. I think I passed you on the stairs when I arrived, Mrs Linde?"
     },
     {
@@ -1011,7 +1011,7 @@
       "text": "Yes, I go up very slowly; I can’t manage stairs well."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Ah! some slight internal weakness?"
     },
     {
@@ -1019,7 +1019,7 @@
       "text": "No, the fact is I have been overworking myself."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Nothing more than that? Then I suppose you have come to town to amuse yourself with our entertainments?"
     },
     {
@@ -1027,7 +1027,7 @@
       "text": "I have come to look for work."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Is that a good cure for overwork?"
     },
     {
@@ -1035,7 +1035,7 @@
       "text": "One must live, Doctor Rank."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, the general opinion seems to be that it is necessary."
     },
     {
@@ -1043,7 +1043,7 @@
       "text": "Look here, Doctor Rank—you know you want to live."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Certainly. However wretched I may feel, I want to prolong the agony as long as possible. All my patients are like that. And so are those who are morally diseased; one of them, and a bad case too, is at this very moment with Helmer—"
     },
     {
@@ -1055,7 +1055,7 @@
       "text": "Whom do you mean?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "A lawyer of the name of Krogstad, a fellow you don’t know at all. He suffers from a diseased moral character, Mrs Helmer; but even he began talking of its being highly important that he should live."
     },
     {
@@ -1063,7 +1063,7 @@
       "text": "Did he? What did he want to speak to Torvald about?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I have no idea; I only heard that it was something about the Bank."
     },
     {
@@ -1071,7 +1071,7 @@
       "text": "I didn’t know this—what’s his name—Krogstad had anything to do with the Bank."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, he has some sort of appointment there. I don’t know whether you find also in your part of the world that there are certain people who go zealously snuffing about to smell out moral corruption, and, as soon as they have found some, put the person concerned into some lucrative position where they can keep their eye on him. Healthy natures are left out in the cold."
     },
     {
@@ -1079,11 +1079,11 @@
       "text": "Still I think the sick are those who most need taking care of."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, there you are. That is the sentiment that is turning Society into a sick-house."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Why do you laugh at that? Have you any notion what Society really is?"
     },
     {
@@ -1091,7 +1091,7 @@
       "text": "What do I care about tiresome Society? I am laughing at something quite different, something extremely amusing. Tell me, Doctor Rank, are all the people who are employed in the Bank dependent on Torvald now?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Is that what you find so extremely amusing?"
     },
     {
@@ -1099,7 +1099,7 @@
       "text": "That’s my affair! It’s perfectly glorious to think that we have—that Torvald has so much power over so many people. Doctor Rank, what do you say to a macaroon?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "What, macaroons? I thought they were forbidden here."
     },
     {
@@ -1115,7 +1115,7 @@
       "text": "Oh, well, don’t be alarmed! You couldn’t know that Torvald had forbidden them. I must tell you that he is afraid they will spoil my teeth. But, bah!—once in a way—That’s so, isn’t it, Doctor Rank? By your leave! You must have one too, Christine. And I shall have one, just a little one—or at most two. I am tremendously happy. There is just one thing in the world now that I should dearly love to do."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Well, what is that?"
     },
     {
@@ -1123,7 +1123,7 @@
       "text": "It’s something I should dearly love to say, if Torvald could hear me."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Well, why can’t you say it?"
     },
     {
@@ -1135,7 +1135,7 @@
       "text": "Shocking?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Well, I should not advise you to say it. Still, with us you might. What is it you would so much like to say if Torvald could hear you?"
     },
     {
@@ -1143,7 +1143,7 @@
       "text": "I should just love to say—Well, I’m damned!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Are you mad?"
     },
     {
@@ -1151,7 +1151,7 @@
       "text": "Nora, dear—!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Say it, here he is!"
     },
     {
@@ -1247,7 +1247,7 @@
       "text": "There is no need. But today you must excuse me—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Wait a minute; I will come with you."
     },
     {
@@ -1287,7 +1287,7 @@
       "text": "There they are! There they are! Come in! Come in! Oh, you sweet blessings! Look at them, Christine! Aren’t they darlings?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Don’t let us stand here in the draught."
     },
     {
@@ -1727,7 +1727,7 @@
       "text": "Nonsense! Trying to frighten me like that!—I am not so silly as he thinks. And yet—? No, it’s impossible! I did it for love’s sake."
     },
     {
-      "speaker": "CHILDREN",
+      "speaker": "THE CHILDREN",
       "text": "Mother, the stranger man has gone out through the gate."
     },
     {
@@ -1735,7 +1735,7 @@
       "text": "Yes, dears, I know. But, don’t tell anyone about the stranger man. Do you hear? Not even papa."
     },
     {
-      "speaker": "CHILDREN",
+      "speaker": "THE CHILDREN",
       "text": "No, mother; but will you come and play again?"
     },
     {
@@ -1743,7 +1743,7 @@
       "text": "No, no,—not now."
     },
     {
-      "speaker": "CHILDREN",
+      "speaker": "THE CHILDREN",
       "text": "But, mother, you promised us."
     },
     {
@@ -2559,7 +2559,7 @@
       "text": "Good day, Doctor Rank. I knew your ring. But you mustn’t go in to Torvald now; I think he is busy with something."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "And you?"
     },
     {
@@ -2567,7 +2567,7 @@
       "text": "Oh, you know very well I always have time for you."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Thank you. I shall make use of as much of it as I can."
     },
     {
@@ -2575,7 +2575,7 @@
       "text": "What do you mean by that? As much of it as you can?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Well, does that alarm you?"
     },
     {
@@ -2583,7 +2583,7 @@
       "text": "It was such a strange way of putting it. Is anything likely to happen?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Nothing but what I have long been prepared for. But I certainly didn’t expect it to happen so soon."
     },
     {
@@ -2591,7 +2591,7 @@
       "text": "What have you found out? Doctor Rank, you must tell me."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "It is all up with me. And it can’t be helped."
     },
     {
@@ -2599,7 +2599,7 @@
       "text": "Is it about yourself?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Who else? It is no use lying to one’s self. I am the most wretched of all my patients, Mrs Helmer. Lately I have been taking stock of my internal economy. Bankrupt! Probably within a month I shall lie rotting in the churchyard."
     },
     {
@@ -2607,7 +2607,7 @@
       "text": "What an ugly thing to say!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "The thing itself is cursedly ugly, and the worst of it is that I shall have to face so much more that is ugly before that. I shall only make one more examination of myself; when I have done that, I shall know pretty certainly when it will be that the horrors of dissolution will begin. There is something I want to tell you. Helmer’s refined nature gives him an unconquerable disgust at everything that is ugly; I won’t have him in my sick-room."
     },
     {
@@ -2615,7 +2615,7 @@
       "text": "Oh, but, Doctor Rank—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I won’t have him there. Not on any account. I bar my door to him. As soon as I am quite certain that the worst has come, I shall send you my card with a black cross on it, and then you will know that the loathsome end has begun."
     },
     {
@@ -2623,7 +2623,7 @@
       "text": "You are quite absurd today. And I wanted you so much to be in a really good humour."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "With death stalking beside me?—To have to pay this penalty for another man’s sin? Is there any justice in that? And in every single family, in one way or another, some such inexorable retribution is being exacted—"
     },
     {
@@ -2631,7 +2631,7 @@
       "text": "Rubbish! Do talk of something cheerful."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Oh, it’s a mere laughing matter, the whole thing. My poor innocent spine has to suffer for my father’s youthful amusements."
     },
     {
@@ -2639,7 +2639,7 @@
       "text": "I suppose you mean that he was too partial to asparagus and pate de foie gras, don’t you?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, and to truffles."
     },
     {
@@ -2647,7 +2647,7 @@
       "text": "Truffles, yes. And oysters too, I suppose?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Oysters, of course, that goes without saying."
     },
     {
@@ -2655,7 +2655,7 @@
       "text": "And heaps of port and champagne. It is sad that all these nice things should take their revenge on our bones."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Especially that they should revenge themselves on the unlucky bones of those who have not had the satisfaction of enjoying them."
     },
     {
@@ -2663,7 +2663,7 @@
       "text": "Yes, that’s the saddest part of it all."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Hm!—"
     },
     {
@@ -2671,7 +2671,7 @@
       "text": "Why did you smile?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "No, it was you that laughed."
     },
     {
@@ -2679,7 +2679,7 @@
       "text": "No, it was you that smiled, Doctor Rank!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "You are a greater rascal than I thought."
     },
     {
@@ -2687,7 +2687,7 @@
       "text": "I am in a silly mood today."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "So it seems."
     },
     {
@@ -2695,7 +2695,7 @@
       "text": "Dear, dear Doctor Rank, death mustn’t take you away from Torvald and me."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "It is a loss you would easily recover from. Those who are gone are soon forgotten."
     },
     {
@@ -2703,7 +2703,7 @@
       "text": "Do you believe that?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "People form new ties, and then—"
     },
     {
@@ -2711,7 +2711,7 @@
       "text": "Who will form new ties?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Both you and Helmer, when I am gone. You yourself are already on the high road to it, I think. What did that Mrs Linde want here last night?"
     },
     {
@@ -2719,7 +2719,7 @@
       "text": "Oho!—you don’t mean to say you are jealous of poor Christine?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, I am. She will be my successor in this house. When I am done for, this woman will—"
     },
     {
@@ -2727,7 +2727,7 @@
       "text": "Hush! don’t speak so loud. She is in that room."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Today again. There, you see."
     },
     {
@@ -2735,7 +2735,7 @@
       "text": "She has only come to sew my dress for me. Bless my soul, how unreasonable you are! Be nice now, Doctor Rank, and tomorrow you will see how beautifully I shall dance, and you can imagine I am doing it all for you—and for Torvald too, of course. Doctor Rank, come and sit down here, and I will show you something."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "What is it?"
     },
     {
@@ -2743,7 +2743,7 @@
       "text": "Just look at those!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Silk stockings."
     },
     {
@@ -2751,7 +2751,7 @@
       "text": "Flesh-coloured. Aren’t they lovely? It is so dark here now, but tomorrow—. No, no, no! you must only look at the feet. Oh well, you may have leave to look at the legs too."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Hm!—"
     },
     {
@@ -2759,7 +2759,7 @@
       "text": "Why are you looking so critical? Don’t you think they will fit me?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I have no means of forming an opinion about that."
     },
     {
@@ -2767,7 +2767,7 @@
       "text": "For shame! That’s to punish you."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "And what other nice things am I to be allowed to see?"
     },
     {
@@ -2775,7 +2775,7 @@
       "text": "Not a single thing more, for being so naughty."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "When I am sitting here, talking to you as intimately as this, I cannot imagine for a moment what would have become of me if I had never come into this house."
     },
     {
@@ -2783,7 +2783,7 @@
       "text": "I believe you do feel thoroughly at home with us."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "And to be obliged to leave it all—"
     },
     {
@@ -2791,7 +2791,7 @@
       "text": "Nonsense, you are not going to leave it."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "And not be able to leave behind one the slightest token of one’s gratitude, scarcely even a fleeting regret—nothing but an empty place which the first comer can fill as well as any other."
     },
     {
@@ -2799,7 +2799,7 @@
       "text": "And if I asked you now for a—? No!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "For what?"
     },
     {
@@ -2807,7 +2807,7 @@
       "text": "For a big proof of your friendship—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, yes!"
     },
     {
@@ -2815,7 +2815,7 @@
       "text": "I mean a tremendously big favour—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Would you really make me so happy for once?"
     },
     {
@@ -2823,7 +2823,7 @@
       "text": "Ah, but you don’t know what it is yet."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "No—but tell me."
     },
     {
@@ -2831,7 +2831,7 @@
       "text": "I really can’t, Doctor Rank. It is something out of all reason; it means advice, and help, and a favour—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "The bigger a thing it is the better. I can’t conceive what it is you mean. Do tell me. Haven’t I your confidence?"
     },
     {
@@ -2839,7 +2839,7 @@
       "text": "More than anyone else. I know you are my truest and best friend, and so I will tell you what it is. Well, Doctor Rank, it is something you must help me to prevent. You know how devotedly, how inexpressibly deeply Torvald loves me; he would never for a moment hesitate to give his life for me."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Nora—do you think he is the only one—?"
     },
     {
@@ -2847,7 +2847,7 @@
       "text": "The only one—?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "The only one who would gladly give his life for your sake."
     },
     {
@@ -2855,7 +2855,7 @@
       "text": "Is that it?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I was determined you should know it before I went away, and there will never be a better opportunity than this. Now you know it, Nora. And now you know, too, that you can trust me as you would trust no one else."
     },
     {
@@ -2863,7 +2863,7 @@
       "text": "Let me pass."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Nora!"
     },
     {
@@ -2871,7 +2871,7 @@
       "text": "Helen, bring in the lamp. Dear Doctor Rank, that was really horrid of you."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "To have loved you as much as anyone else does? Was that horrid?"
     },
     {
@@ -2879,7 +2879,7 @@
       "text": "No, but to go and tell me so. There was really no need—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "What do you mean? Did you know—? Nora—Mrs Helmer—tell me, had you any idea of this?"
     },
     {
@@ -2887,7 +2887,7 @@
       "text": "Oh, how do I know whether I had or whether I hadn’t? I really can’t tell you—To think you could be so clumsy, Doctor Rank! We were getting on so nicely."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Well, at all events you know now that you can command me, body and soul. So won’t you speak out?"
     },
     {
@@ -2895,7 +2895,7 @@
       "text": "After what happened?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I beg you to let me know what it is."
     },
     {
@@ -2903,7 +2903,7 @@
       "text": "I can’t tell you anything now."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, yes. You mustn’t punish me in that way. Let me have permission to do for you whatever a man may do."
     },
     {
@@ -2911,7 +2911,7 @@
       "text": "You can do nothing for me now. Besides, I really don’t need any help at all. You will find that the whole thing is merely fancy on my part. It really is so—of course it is! You are a nice sort of man, Doctor Rank!—don’t you feel ashamed of yourself, now the lamp has come?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Not a bit. But perhaps I had better go—for ever?"
     },
     {
@@ -2919,7 +2919,7 @@
       "text": "No, indeed, you shall not. Of course you must come here just as before. You know very well Torvald can’t do without you."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, but you?"
     },
     {
@@ -2927,7 +2927,7 @@
       "text": "Oh, I am always tremendously pleased when you come."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "It is just that, that put me on the wrong track. You are a riddle to me. I have often thought that you would almost as soon be in my company as in Helmer’s."
     },
     {
@@ -2935,7 +2935,7 @@
       "text": "Yes—you see there are some people one loves best, and others whom one would almost always rather have as companions."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, there is something in that."
     },
     {
@@ -2943,7 +2943,7 @@
       "text": "When I was at home, of course I loved papa best. But I always thought it tremendous fun if I could steal down into the maids’ room, because they never moralised at all, and talked to each other about such entertaining things."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I see—it is their place I have taken."
     },
     {
@@ -2959,7 +2959,7 @@
       "text": "Oh!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Is there anything wrong?"
     },
     {
@@ -2967,7 +2967,7 @@
       "text": "No, no, not in the least. It is only something—it is my new dress—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "What? Your dress is lying there."
     },
     {
@@ -2975,7 +2975,7 @@
       "text": "Oh, yes, that one; but this is another. I ordered it. Torvald mustn’t know about it—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Oho! Then that was the great secret."
     },
     {
@@ -2983,7 +2983,7 @@
       "text": "Of course. Just go in to him; he is sitting in the inner room. Keep him as long as—"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Make your mind easy; I won’t let him escape."
     },
     {
@@ -3451,7 +3451,7 @@
       "text": "Rank led me to expect a splendid transformation."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I understood so, but evidently I was mistaken."
     },
     {
@@ -3555,7 +3555,7 @@
       "text": "Didn’t I tell you so?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Let me play for her."
     },
     {
@@ -3619,7 +3619,7 @@
       "text": "I don’t know; I think there is; but you must not read anything of that kind now. Nothing horrid must come between us until this is all over."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "You mustn’t contradict her."
     },
     {
@@ -3659,7 +3659,7 @@
       "text": "Yes, dear, I will. But go in now and you too, Doctor Rank. Christine, you must help me to do up my hair."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I suppose there is nothing—she is not expecting anything?"
     },
     {
@@ -4279,7 +4279,7 @@
       "text": "Who is it?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "It is I. May I come in for a moment?"
     },
     {
@@ -4287,7 +4287,7 @@
       "text": "Oh, what does he want now? Wait a minute! Come, that’s kind of you not to pass by our door."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "I thought I heard your voice, and felt as if I should like to look in. Ah, yes!—these dear familiar rooms. You are very happy and cosy in here, you two."
     },
     {
@@ -4295,7 +4295,7 @@
       "text": "It seems to me that you looked after yourself pretty well upstairs too."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Excellently. Why shouldn’t I? Why shouldn’t one enjoy everything in this world?—at any rate as much as one can, and as long as one can. The wine was capital—"
     },
     {
@@ -4303,7 +4303,7 @@
       "text": "Especially the champagne."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "So you noticed that too? It is almost incredible how much I managed to put away!"
     },
     {
@@ -4311,7 +4311,7 @@
       "text": "Torvald drank a great deal of champagne tonight too."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Did he?"
     },
     {
@@ -4319,7 +4319,7 @@
       "text": "Yes, and he is always in such good spirits afterwards."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Well, why should one not enjoy a merry evening after a well-spent day?"
     },
     {
@@ -4327,7 +4327,7 @@
       "text": "Well spent? I am afraid I can’t take credit for that."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "But I can, you know!"
     },
     {
@@ -4335,7 +4335,7 @@
       "text": "Doctor Rank, you must have been occupied with some scientific investigation today."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Exactly."
     },
     {
@@ -4347,7 +4347,7 @@
       "text": "And may I congratulate you on the result?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Indeed you may."
     },
     {
@@ -4355,7 +4355,7 @@
       "text": "Was it favourable, then?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "The best possible, for both doctor and patient—certainty."
     },
     {
@@ -4363,7 +4363,7 @@
       "text": "Certainty?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Absolute certainty. So wasn’t I entitled to make a merry evening of it after that?"
     },
     {
@@ -4375,7 +4375,7 @@
       "text": "I think so too, so long as you don’t have to pay for it in the morning."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Oh well, one can’t have anything in this life without paying for it."
     },
     {
@@ -4383,7 +4383,7 @@
       "text": "Doctor Rank—are you fond of fancy-dress balls?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, if there is a fine lot of pretty costumes."
     },
     {
@@ -4395,7 +4395,7 @@
       "text": "Little featherbrain!—are you thinking of the next already?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "We two? Yes, I can tell you. You shall go as a good fairy—"
     },
     {
@@ -4403,7 +4403,7 @@
       "text": "Yes, but what do you suggest as an appropriate costume for that?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Let your wife go dressed just as she is in everyday life."
     },
     {
@@ -4411,7 +4411,7 @@
       "text": "That was really very prettily turned. But can’t you tell us what you will be?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Yes, my dear friend, I have quite made up my mind about that."
     },
     {
@@ -4419,7 +4419,7 @@
       "text": "Well?"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "At the next fancy-dress ball I shall be invisible."
     },
     {
@@ -4427,7 +4427,7 @@
       "text": "That’s a good joke!"
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "There is a big black hat—have you never heard of hats that make you invisible? If you put one on, no one can see you."
     },
     {
@@ -4435,7 +4435,7 @@
       "text": "Yes, you are quite right."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "But I am clean forgetting what I came for. Helmer, give me a cigar—one of the dark Havanas."
     },
     {
@@ -4443,7 +4443,7 @@
       "text": "With the greatest pleasure."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Thanks."
     },
     {
@@ -4451,7 +4451,7 @@
       "text": "Let me give you a light."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Thank you. And now goodbye!"
     },
     {
@@ -4463,7 +4463,7 @@
       "text": "Sleep well, Doctor Rank."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "Thank you for that wish."
     },
     {
@@ -4471,7 +4471,7 @@
       "text": "Wish me the same."
     },
     {
-      "speaker": "RANK",
+      "speaker": "DOCTOR RANK",
       "text": "You? Well, if you want me to sleep well! And thanks for the light."
     },
     {

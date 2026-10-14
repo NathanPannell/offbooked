@@ -8,7 +8,7 @@ header, contents, dramatis personae and licence. The golden is built from
 the same HTML:
   - Only <div class="chapter"> blocks headed "ACT I/II/III" are used.
   - A speech is a <p class="drama"> whose first line is the cue ("NORA.",
-    "DOCTOR RANK." is an alias of RANK, "THE CHILDREN." of CHILDREN).
+    canonical "DOCTOR RANK" with alias "RANK", "THE CHILDREN" with alias "CHILDREN").
   - [Bracketed] text is a direction: removed from speeches and counted.
     A direction paragraph whose bracket closes in the next paragraph (the
     opening scene description) counts once.
@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from benchlib import ORDINALS, GoldenBuilder, collapse, strip_bracketed  # noqa: E402
 
 CUE = re.compile(r"^([A-Z][A-Z .]+?)\.$")
-ALIASES = {"DOCTOR RANK": "RANK", "THE CHILDREN": "CHILDREN"}
+ALIASES = {"RANK": "DOCTOR RANK", "CHILDREN": "THE CHILDREN"}  # fullest cue form is canonical
 
 
 def main() -> None:
