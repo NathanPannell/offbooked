@@ -37,6 +37,7 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
       openedBefore: bracketBalance(texts[index - 1] ?? "", parens).openAtEnd,
     };
     if (!text) continue;
+    const before = out.length;
     const pending = orphan as Orphan | null; // (a cast: TypeScript narrows the loop variable to null)
     orphan = null;
     const lastSpeech = index > 0 && segments[index - 1]!.type !== "skip" ? lastDialogue() : null;
@@ -97,6 +98,7 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
       const spoke = emitSpeech(out, pieces, { speaker, cue: cueAsWritten, note: seg.note ?? owner?.note ?? null, continuation: seg.type === "continue" && !owner });
       if (!spoke && speaker) orphan = { speaker, cue: cueAsWritten ?? speaker, note: seg.note };
     }
+    for (let i = before; i < out.length; i++) out[i]!.sourceLine ??= seg.from;
   }
   if (orphan) out.push({ ...line("dialogue", orphan.speaker, orphan.cue, "", orphan.note), cueOnly: true });
   return out;
@@ -185,15 +187,30 @@ const line = (kind: ParsedLine["kind"], speaker: string | null, speakerAsWritten
 
 // Joins wrapped lines. A word broken with a hyphen at a line end ("some-" / "thing") is rejoined.
 export function joinLines(parts: string[]): string {
+  const kept = parts.map((p) => p.replace(/\s+$/, "")).filter((p) => p.trim());
+  if (!kept.length) return "";
+  // Line breaks and indentation stay as printed (verse, songs, indented speeches), relative to
+  // the block's least indented line.
+  const indent = Math.min(...kept.map((l) => /^ */.exec(l)![0].length));
   let text = "";
-  for (const raw of parts) {
-    const l = raw.trim();
-    if (!l) continue;
-    if (!text) text = l;
-    else if (/[a-z]-$/.test(text) && /^[a-z]/.test(l)) text = text.slice(0, -1) + l;
-    else text += " " + l;
+  for (const raw of kept) {
+    const l = raw.slice(indent);
+    if (!text) text = l.trimStart();
+    else if (/[a-z]-$/.test(text) && /^[a-z]/.test(l.trimStart())) text = text.slice(0, -1) + l.trimStart();
+    else text += "\n" + l;
   }
-  return text.replace(/\s+/g, " ").trim();
+  return text;
+}
+
+// Trims a piece of text without losing its inner line breaks and indentation.
+export function tidyText(raw: string): string {
+  return raw
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+$/, "").replace(/(\S)[ \t]{2,}(?=\S)/g, "$1 "))
+    .join("\n")
+    .replace(/\n{2,}/g, "\n")
+    .replace(/^\s+/, "")
+    .replace(/\s+$/, "");
 }
 
 // The model sometimes copies spoken words into the cue ("BARNARDO Long live the King!"). Keep only
@@ -356,7 +373,7 @@ export function splitDirections(
 
 function push(pieces: Piece[], raw: string, direction: boolean) {
   // Punctuation left at the start after a cut direction (", " or ". "), but not an ellipsis.
-  let text = raw.replace(/\s+/g, " ").trim().replace(/^(?:[,;:]|\.(?!\.))\s*/, "");
+  let text = tidyText(raw).replace(/^(?:[,;:]|\.(?!\.))\s*/, "");
   // A dash left at the start of a speech after cutting a direction ("_Looking out._—Did you…").
   if (!direction) text = text.replace(/^[—–-]+\s*/, "").replace(EMPHASIS, "$1");
   else text = text.replace(/^_(.+)_$/, "$1");

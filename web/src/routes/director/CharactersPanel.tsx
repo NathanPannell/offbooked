@@ -4,6 +4,7 @@ import { script as api } from "../../api/director";
 import type { Character } from "../../api/types";
 import { CharacterName } from "../../components/CharacterName";
 import type { ReviewActions } from "./ScriptReview";
+import { suggestMerges } from "./duplicateCharacters";
 
 /** Rename, merge and add characters. */
 export function CharactersPanel({
@@ -21,12 +22,13 @@ export function CharactersPanel({
   const [newName, setNewName] = useState("");
   const { run, busy } = actions;
   const sorted = [...characters].sort((a, b) => a.name.localeCompare(b.name));
+  const suggested = new Map(suggestMerges(characters).map((m) => [m.from.id, m.into.id]));
 
   const close = () => setEditing(null);
 
   return (
     <div className="stack characters-panel">
-      <p className="small muted">Duplicates like “HAMLET” and “HAM.” can be merged: every line moves to the one you keep.</p>
+      <p className="small muted">Duplicates like “HAMLET” and “HAM.”, or “MACBETH” and “MACBETH (ASIDE)”, can be merged: every line moves to the one you keep.</p>
       <ul className="character-list">
         {sorted.map((c) => (
           <li key={c.id} className="character-row">
@@ -101,7 +103,7 @@ export function CharactersPanel({
                   className="icon-btn"
                   aria-label={`Merge ${c.name} into another character`}
                   onClick={() => {
-                    setIntoId("");
+                    setIntoId(suggested.get(c.id) ?? "");
                     setEditing({ id: c.id, mode: "merge" });
                   }}
                 >

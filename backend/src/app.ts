@@ -8,6 +8,7 @@ import { HttpError } from "./errors.ts";
 import { actorRoutes, MAX_TAKE_BYTES } from "./routes/actor.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { castRoutes } from "./routes/cast.ts";
+import { joinRoutes } from "./routes/join.ts";
 import { emailRoutes } from "./routes/email.ts";
 import { fileRoutes } from "./routes/files.ts";
 import { MAX_PDF_BYTES, productionRoutes } from "./routes/productions.ts";
@@ -99,6 +100,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     productionRoutes(api, ctx);
     scriptRoutes(api, ctx);
     castRoutes(api, ctx);
+    joinRoutes(api, ctx);
     actorRoutes(api, ctx);
     runthroughRoutes(api, ctx);
     fileRoutes(api, ctx);

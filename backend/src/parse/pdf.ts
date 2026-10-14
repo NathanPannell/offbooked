@@ -4,6 +4,7 @@ import { extractTextItems } from "unpdf";
 export class ScriptInputError extends Error {}
 
 export const MAX_PDF_PAGES = 300;
+export const PAGE_BREAK = "\f";
 
 interface Item {
   str: string;
@@ -36,7 +37,8 @@ export async function extractPdfText(data: Uint8Array): Promise<{ text: string; 
   }
   const text = dropRunningHeaders(pages)
     .map((lines) => withParagraphBreaks(lines))
-    .join("\n\n")
+    // A form feed on its own line marks each page break, so parsed lines can point back to their page.
+    .join(`\n${PAGE_BREAK}\n`)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return { text, pages: result.totalPages };
@@ -67,10 +69,23 @@ export function dropOverprints<T extends Item>(items: T[]): T[] {
 function pageLines(items: Item[]): PageLine[] {
   const rows = groupRows(items);
   const split = columnSplit(rows);
-  if (split === null) return rows.map(toLine);
+  if (split === null) return withIndent(rows);
   const left = groupRows(items.filter((i) => i.x < split));
   const right = groupRows(items.filter((i) => i.x >= split));
-  return [...left.map(toLine), ...right.map(toLine)];
+  return [...withIndent(left), ...withIndent(right)];
+}
+
+// Lines keep their indentation as printed, measured from the column's left margin in
+// character widths (approximate: PDFs don't store spaces for indentation).
+function withIndent(rows: Item[][]): PageLine[] {
+  if (!rows.length) return [];
+  const margin = Math.min(...rows.map((r) => r[0]!.x));
+  return rows.map((row) => {
+    const line = toLine(row);
+    const charWidth = (row[0]!.fontSize || 10) * 0.5;
+    const indent = Math.min(40, Math.max(0, Math.round((row[0]!.x - margin) / charWidth)));
+    return { ...line, text: " ".repeat(indent) + line.text };
+  });
 }
 
 function groupRows(items: Item[]): Item[][] {

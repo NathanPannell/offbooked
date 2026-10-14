@@ -9,6 +9,7 @@ import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
 import { plural } from "../../lib/format";
 import { CharactersPanel } from "./CharactersPanel";
+import { MergeSuggestions } from "./MergeSuggestions";
 import { LineEditor } from "./LineEditor";
 
 export interface ReviewActions {
@@ -101,6 +102,13 @@ export function ScriptReview({
           </p>
         </div>
       )}
+
+      <MergeSuggestions
+        productionId={production.id}
+        characters={script.characters}
+        busy={busy}
+        onMerge={(from, into) => actions.run(() => scriptApi.mergeCharacter(from.id, into.id))}
+      />
 
       {view === "flagged" ? (
         flagged.length === 0 ? (

@@ -95,7 +95,8 @@ const EXAMPLE_OUTPUT = `101-103 X
 const ROW = /^(\d+)(?:\s*-\s*(\d+))?\s+([SCDHX])\b\s*(.*)$/;
 
 export function createClaudeLabeler(apiKey: string): Labeler {
-  const client = new Anthropic({ apiKey, maxRetries: 2, timeout: 180_000 });
+  // All chunks go out at once, so allow a few more retries for rate limiting (429s back off).
+  const client = new Anthropic({ apiKey, maxRetries: 5, timeout: 180_000 });
   return async (req) => {
     const prompt = buildPrompt(req);
     const stream = client.messages.stream({

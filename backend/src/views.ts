@@ -81,6 +81,8 @@ export interface LineRow {
   flagged: boolean;
   flagReason: string | null;
   currentTakeId: string | null;
+  sourceLine: number | null;
+  sourcePage: number | null;
 }
 
 export const lineView = (l: LineRow) => ({
@@ -92,13 +94,15 @@ export const lineView = (l: LineRow) => ({
   text: l.text,
   flagged: l.flagged,
   flagReason: l.flagReason,
+  sourceLine: l.sourceLine,
+  page: l.sourcePage,
 });
 
 export const sectionsOf = (sql: Sql, productionId: string) =>
   sql<SectionRow[]>`select id, seq, act, scene, title from sections where production_id = ${productionId} order by seq`;
 
 export const linesOf = (sql: Sql, productionId: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_reason, current_take_id
+  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_reason, current_take_id, source_line, source_page
                  from lines where production_id = ${productionId} order by seq`;
 
 export const charactersOf = (sql: Sql, productionId: string) =>

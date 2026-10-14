@@ -1,3 +1,4 @@
+import { tidyText } from "./assemble.ts";
 import { canonicalName } from "./heuristic.ts";
 import type { ParsedLine, StructuredScript } from "./types.ts";
 
@@ -115,7 +116,7 @@ export function buildStructure(parsed: ParsedLine[]): StructuredScript {
   let scene: string | null = null;
 
   parsed.forEach((p, index) => {
-    const text = p.text.replace(/\s+/g, " ").trim();
+    const text = tidyText(p.text);
     if (!text) return;
     if (p.kind === "heading" && (p.act || p.scene)) {
       const nextAct = p.act ?? act;
@@ -134,11 +135,11 @@ export function buildStructure(parsed: ParsedLine[]): StructuredScript {
     }
     const character = chars.nameFor(p);
     if (p.kind === "dialogue" && !character) {
-      lines.push({ section: sections.length - 1, kind: "stage_direction", character: null, text, flagReason: p.flagReason ?? "No speaker found for this line" });
+      lines.push({ section: sections.length - 1, kind: "stage_direction", character: null, text, flagReason: p.flagReason ?? "No speaker found for this line", sourceLine: p.sourceLine ?? null, page: null });
       return;
     }
     if (p.kind === "dialogue") hasDialogue = true;
-    lines.push({ section: sections.length - 1, kind: p.kind, character, text, flagReason: p.flagReason ?? chars.flagFor(p, index) });
+    lines.push({ section: sections.length - 1, kind: p.kind, character, text, flagReason: p.flagReason ?? chars.flagFor(p, index), sourceLine: p.sourceLine ?? null, page: null });
   });
 
   const used = new Set(lines.map((l) => l.character).filter(Boolean));

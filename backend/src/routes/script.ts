@@ -11,7 +11,7 @@ const KINDS = ["dialogue", "stage_direction", "heading"] as const;
 
 async function ownedLine(sql: Sql, user: Director, lineId: string): Promise<LineRow & { productionId: string }> {
   const [line] = await sql<(LineRow & { productionId: string })[]>`
-    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_reason, l.current_take_id, l.production_id
+    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.production_id
     from lines l join productions p on p.id = l.production_id
     where l.id = ${lineId} and p.owner_id = ${user.id}`;
   if (!line) throw notFound("Line not found.");
@@ -28,7 +28,7 @@ async function ownedCharacter(sql: Sql, user: Director, characterId: string): Pr
 }
 
 const selectLine = (sql: Sql, id: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_reason, current_take_id from lines where id = ${id}`.then((r) => lineView(r[0]!));
+  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_reason, current_take_id, source_line, source_page from lines where id = ${id}`.then((r) => lineView(r[0]!));
 
 // Drops sections left empty by an edit and renumbers the rest in script order.
 async function tidySections(sql: Tx, productionId: string): Promise<void> {
@@ -78,8 +78,8 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       await tx`update lines set seq = seq + 1 where production_id = ${line.productionId} and seq > ${line.seq}`;
       await tx`update lines set text = ${first}, updated_at = now() where id = ${line.id}`;
       const [row] = await tx<{ id: string }[]>`
-        insert into lines (production_id, section_id, seq, kind, character_id, text)
-        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${line.kind}, ${line.characterId}, ${second}) returning id`;
+        insert into lines (production_id, section_id, seq, kind, character_id, text, source_line, source_page)
+        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${line.kind}, ${line.characterId}, ${second}, ${line.sourceLine}, ${line.sourcePage}) returning id`;
       return row!.id;
     });
     return { lines: [await selectLine(sql, line.id), await selectLine(sql, newId)] };

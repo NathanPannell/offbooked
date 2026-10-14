@@ -164,3 +164,61 @@ interface RunThrough {
 - `/signin`, `/auth/verify?token=`
 - `/app`: productions list. `/app/new`. `/app/p/:id` (tabs: Script, Cast & progress, Run-through).
 - `/i/:token`: actor welcome, then recording, then wrapped. `/i/:token/play`: run-through for the actor.
+
+---
+
+# Additions (2026-10-14): cast link, review in context, parse progress, stand-ins and TTS
+
+These extend the contract above. Where they differ from it, these win.
+
+## Changed types
+
+```ts
+interface Line {
+  // …all existing fields, plus:
+  sourceLine: number | null;  // 1-based line in the prepared source text (see /script/source)
+  page: number | null;        // PDF page the line came from; null for DOCX and plain text
+}
+// Line.text keeps the script's line breaks ("\n") and relative indentation as printed. Render it
+// with `white-space: pre-wrap`. Never assume it is a single line.
+
+interface ParseProgress {
+  stage?: "reading" | "labelling" | "saving";
+  pages?: number | null;      // PDF page count once the file has been read
+  chunksDone?: number; chunksTotal?: number;
+  linesDone?: number; linesTotal?: number;   // source lines labelled so far / in total
+  scenes?: number;            // act and scene headings found so far
+  speeches?: number;          // speeches found so far
+}
+// GET /api/productions/:id/script gains `progress: ParseProgress | null` (non-null while status is "parsing").
+// Poll it every ~1.5 s while parsing. All parts are labelled in parallel, so progress jumps in bursts.
+
+type AudioSource = "actor" | "standin" | "tts" | "none";
+// TimingEntry gains `source: AudioSource` (`recorded` stays: true for actor or standin).
+// ActorLine.cue gains `audioSource: AudioSource` (cue audio is a take when one exists, else TTS).
+```
+
+## Review in context (director)
+
+| Method | Path | Response |
+| --- | --- | --- |
+| GET | `/api/productions/:id/script/source?line=N&context=40` | `{ kind: "pdf" \| "docx" \| "text", pageCount: number \| null, from: number, lines: { n: number, text: string, page: number \| null }[] }`: the prepared source text around line N (page-break marker lines are omitted). |
+| GET | `/api/productions/:id/script/file` | The original uploaded file (PDF, DOCX or text) with its content type, for rendering the page next to the script (pdf.js for PDFs). Director auth header. |
+
+## One cast link (whole cast)
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| GET | `/api/productions/:id/join-link` | director | `{ joinUrl }` (`${APP_URL}/join/<token>`) |
+| POST | `/api/productions/:id/join-link/reset` | director | `{ joinUrl }`: the old link stops working |
+| GET | `/api/join/:token` | none | `{ production: { id, title, directorName }, characters: { id, name, lineCount, takenBy: string \| null }[] }`, sorted by line count. 409 `script_not_ready` while parsing; 410 when archived; 404 for a bad or reset link. |
+| POST | `/api/join/:token/claim` | none | `{ characterIds: string[], firstName }` → `{ inviteToken, inviteUrl }`. Creates a cast member who owns those characters, then the web app goes straight to `/i/<inviteToken>`. 409 `character_taken` if someone got there first. Store the invite token per join link in localStorage, so reopening the cast link on the same device goes back to that actor's recording screen. |
+
+## Stand-ins and TTS (backend agent fills these in; shapes are fixed here)
+
+- Every dialogue line always has audio in the run-through, in this order: the latest take (by the cast actor or a stand-in), otherwise a TTS voice. Each character gets a consistent synthetic voice, and different characters get different voices where possible.
+- The director (or anyone they share the director account with) can record a stand-in take for any line:
+  - `PUT /api/lines/:lineId/take` (director auth): same body, headers and response as the actor take upload.
+  - `GET /api/productions/:id/sections/:sectionId/lines` (director): `{ section, lines: { line: Line, characterName: string, take: Take \| null, audioSource: AudioSource, cue: ActorLine["cue"] }[] }` for recording a whole scene, partner by partner.
+- When an actor later records their own line it becomes the current take; older takes are kept.
+- Takes gain `recordedBy: "actor" | "standin"`.

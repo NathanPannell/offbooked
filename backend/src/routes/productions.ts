@@ -94,9 +94,14 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, idOf(req.params));
     const [sections, characters, lines] = await Promise.all([sectionsOf(ctx.sql, p.id), charactersOf(ctx.sql, p.id), linesOf(ctx.sql, p.id)]);
+    const [latest] =
+      p.scriptStatus === "parsing"
+        ? await ctx.sql<{ progress: unknown }[]>`select progress from scripts where production_id = ${p.id} order by created_at desc limit 1`
+        : [];
     return {
       status: p.scriptStatus,
       error: p.scriptError,
+      progress: latest?.progress ?? null,
       sections: sections.map(sectionView),
       characters: characters.map(characterView),
       lines: lines.map(lineView),

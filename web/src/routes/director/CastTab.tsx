@@ -12,6 +12,7 @@ import { firstWord, joinNames, plural, relativeTime } from "../../lib/format";
 import { copyText, shareOrCopy, type ShareOutcome } from "../../lib/share";
 import { useInterval, useResource } from "../../lib/useResource";
 import { ActorForm } from "./ActorForm";
+import { MergeSuggestions } from "./MergeSuggestions";
 
 const STATUS_LABEL: Record<CastMember["status"], string> = {
   not_opened: "Not opened",
@@ -47,6 +48,7 @@ export function CastTab({
   );
   const [form, setForm] = useState<{ member?: CastMember; characterIds: string[] } | null>(null);
   const [resetting, setResetting] = useState<CastMember | null>(null);
+  const [merging, setMerging] = useState(false);
 
   useInterval(() => void data.reload(), 15_000, !!data.data);
 
@@ -113,8 +115,24 @@ export function CastTab({
     toast((await copyText(text)) ? `Copied ${plural(cast.length, "link")} for the group chat` : "Couldn't copy");
   };
 
+  const merge = async (from: Character, into: Character) => {
+    setMerging(true);
+    try {
+      await scriptApi.mergeCharacter(from.id, into.id);
+      toast(`Merged ${from.name} into ${into.name}`);
+      data.reload();
+      return true;
+    } catch (err) {
+      toast(errorMessage(err));
+      return false;
+    } finally {
+      setMerging(false);
+    }
+  };
+
   return (
     <div className="stack cast">
+      <MergeSuggestions productionId={production.id} characters={script.characters} busy={merging} onMerge={merge} />
       <div className="card overview">
         <div className="stack" style={{ gap: 8 }}>
           <div className="spread">
