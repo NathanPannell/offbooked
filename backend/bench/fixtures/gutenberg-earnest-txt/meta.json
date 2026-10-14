@@ -1,0 +1,10 @@
+{
+  "title": "The Importance of Being Earnest",
+  "author": "Oscar Wilde",
+  "format": "txt",
+  "sourceUrl": "https://www.gutenberg.org/cache/epub/844/pg844.txt",
+  "license": "Public domain in the USA; Project Gutenberg License applies to the file (trademark terms)",
+  "description": "Project Gutenberg #844 plain text, UTF-8 with BOM and CRLF line endings, hard-wrapped at ~72 columns. Gutenberg header and licence; cast list and first-cast list; 'FIRST ACT' style headings with 'SCENE' and a setting paragraph; cue alone on its line in caps with a period ('ALGERNON.'); [bracketed] directions inline and as paragraphs; _underscore_ italics, including inside directions ('[Languidly_._]'); 'ACT DROP' / 'TABLEAU' endings; two joint cues 'GWENDOLEN and CECILY [Speaking together.]'.",
+  "goldenMethod": "gutenberg_earnest.py on Gutenberg's HTML of the same release (cue paragraphs 'NAME.<br>'). Bracketed text removed and counted; a direction paragraph followed by words continues the previous speech. Italic underscores are not part of the golden text. verify.py: 879/879 speeches >=95% verbatim in source.txt; spot-checked by hand.",
+  "sourceSha256": "1b8a58099bb1cdef6a845277a4bacf2f4a268702c165bde30124d4b5105d1851"
+}

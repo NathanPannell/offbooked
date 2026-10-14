@@ -1,0 +1,10 @@
+{
+  "title": "She Stoops to Conquer",
+  "author": "Oliver Goldsmith",
+  "format": "pdf",
+  "sourceUrl": "http://www2.hn.psu.edu/faculty/jmanis/goldsmith/She_Stoops_to_Conquer6x9.pdf (Wayback Machine copy of 2014-09-25; the Penn State site is offline)",
+  "license": "Public domain text; Penn State Electronic Classics Series file, 'furnished free' (cover and notice pages copyright PSU)",
+  "description": "Penn State Electronic Classics Series PDF (PageMaker, 6x9 in, 116 pages). Cover, PSU notice page, dedication to Johnson, Garrick's prologue set as prose, dramatis personae with the first cast on alternate lines. Speaker cues inline in caps ('MRS. HARDCASTLE. I vow...'), drawn in fake bold: the text layer repeats each cue up to five times ('HARDCASTLEHARDCASTLEHARDCASTLE.'); words hyphenated across lines ('particu-lar'); alternating running heads ('Oliver Goldsmith' / 'She Stoops to Conquer') and page numbers; directions in (parentheses) and [brackets] inline, entrances on their own line; Tony's song set as verse.",
+  "goldenMethod": "gutenberg_stoops.py on Project Gutenberg #383 HTML, the transcription the PSU file was typeset from (same text, same typography in the PDF text layer). Garrick's prologue is performed text and is one speech by 'PROLOGUE' (no cue is printed); dedication and dramatis personae excluded. Parenthesised and bracketed directions removed except the spoken '(ay, the hag)'. Checked: verify.py 802/843 >=95% verbatim (the rest are hyphenation splits), speaker sequence identical to the cues parsed from pdftotext output (842/842), and by hand.",
+  "sourceSha256": "222afe81c12e82129addd1fdc9119d7e82345d1c2088920d2e0b3d6e343a504f"
+}

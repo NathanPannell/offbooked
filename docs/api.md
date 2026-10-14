@@ -76,7 +76,7 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 | GET | `/api/productions/:id` | | `{ production }` |
 | PATCH | `/api/productions/:id` | `{ title?, performanceDate? }` | `{ production }` |
 | POST | `/api/productions/:id/archive` | | `204`. Hides it and revokes its invites. Nothing is deleted. |
-| POST | `/api/productions/:id/script` | `multipart/form-data` with a `file` field (PDF, ≤ 20 MB) **or** JSON `{ text }` | `202 { scriptStatus: "parsing" }`. Parsing runs in the background. Replacing a script with recordings is refused (409). |
+| POST | `/api/productions/:id/script` | `multipart/form-data` with a `file` field (PDF, Word `.docx` or plain text, ≤ 20 MB; the type is detected from the bytes) **or** JSON `{ text }` | `202 { scriptStatus: "parsing" }`. Parsing runs in the background. Replacing a script with recordings is refused (409). |
 | GET | `/api/productions/:id/script` | | `{ status, error, sections: Section[], characters: Character[], lines: Line[], flaggedCount }` |
 | PATCH | `/api/lines/:id` | `{ characterId?, kind?, text? }` | `{ line }` |
 | POST | `/api/lines/:id/split` | `{ at }` (character offset) | `{ lines: [Line, Line] }` |

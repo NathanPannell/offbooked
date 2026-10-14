@@ -1,0 +1,10 @@
+{
+  "title": "The Duchess of Malfi",
+  "author": "John Webster",
+  "format": "pdf",
+  "sourceUrl": "https://archive.org/details/duchessofmalfipl00websuoft",
+  "license": "Public domain (Temple Dramatists edition, J. M. Dent 1900); scan by University of Toronto via Internet Archive",
+  "description": "Internet Archive scan with an OCR text layer (184 small pages, 8 MB). Title, preface with footnotes, dramatis personae, glossary at the end. Running heads 'ACT I. SC. I. The Duchess of Malfi' OCR'd as 'ACT i. sc. «.'; marginal line numbers every fifth line, often misread ('no' for 110, '1 1 1', '5°'); page numbers; scan noise from the gutter ('\\\\', '^', 'iC', '•'); abbreviated cues inline ('Bos.', 'Duch.') with OCR variants ('Duck.', 'Cart.', 'Can.', 'Trd.'); brackets OCR'd as '\\\\', '{', '^'; 'SCENE' and its numeral on separate lines; two songs set as verse after a direction; widespread OCR errors (\"I '11\" for I'll, '1' for '!').",
+  "goldenMethod": "ia_malfi.py: format-specific extraction from this PDF's own text layer (word positions via PyMuPDF): drops running heads, page numbers and margin numbers by position, segments speeches at known cue prefixes, removes bracketed directions, rejoins hyphenated words, and scrubs a short list of margin debris. Text keeps the OCR errors (a parser cannot fix them). Speaker sequence cross-checked against Project Gutenberg #2232 (different edition, full names): all differences reviewed by hand and are edition differences, which follow the PDF; ambiguous OCR'd cues resolved from the alignment. Songs: CHURCHMEN (3.4 ditty), MADMAN (4.2 song). Sections follow Temple (ACT I has one scene). verify.py 1130/1132 aligned; spot-checked by hand.",
+  "sourceSha256": "07507f45ca205504e1c7b7ddae916fc826ed1d3a7c459faff5787ae2dff5b538"
+}

@@ -26,4 +26,5 @@ export interface ParseUsage {
   outputTokens: number;
   cacheReadTokens: number;
   droppedChars: number;
+  lineNumbers?: { leadingPrefix: string | null; leadingNumbers: boolean; trailingCounters: number };
 }

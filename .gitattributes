@@ -3,3 +3,6 @@
 *.jpg binary
 *.pdf binary
 *.wasm binary
+*.docx binary
+# Benchmark sources stay byte-for-byte as downloaded (CRLF, BOM).
+backend/bench/fixtures/*/source.* -text

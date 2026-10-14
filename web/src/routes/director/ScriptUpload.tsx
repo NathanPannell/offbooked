@@ -3,12 +3,13 @@ import { useRef, useState, type DragEvent } from "react";
 import { ApiError, errorMessage } from "../../api/client";
 import { script } from "../../api/director";
 
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const MAX_BYTES = 20 * 1024 * 1024;
 
 function validate(file: File): string | null {
-  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  if (!isPdf) return "That isn't a PDF. Upload a PDF, or paste the script as text instead.";
-  if (file.size > MAX_BYTES) return "That PDF is over 20 MB. Try a smaller export, or paste the text.";
+  const ok = /\.(pdf|docx|txt|text|fountain)$/i.test(file.name) || ["application/pdf", "text/plain", DOCX_TYPE].includes(file.type);
+  if (!ok) return "Upload a PDF, a Word .docx or a plain text file, or paste the script below.";
+  if (file.size > MAX_BYTES) return "That file is over 20 MB. Try a smaller export, or paste the text.";
   return null;
 }
 
@@ -67,7 +68,7 @@ export function ScriptUpload({
       {failure && (
         <div className="notice notice-error" role="alert">
           <div>
-            <strong>We couldn't read that script.</strong> {failure} Try the PDF again, or paste the text below. Pasted
+            <strong>We couldn't read that script.</strong> {failure} Try the file again, or paste the text below. Pasted
             text usually works best for scanned or unusual layouts.
           </div>
         </div>
@@ -76,7 +77,7 @@ export function ScriptUpload({
         <h2>Add your script</h2>
         <div className="segmented" role="group" aria-label="Script source">
           <button type="button" aria-pressed={mode === "pdf"} onClick={() => setMode("pdf")}>
-            PDF
+            File
           </button>
           <button type="button" aria-pressed={mode === "paste"} onClick={() => setMode("paste")}>
             Paste text
@@ -96,16 +97,16 @@ export function ScriptUpload({
         >
           <FileUp size={36} aria-hidden="true" />
           <p>
-            <strong>Drop your script PDF here</strong>
+            <strong>Drop your script here</strong>
           </p>
-          <p className="small muted">Up to 20 MB. Text-based PDFs work; scanned pages don't yet.</p>
+          <p className="small muted">PDF, Word (.docx) or plain text, up to 20 MB. Scanned pages without a text layer don't work yet.</p>
           <button type="button" className="btn btn-primary" disabled={busy} onClick={() => inputRef.current?.click()}>
-            {busy ? "Uploading…" : "Choose a PDF"}
+            {busy ? "Uploading…" : "Choose a file"}
           </button>
           <input
             ref={inputRef}
             type="file"
-            accept="application/pdf,.pdf"
+            accept={`application/pdf,.pdf,${DOCX_TYPE},.docx,text/plain,.txt`}
             hidden
             onChange={(e) => {
               upload(e.target.files?.[0]);

@@ -3,7 +3,7 @@ import type { Sql } from "./db.ts";
 import { createMailer, type Mailer } from "./email/mailer.ts";
 import { Jobs } from "./jobs.ts";
 import type { Log } from "./log.ts";
-import { createClaudeChunkParser, type ChunkParser } from "./parse/llm.ts";
+import { createClaudeLabeler, type Labeler } from "./parse/label.ts";
 import { createStorage } from "./storage/index.ts";
 import type { Storage } from "./storage/storage.ts";
 
@@ -15,7 +15,7 @@ export interface Ctx {
   mailer: Mailer;
   log: Log;
   jobs: Jobs;
-  chunkParser: ChunkParser | null;
+  labeler: Labeler | null;
   renderWorker: { kick(): void }; // wakes the in-process render worker after a forced render
 }
 
@@ -27,12 +27,7 @@ export function createCtx(config: Config, sql: Sql, log: Log, overrides: Partial
     storage: overrides.storage ?? createStorage(config),
     mailer: overrides.mailer ?? createMailer(config, log),
     jobs: overrides.jobs ?? new Jobs(log),
-    chunkParser:
-      overrides.chunkParser !== undefined
-        ? overrides.chunkParser
-        : config.anthropicApiKey
-          ? createClaudeChunkParser(config.anthropicApiKey)
-          : null,
+    labeler: overrides.labeler !== undefined ? overrides.labeler : config.anthropicApiKey ? createClaudeLabeler(config.anthropicApiKey) : null,
     renderWorker: overrides.renderWorker ?? { kick() {} },
   };
 }

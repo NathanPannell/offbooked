@@ -5,6 +5,8 @@ import { HttpError, badRequest, conflict } from "../errors.ts";
 import { body, idOf, optionalDate, requiredString } from "../input.ts";
 import { MAX_SCRIPT_CHARS } from "../parse/pipeline.ts";
 import { startScriptParse, type ScriptSource } from "../parse/job.ts";
+import { ScriptInputError } from "../parse/pdf.ts";
+import { decodeText, detectSourceKind, type SourceKind } from "../parse/source.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
 import { charactersOf, characterView, linesOf, lineView, productionRows, productionView, sectionsOf, sectionView } from "../views.ts";
 
@@ -61,13 +63,25 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
     let source: ScriptSource;
     if (req.isMultipart()) {
       const file = await req.file({ limits: { fileSize: MAX_PDF_BYTES, files: 1 } });
-      if (!file || file.fieldname !== "file") throw badRequest("Attach the PDF in a field named file.");
+      if (!file || file.fieldname !== "file") throw badRequest("Attach the script in a field named file.");
       const data = await file.toBuffer();
-      if (data.subarray(0, 5).toString("latin1") !== "%PDF-") throw new HttpError(415, "unsupported_media_type", "That file isn't a PDF. Upload a PDF or paste the text.");
-      source = { kind: "pdf", data };
+      let kind: SourceKind;
+      try {
+        kind = detectSourceKind(data, file.filename);
+      } catch (err) {
+        if (err instanceof ScriptInputError) throw new HttpError(415, "unsupported_media_type", err.message);
+        throw err;
+      }
+      if (kind === "text") {
+        const text = decodeText(data);
+        if (text.length > MAX_SCRIPT_CHARS) throw new HttpError(413, "payload_too_large", "This script is too long. Split it into parts under 600,000 characters.");
+        source = { kind: "text", text, data };
+      } else {
+        source = { kind, data };
+      }
     } else {
       const text = body(req.body).text;
-      if (typeof text !== "string" || !text.trim()) throw badRequest("Paste the script text, or upload a PDF.");
+      if (typeof text !== "string" || !text.trim()) throw badRequest("Paste the script text, or upload a file.");
       if (text.length > MAX_SCRIPT_CHARS) throw new HttpError(413, "payload_too_large", "This script is too long. Split it into parts under 600,000 characters.");
       source = { kind: "text", text };
     }

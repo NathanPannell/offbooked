@@ -4,9 +4,12 @@ import type { ParsedLine } from "./types.ts";
 // anything it is unsure about goes to the director's review list.
 
 const NUMBER_WORDS = ["ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN", "ELEVEN", "TWELVE"];
-const ORDINAL = String.raw`(?:[IVXLC]+|\d{1,2}|${NUMBER_WORDS.join("|")})`;
-const ACT_RE = new RegExp(String.raw`^ACT\s+(${ORDINAL})\b\.?(?:\s*[,.;:\-–—]?\s*SCENE\s+(${ORDINAL})\b\.?)?(.*)$`, "i");
-const SCENE_RE = new RegExp(String.raw`^SCENE\s+(${ORDINAL})\b\.?(.*)$`, "i");
+const ORDINAL_WORDS = ["FIRST", "SECOND", "THIRD", "FOURTH", "FIFTH", "SIXTH", "SEVENTH", "EIGHTH", "NINTH", "TENTH", "ELEVENTH", "TWELFTH"];
+const ORDINAL = String.raw`(?:[IVXLC]+|\d{1,2}|${NUMBER_WORDS.join("|")}|${ORDINAL_WORDS.join("|")})`;
+// "ACT II", "Act the Fourth", "ACT 3, SCENE 2"; "FIRST ACT"; "SCENE IV", "Scene the Second".
+const ACT_RE = new RegExp(String.raw`^(?:THE\s+)?ACT\s+(?:THE\s+)?(${ORDINAL})\b\.?(?:\s*[,.;:\-–—]?\s*SCENE\s+(?:THE\s+)?(${ORDINAL})\b\.?)?(.*)$`, "i");
+const WORD_ACT_RE = new RegExp(String.raw`^(?:THE\s+)?(${ORDINAL_WORDS.join("|")})\s+ACT\b\.?(.*)$`, "i");
+const SCENE_RE = new RegExp(String.raw`^SCENE\s+(?:THE\s+)?(${ORDINAL})\b\.?(.*)$`, "i");
 const SHORT_REF_RE = /^([IVX]+)\.\s?([ivx]+|\d{1,2})\.?$/;
 const SLUG_RE = /^(?:INT|EXT|INT\.?\/EXT|I\/E)[.\s].{2,}$/;
 const SPECIAL_HEADING_RE = /^(PROLOGUE|EPILOGUE)\.?$/i;
@@ -26,6 +29,8 @@ export function romanToNumber(value: string): string {
   const upper = value.toUpperCase();
   const word = NUMBER_WORDS.indexOf(upper);
   if (word >= 0) return String(word + 1);
+  const ordinal = ORDINAL_WORDS.indexOf(upper);
+  if (ordinal >= 0) return String(ordinal + 1);
   if (/^\d+$/.test(upper)) return String(Number(upper));
   if (!/^[IVXLC]+$/.test(upper)) return value;
   const values: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100 };
@@ -42,6 +47,8 @@ export function parseHeading(line: string): { act: string | null; scene: string 
   if (line.length > 80) return null;
   let m = ACT_RE.exec(line);
   if (m && isHeadingTail(m[3]!)) return { act: romanToNumber(m[1]!), scene: m[2] ? romanToNumber(m[2]) : null };
+  m = WORD_ACT_RE.exec(line);
+  if (m && isHeadingTail(m[2]!)) return { act: romanToNumber(m[1]!), scene: null };
   m = SCENE_RE.exec(line);
   if (m && isHeadingTail(m[2]!)) return { act: null, scene: romanToNumber(m[1]!) };
   m = SHORT_REF_RE.exec(line);

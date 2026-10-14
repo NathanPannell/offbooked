@@ -1,0 +1,10 @@
+{
+  "title": "Riders to the Sea",
+  "author": "J. M. Synge",
+  "format": "txt",
+  "sourceUrl": "https://www.gutenberg.org/cache/epub/994/pg994.txt",
+  "license": "Public domain in the USA; Project Gutenberg License applies to the file (trademark terms)",
+  "description": "Project Gutenberg #994 plain text (CRLF). Gutenberg header, contents, a two-page introduction by E. J. O'Brien, PERSONS list with first cast run together on wrapped lines. One act, many directions: cue alone on its line ('NORA.'), delivery directions in _underscores_ before an em dash ('_In a low voice._--Where is she?'), [_bracketed_] directions as paragraphs and inline; dialogue resumes after a direction without repeating the cue; a joint cue 'CATHLEEN AND NORA.'.",
+  "goldenMethod": "gutenberg_riders.py on Gutenberg's HTML of the same release: every italic run inside a speech is a direction (removed with its brackets or trailing em dash, counted); cue-less paragraphs after a direction continue the previous speech. verify.py 122/122 verbatim; spot-checked by hand.",
+  "sourceSha256": "69ccbe885155ff6f7e9026435008a035dbdfb5d040b9a06947a8732c784c306c"
+}

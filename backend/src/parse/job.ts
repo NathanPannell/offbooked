@@ -1,18 +1,26 @@
 import { randomUUID } from "node:crypto";
 import type { Ctx } from "../context.ts";
 import type { Tx } from "../db.ts";
-import { extractPdfText, ScriptInputError } from "./pdf.ts";
+import { ScriptInputError } from "./pdf.ts";
 import { parseScriptText } from "./pipeline.ts";
+import { extractSourceText, type SourceKind } from "./source.ts";
 import type { StructuredScript } from "./types.ts";
 
-export type ScriptSource = { kind: "pdf"; data: Buffer } | { kind: "text"; text: string };
+export type ScriptSource = { kind: Exclude<SourceKind, "text">; data: Buffer } | { kind: "text"; text: string; data?: Buffer };
+
+const EXTENSIONS: Record<SourceKind, [string, string]> = {
+  pdf: ["pdf", "application/pdf"],
+  docx: ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  text: ["txt", "text/plain; charset=utf-8"],
+};
 
 // Stores the raw upload, marks the production as parsing and runs the parse in the background.
 export async function startScriptParse(ctx: Ctx, productionId: string, source: ScriptSource): Promise<string> {
   const scriptId = randomUUID();
-  const key = `productions/${productionId}/scripts/${scriptId}.${source.kind === "pdf" ? "pdf" : "txt"}`;
-  if (source.kind === "pdf") await ctx.storage.put(key, source.data, "application/pdf");
-  else await ctx.storage.put(key, Buffer.from(source.text, "utf8"), "text/plain; charset=utf-8");
+  const [ext, contentType] = EXTENSIONS[source.kind];
+  const key = `productions/${productionId}/scripts/${scriptId}.${ext}`;
+  const bytes = source.kind === "text" ? (source.data ?? Buffer.from(source.text, "utf8")) : source.data;
+  await ctx.storage.put(key, bytes, contentType);
   await ctx.sql.begin(async (tx) => {
     await tx`insert into scripts (id, production_id, source_kind, storage_key, raw_text)
              values (${scriptId}, ${productionId}, ${source.kind}, ${key}, ${source.kind === "text" ? source.text : null})`;
@@ -31,11 +39,10 @@ export async function runScriptParse(ctx: Ctx, scriptId: string): Promise<void> 
   try {
     let text = script.rawText;
     if (text === null) {
-      const pdf = await extractPdfText(new Uint8Array(await ctx.storage.get(script.storageKey)));
-      text = pdf.text;
+      text = await extractSourceText(await ctx.storage.get(script.storageKey), script.sourceKind as SourceKind);
       await ctx.sql`update scripts set raw_text = ${text} where id = ${scriptId}`;
     }
-    const { structure, usage } = await parseScriptText(text, { chunkParser: ctx.chunkParser, log: ctx.log });
+    const { structure, usage } = await parseScriptText(text, { labeler: ctx.labeler, log: ctx.log });
     ctx.log.info({ scriptId, productionId: script.productionId, ms: Date.now() - started, lines: structure.lines.length, ...usage }, "script parsed");
     const current = await ctx.sql.begin(async (tx) => {
       const [latest] = await tx`select id from scripts where production_id = ${script.productionId} order by created_at desc limit 1 for update`;

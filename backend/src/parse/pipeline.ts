@@ -1,102 +1,288 @@
 import type { Log } from "../log.ts";
-import { alignToSource, NOT_FOUND, type AlignResult } from "./align.ts";
-import { chunkScript } from "./chunk.ts";
-import { heuristicParse } from "./heuristic.ts";
-import { PARSE_MODEL, type ChunkParser } from "./llm.ts";
+import { abbreviates, assembleSegments, PARENTHESES, type AssembledLine } from "./assemble.ts";
+import { learnCues, reclaimSkips, repairCues } from "./cues.ts";
+import { canonicalName, heuristicParse, parseHeading } from "./heuristic.ts";
+import { PARSE_MODEL, type Labeler, type Segment } from "./label.ts";
+import { stripLineNumbers } from "./noise.ts";
 import { ScriptInputError } from "./pdf.ts";
 import { buildStructure, validateStructure } from "./structure.ts";
 import type { ParsedLine, ParseUsage, StructuredScript } from "./types.ts";
 
 export const MAX_SCRIPT_CHARS = 600_000;
-const CONCURRENCY = 4;
+const CONCURRENCY = 6;
+const MAX_ATTEMPTS = 4;
+const CHUNK_LINES = 180;
+const MAX_CHUNK_CHARS = 14_000;
 const FALLBACK_NOTE = "This part was read by the backup parser; check speakers and stage directions here";
+const GAP_NOTE = "This line wasn't labelled by the parser; check it belongs here";
 
 export function cleanScriptText(text: string): string {
   return text
     .replace(/\r\n?/g, "\n")
-    .replace(/[\t\xa0]/g, " ")
+    .replace(/[\t\xa0 -  ]/g, " ")
+    .replace(/[​﻿]/g, "")
     .replace(/[ ]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-// Claude (Haiku) when available, chunk by chunk. A chunk whose output fails validation is retried
-// once, then parsed by the heuristic parser with every line flagged, so a parse always produces
-// something the director can correct.
+// Claude (Haiku) labels numbered line ranges; the text itself always comes from the source.
+// A chunk whose labels fail validation is retried once, then read by the heuristic parser with
+// its lines flagged, so a parse always produces something the director can correct.
 export async function parseScriptText(
   rawText: string,
-  opts: { chunkParser: ChunkParser | null; log: Log },
+  opts: { labeler: Labeler | null; log: Log },
 ): Promise<{ structure: StructuredScript; usage: ParseUsage }> {
-  const text = cleanScriptText(rawText);
-  if (!text) throw new ScriptInputError("The script is empty. Paste the text or upload a PDF.");
-  if (text.length > MAX_SCRIPT_CHARS) throw new ScriptInputError("This script is too long to process. Split it into parts under 600,000 characters.");
+  const cleaned = cleanScriptText(rawText);
+  if (!cleaned) throw new ScriptInputError("The script is empty. Paste the text or upload a file.");
+  if (cleaned.length > MAX_SCRIPT_CHARS) throw new ScriptInputError("This script is too long to process. Split it into parts under 600,000 characters.");
+  const { text, report } = stripLineNumbers(cleaned);
 
   const heuristic = heuristicParse(text);
-  const usage: ParseUsage = { parser: "heuristic", model: null, chunks: 1, fallbackChunks: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, droppedChars: 0 };
+  const usage: ParseUsage = {
+    parser: "heuristic",
+    model: null,
+    chunks: 1,
+    fallbackChunks: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    droppedChars: 0,
+    lineNumbers: report,
+  };
   let lines: ParsedLine[] = heuristic;
 
-  if (opts.chunkParser) {
-    const parser = opts.chunkParser;
-    const hints = speakerHints(heuristic);
-    const chunks = chunkScript(text);
-    usage.chunks = chunks.length;
+  if (opts.labeler) {
+    const labeler = opts.labeler;
+    const docLines = text.split("\n");
+    const ranges = chunkRanges(docLines);
+    usage.chunks = ranges.length;
     usage.model = PARSE_MODEL;
-    const results = await mapLimit(chunks, CONCURRENCY, async (chunk) => {
-      for (let attempt = 1; attempt <= 2; attempt++) {
+    const results = await mapLimit(ranges, CONCURRENCY, async ([from, to], index) => {
+      // Keep every valid row and re-ask from the first unlabelled line: the model sometimes stops
+      // early or skips a stretch, and relabelling only the rest is cheaper and more reliable.
+      const kept: Segment[] = [];
+      let cursor = from;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS && cursor <= to; attempt++) {
         try {
-          const res = await parser({ chunk, total: chunks.length, speakerHints: hints });
+          const res = await labeler({ lines: docLines, from: cursor, to, knownSpeakers: [] });
           usage.inputTokens += res.usage.inputTokens;
           usage.outputTokens += res.usage.outputTokens;
           usage.cacheReadTokens += res.usage.cacheReadTokens;
-          const cueNames = [...hints, ...res.lines.flatMap((l) => [l.speaker ?? "", l.speakerAsWritten ?? ""])];
-          const aligned = alignToSource(chunk.text, res.lines, cueNames);
-          const problem = chunkProblem(aligned, res.lines.length);
-          if (problem) throw new Error(problem);
-          usage.droppedChars += aligned.droppedChars;
-          return aligned.lines;
+          const prefix = validPrefix(res.segments, docLines, cursor, to);
+          kept.push(...prefix.segments);
+          if (prefix.next <= to) opts.log.warn({ chunk: index, attempt, from: cursor, stoppedAt: prefix.next, to }, "chunk labels stopped early; relabelling the rest");
+          cursor = prefix.next;
         } catch (err) {
-          opts.log.warn({ err, chunk: chunk.index, attempt }, "LLM chunk parse failed validation");
+          opts.log.warn({ err: String(err), chunk: index, attempt }, "chunk labelling failed");
         }
       }
-      usage.fallbackChunks += 1;
-      return heuristicParse(chunk.text).map((l) => ({ ...l, flagReason: l.flagReason ?? FALLBACK_NOTE }));
+      let fallback: ParsedLine[] = [];
+      if (cursor <= to) {
+        usage.fallbackChunks += 1;
+        fallback = heuristicParse(docLines.slice(cursor - 1, to).join("\n")).map((l) => ({ ...l, flagReason: l.flagReason ?? FALLBACK_NOTE }));
+      }
+      return { segments: kept, fallback };
     });
-    lines = results.flat();
-    usage.parser = usage.fallbackChunks === 0 ? "llm" : usage.fallbackChunks === chunks.length ? "heuristic" : "mixed";
+    // Cues are learnt across the whole script, then used to repair each chunk's blocks.
+    const book = learnCues(results.flatMap((r) => r.segments), docLines);
+    const parenDirections = usesParenDirections(results.flatMap((r) => r.segments), docLines);
+    const firstSpeechChunk = results.findIndex((r) => r.segments.some((sg) => sg.type === "speech"));
+    const assembled = results.map((r, i) => {
+      const reclaimed = reclaimSkips(r.segments, docLines, book, firstSpeechChunk >= 0 && i > firstSpeechChunk);
+      return [...assembleSegments(repairCues(reclaimed, docLines, book), docLines, { parenDirections }), ...r.fallback];
+    });
+    lines = unifySpeakers(joinContinuations(assembled));
+    usage.parser = usage.fallbackChunks === 0 ? "llm" : usage.fallbackChunks === ranges.length ? "heuristic" : "mixed";
   }
 
   const structure = buildStructure(lines);
-  if (!structure.lines.length) throw new ScriptInputError("We couldn't find any script text. Paste the text instead.");
+  if (!structure.lines.some((l) => l.kind === "dialogue")) throw new ScriptInputError("We couldn't find any dialogue in this file. Check it's a script, or paste the text instead.");
   const problems = validateStructure(structure);
   if (problems.length) throw new Error(`Parsed script failed validation: ${problems.slice(0, 5).join("; ")}`);
   return { structure, usage };
 }
 
-// Output that misses or invents a large share of the source is rejected rather than patched.
-export function chunkProblem(aligned: AlignResult, outputLines: number): string | null {
-  if (!outputLines) return "no lines returned";
-  if (aligned.sourceChars && aligned.droppedChars / aligned.sourceChars > 0.15) return "too much source text missing";
-  const unmatched = aligned.lines.filter((l) => l.flagReason === NOT_FOUND).length;
-  if (unmatched / outputLines > 0.15) return "too much text not found in the source";
-  return null;
-}
-
-function speakerHints(lines: ParsedLine[]): string[] {
-  const counts = new Map<string, number>();
-  for (const l of lines) {
-    if (l.kind !== "dialogue") continue;
-    for (const name of [l.speaker, l.speakerAsWritten]) if (name) counts.set(name, (counts.get(name) ?? 0) + 1);
+// Line ranges of about CHUNK_LINES non-blank lines, cut at a heading or blank line near the end.
+export function chunkRanges(lines: string[]): [number, number][] {
+  const ranges: [number, number][] = [];
+  let start = 1;
+  let count = 0;
+  let chars = 0;
+  let bestCut = -1;
+  for (let n = 1; n <= lines.length; n++) {
+    const l = lines[n - 1]!;
+    if (l.trim()) {
+      count++;
+      chars += l.length + 1;
+    }
+    const nearEnd = count >= CHUNK_LINES * 0.75 || chars >= MAX_CHUNK_CHARS * 0.75;
+    if (nearEnd && n < lines.length) {
+      const next = lines[n]!;
+      if (parseHeading(next.trim())) bestCut = n;
+      else if (!l.trim() && bestCut < 0) bestCut = n;
+    }
+    if (count >= CHUNK_LINES || chars >= MAX_CHUNK_CHARS) {
+      const end = bestCut > start ? bestCut : n;
+      ranges.push([start, end]);
+      start = end + 1;
+      count = 0;
+      chars = 0;
+      for (let k = start; k <= n; k++) {
+        if (lines[k - 1]!.trim()) {
+          count++;
+          chars += lines[k - 1]!.length + 1;
+        }
+      }
+      bestCut = -1;
+    }
   }
-  return [...counts].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 80).map(([name]) => name);
+  if (start <= lines.length && lines.slice(start - 1).some((l) => l.trim())) ranges.push([start, lines.length]);
+  return ranges;
 }
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+// The longest run of rows that labels the range in order from its start. One or two unlabelled
+// lines are attached to the block before them (flagged); a bigger gap ends the run there.
+export function validPrefix(segments: Segment[], lines: string[], from: number, to: number): { segments: Segment[]; next: number } {
+  const sorted = [...segments].filter((s) => s.to >= s.from && s.from >= from && s.from <= to).sort((a, b) => a.from - b.from || (a.type === "skip" ? 1 : 0) - (b.type === "skip" ? 1 : 0));
+  const out: Segment[] = [];
+  let next = from;
+  const contentBetween = (a: number, b: number) => lines.slice(a - 1, b).filter((l) => l.trim()).length;
+  for (const s of sorted) {
+    if (s.type === "speech" && !s.speaker) break;
+    // On overlap, play content beats "not part of the play": cut the skip row back instead.
+    const prev = out[out.length - 1];
+    if (s.from < next && s.type !== "skip" && prev?.type === "skip" && s.from >= prev.from) {
+      prev.to = s.from - 1;
+      if (prev.to < prev.from) out.pop();
+      next = s.from;
+    }
+    if (s.to < next) continue;
+    const seg = { ...s, from: Math.max(s.from, next), to: Math.min(s.to, to) };
+    const gap = contentBetween(next, seg.from - 1);
+    if (gap > 2) break;
+    if (gap > 0) {
+      const prev = out[out.length - 1];
+      if (prev && prev.type !== "skip") {
+        prev.to = seg.from - 1;
+        prev.note ??= GAP_NOTE;
+      } else {
+        out.push({ from: next, to: seg.from - 1, type: "direction", speaker: null, cue: null, act: null, scene: null, inlineDirections: [], note: GAP_NOTE });
+      }
+    }
+    out.push(seg);
+    next = seg.to + 1;
+  }
+  // A wrapped speech line labelled "not part of the play" ("instantly; or else seek…") belongs to
+  // the speech above it. Page furniture never starts in lower case, so that stays skipped.
+  for (let i = 1; i < out.length; i++) {
+    const seg = out[i]!;
+    const prev = out[i - 1]!;
+    if (seg.type !== "skip" || (prev.type !== "speech" && prev.type !== "continue") || seg.from !== prev.to + 1) continue;
+    const content = lines.slice(seg.from - 1, seg.to).filter((l) => l.trim());
+    if (content.length && content.length <= 3 && content.every((l) => /^\s*[\p{Ll}]/u.test(l))) {
+      prev.to = seg.to;
+      out.splice(i--, 1);
+    }
+  }
+    // Trailing blank lines need no label.
+  while (next <= to && !lines[next - 1]!.trim()) next++;
+  if (next <= to && contentBetween(next, to) <= 2 && out.length) {
+    const prev = out[out.length - 1]!;
+    if (prev.type !== "skip") {
+      prev.to = to;
+      prev.note ??= GAP_NOTE;
+      next = to + 1;
+    }
+  }
+  return { segments: out, next };
+}
+
+// A chunk that starts mid-speech labels its first lines as a continuation; join them to the
+// speech they continue, or give them that speech's speaker after an interrupting direction.
+export function joinContinuations(chunks: AssembledLine[][]): ParsedLine[] {
+  const out: ParsedLine[] = [];
+  let lastSpeaker: { speaker: string | null; speakerAsWritten: string | null } | null = null;
+  let cuePending = false;
+  for (const chunk of chunks) {
+    for (const l of chunk) {
+      const { continuation, cueOnly, ...line } = l;
+      if (cueOnly) {
+        lastSpeaker = { speaker: line.speaker, speakerAsWritten: line.speakerAsWritten };
+        cuePending = true;
+        continue;
+      }
+      if (continuation && cuePending && lastSpeaker) {
+        Object.assign(line, lastSpeaker);
+      } else if (continuation) {
+        const prev = out[out.length - 1];
+        if (prev?.kind === "dialogue") {
+          prev.text = `${prev.text} ${line.text}`;
+          continue;
+        }
+        if (lastSpeaker) Object.assign(line, lastSpeaker);
+        else line.flagReason ??= "No speaker found for this line";
+      }
+      if (line.kind === "dialogue" && line.speaker) lastSpeaker = { speaker: line.speaker, speakerAsWritten: line.speakerAsWritten };
+      if (line.kind === "dialogue") cuePending = false;
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+// Some scripts put stage directions in parentheses inside speeches ("(Exit Hale door rear.)"),
+// others use parentheses for spoken asides in verse. The model marks the direction ones; when it
+// marked most of a script's parentheticals, the script uses that convention and all are cut.
+export function usesParenDirections(segments: Segment[], lines: string[]): boolean {
+  let total = 0;
+  let marked = 0;
+  let standalone = 0;
+  for (const s of segments) {
+    if (s.type === "direction" && /^\(.*\)\.?$/.test(lines.slice(s.from - 1, s.to).join(" ").trim())) standalone++;
+    if (s.type !== "speech" && s.type !== "continue") continue;
+    const text = lines.slice(s.from - 1, s.to).join(" ");
+    for (const m of text.matchAll(PARENTHESES)) {
+      total++;
+      if (s.inlineDirections.some((d) => d.includes(m[0].slice(1, -1).trim().slice(0, 20)))) marked++;
+    }
+  }
+  // Directions printed as "(Aside)" on their own lines mean the script's parentheses are directions.
+  return standalone >= 3 || (total >= 3 && marked / total >= 0.4);
+}
+
+// Chunks are labelled independently, so the same printed cue can come back under two names
+// ("KING" in one chunk, "CLAUDIUS" in another). Each cue goes to its most common name.
+export function unifySpeakers(lines: ParsedLine[]): ParsedLine[] {
+  const byCue = new Map<string, Map<string, number>>();
+  for (const l of lines) {
+    if (l.kind !== "dialogue" || !l.speaker || !l.speakerAsWritten) continue;
+    const cue = canonicalName(l.speakerAsWritten);
+    const names = byCue.get(cue) ?? new Map<string, number>();
+    names.set(l.speaker, (names.get(l.speaker) ?? 0) + 1);
+    byCue.set(cue, names);
+  }
+  const preferred = new Map<string, string>();
+  for (const [cue, names] of byCue) {
+    // A short cue that fits two names ("Sec." for SECOND PILGRIM and SECOND OFFICER) is shared,
+    // not inconsistent; only a cue that fits one of its names is unified ("KING" over "CLAUDIUS").
+    if ([...names.keys()].filter((name) => abbreviates(cue, name)).length > 1) continue;
+    preferred.set(cue, [...names].sort((a, b) => b[1] - a[1])[0]![0]);
+  }
+  return lines.map((l) => {
+    if (l.kind !== "dialogue" || !l.speaker || !l.speakerAsWritten) return l;
+    const name = preferred.get(canonicalName(l.speakerAsWritten));
+    return name && name !== l.speaker ? { ...l, speaker: name } : l;
+  });
+}
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
       const i = next++;
-      results[i] = await fn(items[i]!);
+      results[i] = await fn(items[i]!, i);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));

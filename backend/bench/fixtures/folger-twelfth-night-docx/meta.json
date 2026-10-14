@@ -1,0 +1,11 @@
+{
+  "title": "Twelfth Night",
+  "author": "William Shakespeare",
+  "format": "docx",
+  "sourceUrl": "https://folger-main-site-assets.s3.amazonaws.com/uploads/2022/11/twelfth-night_DOC-LN_FolgerShakespeare.doc",
+  "license": "CC BY-NC 3.0 Unported (Folger Shakespeare, Folger Shakespeare Library); internal testing only",
+  "description": "Folger 'Word (with line numbers)' download. Folger only publishes legacy .doc, so it was opened in Microsoft Word and saved as .docx (word_convert.ps1); content unchanged. Front matter (director's note, textual introduction, synopsis, characters) before ACT 1; cue on its own paragraph in caps before verse, inline with two spaces before short prose ('ORSINO  What, Curio?'); every fifth line ends with a tab and its line number ('...sweet sound\\t5'); songs (Feste) and letters read aloud.",
+  "goldenMethod": "folger_tei.py on the same edition's TEI (TN.xml from twelfth-night_XML_FolgerShakespeare.zip), same rules as folger-hamlet-pdf. verify.py: 925/926 speeches >=95% verbatim in the DOCX text, cue found before every aligned speech; spot-checked by hand.",
+  "sourceSha256": "f9b00cd1b6544ff192351d8a0a1c41bf987ad14054f95951a6be0316acb5ac67",
+  "sourceNote": "sha256 is of the downloaded .doc; source.docx is Word's conversion"
+}
