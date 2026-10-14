@@ -39,7 +39,7 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     sql<{ id: string; name: string; lineCount: number; takenBy: string | null }[]>`
       select c.id, c.name,
         (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue') as line_count,
-        (select coalesce(a.first_name, a.name) from actor_characters ac join actors a on a.id = ac.actor_id where ac.character_id = c.id limit 1) as taken_by
+        (select coalesce(a.first_name, split_part(a.name, ' ', 1)) from actor_characters ac join actors a on a.id = ac.actor_id where ac.character_id = c.id limit 1) as taken_by
       from characters c where c.production_id = ${productionId}
       order by line_count desc, lower(c.name)`;
 

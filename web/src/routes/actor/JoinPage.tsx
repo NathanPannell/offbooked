@@ -151,7 +151,14 @@ function Join({ token }: { token: string }) {
             const on = picked.has(c.id);
             return (
               <label key={c.id} className={`role-card ${on ? "is-picked" : ""} ${taken ? "is-taken" : ""}`}>
-                <input type="checkbox" checked={on} disabled={taken} onChange={() => toggle(c.id)} className="sr-only" />
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={taken}
+                  onChange={() => toggle(c.id)}
+                  className="sr-only"
+                  aria-label={`${c.name}, ${taken ? `taken by ${c.takenBy}` : plural(c.lineCount, "line")}`}
+                />
                 <span className="role-check" aria-hidden="true">
                   {on && <Check size={14} strokeWidth={3.5} />}
                 </span>
