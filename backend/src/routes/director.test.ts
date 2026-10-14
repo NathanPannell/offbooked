@@ -77,8 +77,15 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(reassigned.characterId, char("QUEEN").id);
     const direction = (await send("PATCH", `/api/lines/${line.id}`, { kind: "stage_direction" })).json().line;
     assert.equal(direction.characterId, null);
-    const noSpeaker = await send("PATCH", `/api/lines/${line.id}`, { kind: "dialogue" });
-    assert.equal(noSpeaker.statusCode, 400);
+    // One tap from direction to dialogue: the speaker of the dialogue line before it.
+    const previousSpeaker = script.lines.filter((l) => l.seq < line.seq && l.kind === "dialogue").at(-1)!.characterId;
+    const backToDialogue = (await send("PATCH", `/api/lines/${line.id}`, { kind: "dialogue" })).json().line;
+    assert.equal(backToDialogue.characterId, previousSpeaker);
+    // …or the character whose cue opens the text, with the cue removed.
+    await send("PATCH", `/api/lines/${line.id}`, { kind: "stage_direction" });
+    const cued = (await send("PATCH", `/api/lines/${line.id}`, { kind: "dialogue", text: "HAMLET. A little more than kin" })).json().line;
+    assert.equal(cued.characterId, char("HAMLET").id);
+    assert.equal(cued.text, "A little more than kin");
     await send("PATCH", `/api/lines/${line.id}`, { kind: "dialogue", characterId: char("KING").id, text: "Have you your father's leave, Laertes? What says Polonius?" });
 
     const split = (await send("POST", `/api/lines/${line.id}/split`, { at: 38 })).json().lines;

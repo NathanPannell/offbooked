@@ -51,6 +51,12 @@ function authHeader(auth: Auth): string | null {
   return null;
 }
 
+/** Headers for a director request made outside `request`, such as pdf.js loading the original script. */
+export function directorHeaders(): Record<string, string> {
+  const authorization = authHeader({ kind: "director" });
+  return authorization ? { Authorization: authorization } : {};
+}
+
 export async function request<T>(path: string, options: RequestOptions): Promise<T> {
   const headers: Record<string, string> = { ...options.headers };
   const authorization = authHeader(options.auth);

@@ -4,12 +4,13 @@ import { learnCues, reclaimSkips, repairCues } from "./cues.ts";
 import { canonicalName, heuristicParse, parseHeading } from "./heuristic.ts";
 import { PARSE_MODEL, type Labeler, type Segment } from "./label.ts";
 import { stripLineNumbers } from "./noise.ts";
-import { ScriptInputError } from "./pdf.ts";
+import { PAGE_BREAK, ScriptInputError } from "./pdf.ts";
 import { buildStructure, validateStructure } from "./structure.ts";
 import type { ParsedLine, ParseUsage, StructuredScript } from "./types.ts";
 
 export const MAX_SCRIPT_CHARS = 600_000;
-const CONCURRENCY = 6;
+// Every chunk is labelled at once; the cap only matters for very long scripts.
+const MAX_PARALLEL_CHUNKS = 64;
 const MAX_ATTEMPTS = 4;
 const CHUNK_LINES = 180;
 const MAX_CHUNK_CHARS = 14_000;
@@ -31,12 +32,11 @@ export function cleanScriptText(text: string): string {
 // its lines flagged, so a parse always produces something the director can correct.
 export async function parseScriptText(
   rawText: string,
-  opts: { labeler: Labeler | null; log: Log },
+  opts: { labeler: Labeler | null; log: Log; onProgress?: (p: LabelProgress) => void },
 ): Promise<{ structure: StructuredScript; usage: ParseUsage }> {
-  const cleaned = cleanScriptText(rawText);
-  if (!cleaned) throw new ScriptInputError("The script is empty. Paste the text or upload a file.");
-  if (cleaned.length > MAX_SCRIPT_CHARS) throw new ScriptInputError("This script is too long to process. Split it into parts under 600,000 characters.");
-  const { text, report } = stripLineNumbers(cleaned);
+  const { text, report } = prepareText(rawText);
+  if (!text) throw new ScriptInputError("The script is empty. Paste the text or upload a file.");
+  if (text.length > MAX_SCRIPT_CHARS) throw new ScriptInputError("This script is too long to process. Split it into parts under 600,000 characters.");
 
   const heuristic = heuristicParse(text);
   const usage: ParseUsage = {
@@ -58,7 +58,10 @@ export async function parseScriptText(
     const ranges = chunkRanges(docLines);
     usage.chunks = ranges.length;
     usage.model = PARSE_MODEL;
-    const results = await mapLimit(ranges, CONCURRENCY, async ([from, to], index) => {
+    const contentIn = (from: number, to: number) => docLines.slice(from - 1, to).filter((l) => l.trim()).length;
+    const progress: LabelProgress = { chunksDone: 0, chunksTotal: ranges.length, linesDone: 0, linesTotal: contentIn(1, docLines.length), scenes: 0, speeches: 0 };
+    opts.onProgress?.({ ...progress });
+    const results = await mapLimit(ranges, MAX_PARALLEL_CHUNKS, async ([from, to], index) => {
       // Keep every valid row and re-ask from the first unlabelled line: the model sometimes stops
       // early or skips a stretch, and relabelling only the rest is cheaper and more reliable.
       const kept: Segment[] = [];
@@ -82,6 +85,11 @@ export async function parseScriptText(
         usage.fallbackChunks += 1;
         fallback = heuristicParse(docLines.slice(cursor - 1, to).join("\n")).map((l) => ({ ...l, flagReason: l.flagReason ?? FALLBACK_NOTE }));
       }
+      progress.chunksDone++;
+      progress.linesDone += contentIn(from, to);
+      progress.scenes += kept.filter((sg) => sg.type === "heading" && (sg.act || sg.scene)).length;
+      progress.speeches += kept.filter((sg) => sg.type === "speech").length + fallback.filter((l) => l.kind === "dialogue").length;
+      opts.onProgress?.({ ...progress });
       return { segments: kept, fallback };
     });
     // Cues are learnt across the whole script, then used to repair each chunk's blocks.
@@ -96,11 +104,23 @@ export async function parseScriptText(
     usage.parser = usage.fallbackChunks === 0 ? "llm" : usage.fallbackChunks === ranges.length ? "heuristic" : "mixed";
   }
 
-  const structure = buildStructure(lines);
+  const structure = buildStructure(locateLines(lines, text.split("\n")));
+  const pageOf = pageIndex(text.split("\n"));
+  for (const l of structure.lines) l.page = l.sourceLine ? pageOf(l.sourceLine) : null;
   if (!structure.lines.some((l) => l.kind === "dialogue")) throw new ScriptInputError("We couldn't find any dialogue in this file. Check it's a script, or paste the text instead.");
   const problems = validateStructure(structure);
   if (problems.length) throw new Error(`Parsed script failed validation: ${problems.slice(0, 5).join("; ")}`);
   return { structure, usage };
+}
+
+// How far labelling has got, for the director's progress bar.
+export interface LabelProgress {
+  chunksDone: number;
+  chunksTotal: number;
+  linesDone: number;
+  linesTotal: number;
+  scenes: number; // act and scene headings found so far
+  speeches: number;
 }
 
 // Line ranges of about CHUNK_LINES non-blank lines, cut at a heading or blank line near the end.
@@ -217,7 +237,7 @@ export function joinContinuations(chunks: AssembledLine[][]): ParsedLine[] {
       } else if (continuation) {
         const prev = out[out.length - 1];
         if (prev?.kind === "dialogue") {
-          prev.text = `${prev.text} ${line.text}`;
+          prev.text = `${prev.text}\n${line.text}`;
           continue;
         }
         if (lastSpeaker) Object.assign(line, lastSpeaker);
@@ -287,4 +307,52 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
+}
+
+// The text every later step sees, and the source view shows: cleaned, with line numbers removed.
+// Parsed lines point at its line numbers, so it must be reproducible from the stored raw text.
+export function prepareText(rawText: string): { text: string; report: ReturnType<typeof stripLineNumbers>["report"] } {
+  return stripLineNumbers(cleanScriptText(rawText));
+}
+
+// Page of each prepared line, counted from the page-break lines a PDF extraction leaves; null
+// for sources without pages.
+export function pageIndex(docLines: string[]): (line: number) => number | null {
+  const breaks: number[] = [];
+  docLines.forEach((l, i) => {
+    if (l === PAGE_BREAK) breaks.push(i + 1);
+  });
+  if (!breaks.length) return () => null;
+  return (line) => {
+    let page = 1;
+    for (const b of breaks) if (b < line) page++;
+    return page;
+  };
+}
+
+const locateKey = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+
+// Lines from the heuristic fallback carry no position; find each one in the source, searching on
+// from the line before it.
+export function locateLines(lines: ParsedLine[], docLines: string[]): ParsedLine[] {
+  const keys = docLines.map(locateKey);
+  let from = 0;
+  return lines.map((l) => {
+    if (l.sourceLine) {
+      from = l.sourceLine - 1;
+      return l;
+    }
+    // The first dozen letters of the line, found inside a source line (or a short source line
+    // found at the start of the line text).
+    const head = locateKey(l.text).slice(0, 12);
+    if (head.length < 4) return l;
+    for (let i = from; i < keys.length; i++) {
+      const key = keys[i]!;
+      if (key.length >= 4 && (key.includes(head) || head.startsWith(key))) {
+        from = i;
+        return { ...l, sourceLine: i + 1 };
+      }
+    }
+    return l;
+  });
 }

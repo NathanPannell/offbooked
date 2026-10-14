@@ -8,7 +8,7 @@ const MAX_BYTES = 20 * 1024 * 1024;
 
 function validate(file: File): string | null {
   const ok = /\.(pdf|docx|txt|text|fountain)$/i.test(file.name) || ["application/pdf", "text/plain", DOCX_TYPE].includes(file.type);
-  if (!ok) return "Upload a PDF, a Word .docx or a plain text file, or paste the script below.";
+  if (!ok) return "That file type won't work. Use a PDF, a Word .docx or a plain text file, or paste the script.";
   if (file.size > MAX_BYTES) return "That file is over 20 MB. Try a smaller export, or paste the text.";
   return null;
 }
@@ -24,29 +24,29 @@ export function ScriptUpload({
   failure: string | null;
   canCancel: boolean;
   onCancel: () => void;
-  onStarted: () => void;
+  onStarted: (fileName: string | null) => void;
 }) {
-  const [mode, setMode] = useState<"pdf" | "paste">(failure ? "paste" : "pdf");
+  const [mode, setMode] = useState<"file" | "paste">(failure ? "paste" : "file");
   const [dragging, setDragging] = useState(false);
   const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const send = async (work: () => Promise<unknown>) => {
-    setBusy(true);
+  const send = async (label: string, fileName: string | null, work: () => Promise<unknown>) => {
+    setBusy(label);
     setError(null);
     try {
       await work();
-      onStarted();
+      onStarted(fileName);
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 409
-          ? "This script already has recordings, so it can't be replaced. Fix lines in the review instead."
+          ? "This script already has recordings, so it can't be replaced. Fix lines in the script instead."
           : errorMessage(err),
       );
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -54,7 +54,7 @@ export function ScriptUpload({
     if (!file) return;
     const problem = validate(file);
     if (problem) return setError(problem);
-    void send(() => script.uploadFile(productionId, file));
+    void send(`Uploading ${file.name}…`, file.name, () => script.uploadFile(productionId, file));
   };
 
   const onDrop = (e: DragEvent) => {
@@ -64,28 +64,17 @@ export function ScriptUpload({
   };
 
   return (
-    <div className="stack">
+    <div className="upload stack">
       {failure && (
         <div className="notice notice-error" role="alert">
           <div>
-            <strong>We couldn't read that script.</strong> {failure} Try the file again, or paste the text below. Pasted
-            text usually works best for scanned or unusual layouts.
+            <strong>We couldn't read that script.</strong> {failure} Try the file again, or paste the text. Pasting usually works
+            best for scanned or unusual layouts.
           </div>
         </div>
       )}
-      <div className="spread">
-        <h2>Add your script</h2>
-        <div className="segmented" role="group" aria-label="Script source">
-          <button type="button" aria-pressed={mode === "pdf"} onClick={() => setMode("pdf")}>
-            File
-          </button>
-          <button type="button" aria-pressed={mode === "paste"} onClick={() => setMode("paste")}>
-            Paste text
-          </button>
-        </div>
-      </div>
 
-      {mode === "pdf" ? (
+      {mode === "file" ? (
         <div
           className={`upload-drop ${dragging ? "is-drag" : ""}`}
           onDragOver={(e) => {
@@ -95,13 +84,11 @@ export function ScriptUpload({
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
         >
-          <FileUp size={36} aria-hidden="true" />
-          <p>
-            <strong>Drop your script here</strong>
-          </p>
-          <p className="small muted">PDF, Word (.docx) or plain text, up to 20 MB. Scanned pages without a text layer don't work yet.</p>
-          <button type="button" className="btn btn-primary" disabled={busy} onClick={() => inputRef.current?.click()}>
-            {busy ? "Uploading…" : "Choose a file"}
+          <ScriptIllustration />
+          <h2 className="display">Drop your script here</h2>
+          <p className="muted">PDF, Word or plain text, up to 20 MB. We'll find the scenes, characters and lines for you.</p>
+          <button type="button" className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => inputRef.current?.click()}>
+            <FileUp size={19} aria-hidden="true" /> {busy ?? "Choose a file"}
           </button>
           <input
             ref={inputRef}
@@ -113,17 +100,20 @@ export function ScriptUpload({
               e.target.value = "";
             }}
           />
+          <button type="button" className="quiet-link" onClick={() => setMode("paste")}>
+            Or paste the text instead
+          </button>
         </div>
       ) : (
         <form
-          className="stack"
+          className="stack panel"
           onSubmit={(e) => {
             e.preventDefault();
-            void send(() => script.uploadText(productionId, text));
+            void send("Sending…", null, () => script.uploadText(productionId, text));
           }}
         >
           <label className="field">
-            <span>Script text</span>
+            <span>Paste your script</span>
             <textarea
               className="input script-paste"
               value={text}
@@ -131,11 +121,16 @@ export function ScriptUpload({
               placeholder={"HAMLET\nWho's there?\n\nHORATIO\nFriends to this ground."}
               spellCheck={false}
             />
-            <span className="field-hint">Keep the character names and line breaks as they are in the script.</span>
+            <span className="field-hint">Keep the character names, line breaks and indentation as they are.</span>
           </label>
-          <button className="btn btn-primary" disabled={busy || !text.trim()}>
-            <ClipboardPaste size={18} aria-hidden="true" /> {busy ? "Sending…" : "Use this text"}
-          </button>
+          <div className="row">
+            <button className="btn btn-primary" disabled={!!busy || !text.trim()}>
+              <ClipboardPaste size={18} aria-hidden="true" /> {busy ?? "Use this text"}
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setMode("file")}>
+              Upload a file instead
+            </button>
+          </div>
         </form>
       )}
       {error && (
@@ -144,10 +139,29 @@ export function ScriptUpload({
         </p>
       )}
       {canCancel && (
-        <button type="button" className="btn btn-ghost" onClick={onCancel}>
+        <button type="button" className="quiet-link" style={{ alignSelf: "center" }} onClick={onCancel}>
           Keep the current script
         </button>
       )}
     </div>
+  );
+}
+
+/** A little script page with a marker swipe, for the empty upload state. */
+function ScriptIllustration() {
+  return (
+    <svg className="upload-art" width="120" height="104" viewBox="0 0 120 104" aria-hidden="true">
+      <rect x="30" y="10" width="66" height="86" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2" transform="rotate(6 63 53)" />
+      <rect x="22" y="6" width="66" height="86" rx="6" fill="#fff" stroke="var(--ink)" strokeWidth="2" />
+      <rect x="32" y="20" width="22" height="5" rx="2.5" fill="var(--ink)" />
+      <rect x="32" y="31" width="46" height="4" rx="2" fill="var(--line-strong)" />
+      <rect x="29" y="42" width="52" height="11" rx="3" fill="var(--sun)" opacity="0.85" />
+      <rect x="32" y="45.5" width="44" height="4" rx="2" fill="var(--ink)" />
+      <rect x="32" y="60" width="18" height="5" rx="2.5" fill="var(--ink)" />
+      <rect x="32" y="71" width="40" height="4" rx="2" fill="var(--line-strong)" />
+      <rect x="32" y="80" width="30" height="4" rx="2" fill="var(--line-strong)" />
+      <circle cx="98" cy="22" r="10" fill="var(--accent)" stroke="var(--ink)" strokeWidth="2" />
+      <path d="M93 22h10M98 17v10" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   );
 }

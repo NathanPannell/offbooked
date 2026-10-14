@@ -144,7 +144,7 @@ test("assembly strips cues and splits out inline directions", () => {
   assert.equal(stripCue("HAM. To be, or not to be", ["Ham.", "HAMLET"]), "To be, or not to be");
   assert.equal(stripCue("BARNARDO Who's there?", ["BARNARDO"]), "Who's there?");
   assert.equal(stripCue("Barnardo hath my place.", ["BARNARDO"]), "hath my place.", "a cue match is case-insensitive");
-  assert.equal(joinLines(["some-", "thing here", "", "and more"]), "something here and more");
+  assert.equal(joinLines(["some-", "thing here", "", "and more"]), "something here\nand more");
   assert.deepEqual(splitDirections("Give you good night. Francisco exits.", ["Francisco exits."]), [
     { text: "Give you good night.", direction: false },
     { text: "Francisco exits.", direction: true },
@@ -184,7 +184,7 @@ test("valid label prefixes are kept, small gaps patched, continuations joined, c
     [{ kind: "dialogue", speaker: "A", speakerAsWritten: "A", text: "one", act: null, scene: null, flagReason: null }],
     [{ kind: "dialogue", speaker: null, speakerAsWritten: null, text: "two", act: null, scene: null, flagReason: null, continuation: true }],
   ]);
-  assert.deepEqual(joined.map((l) => l.text), ["one two"]);
+  assert.deepEqual(joined.map((l) => l.text), ["one\ntwo"]);
 
   const unified = unifySpeakers([dialogue("KING", "a", "King."), dialogue("KING", "b", "King."), dialogue("CLAUDIUS", "c", "King.")]);
   assert.deepEqual(unified.map((l) => l.speaker), ["KING", "KING", "KING"]);
@@ -351,7 +351,7 @@ test("dialogue labelled as not part of the play is reclaimed once the play has s
   assert.deepEqual(out.map((l) => [l.speaker, l.text]), [
     ["HEDDA", "So you are here again, Judge!"],
     ["BRACK", "As you see."],
-    ["HEDDA", "Not one. I suppose all our set are still out of town."],
+    ["HEDDA", "Not one. I suppose all our set are\nstill out of town."],
     ["BRACK", "And is Tesman not at home?"],
   ]);
   const castList = parseRows("1-2 X");
@@ -400,7 +400,7 @@ test("plain mixed-case cues printed alone on a line are learnt, but only as whol
 test("a heading folded into a scene description is split off", () => {
   const lines = ["Act Second", "The room at the Tesmans'.", "It is afternoon."];
   const out = assembleSegments(parseRows("1-3 D"), lines);
-  assert.deepEqual(out.map((l) => [l.kind, l.act, l.text]), [["heading", "2", "Act Second"], ["stage_direction", null, "The room at the Tesmans'. It is afternoon."]]);
+  assert.deepEqual(out.map((l) => [l.kind, l.act, l.text]), [["heading", "2", "Act Second"], ["stage_direction", null, "The room at the Tesmans'.\nIt is afternoon."]]);
 });
 
 test("OCR noise and old spellings don't swallow speeches", () => {
@@ -411,7 +411,7 @@ test("OCR noise and old spellings don't swallow speeches", () => {
 
 test("a spoken first line reported as the cue is not dropped", () => {
   const out = assembleSegments(parseRows("1-2 S NATALYA | Yes, Miss."), ["Yes, Miss.", "Do sit down."]);
-  assert.equal(out[0]!.text, "Yes, Miss. Do sit down.");
+  assert.equal(out[0]!.text, "Yes, Miss.\nDo sit down.");
 });
 
 test("a heading without a printed number gets no invented number", () => {
@@ -427,7 +427,7 @@ test("a speech with its cue and a delivery note, labelled as a direction, is tur
   const out = assembleSegments(repairCues(parseRows("1-2 D\n3 D"), lines, book), lines, { parenDirections: true });
   assert.deepEqual(out.map((l) => [l.kind, l.speaker, l.text]), [
     ["stage_direction", null, "(aside to JACK)"],
-    ["dialogue", "LORD FANCOURT BABBERLEY", "You know, you're placing me in a terribly false position."],
+    ["dialogue", "LORD FANCOURT BABBERLEY", "You know, you're placing me in a terribly\nfalse position."],
     ["stage_direction", null, "LORD FANCOURT takes flowers out of his dress."],
   ]);
 });
@@ -439,4 +439,24 @@ test("a speech that carries on after a direction closing on the next line keeps 
     ["CHARLEY", '"Yours sincerely, Charles Wykeham.'],
     ["CHARLEY", "Splendid, Jack, you're a genius!"],
   ]);
+});
+
+test("line breaks and indentation are kept as printed", () => {
+  const lines = ["ARIEL", "  Full fathom five thy father lies;", "    Of his bones are coral made;", "  Those are pearls that were his eyes."];
+  const out = assembleSegments(parseRows("1-4 S ARIEL | ARIEL"), lines);
+  assert.equal(out[0]!.text, "Full fathom five thy father lies;\n  Of his bones are coral made;\nThose are pearls that were his eyes.");
+  assert.equal(joinLines(["some-", "thing"]), "something");
+});
+
+test("progress is reported as chunks finish, ending with every line labelled", async () => {
+  const counter = { calls: 0 };
+  const seen: { chunksDone: number; linesDone: number; linesTotal: number; speeches: number }[] = [];
+  const long = Array.from({ length: 6 }, () => SEED_SCENE).join("\n\n");
+  await parseScriptText(long, { labeler: fakeLabeler(counter), log: silentLog, onProgress: (p) => seen.push(p) });
+  assert.ok(seen.length >= 2);
+  assert.equal(seen[0]!.chunksDone, 0);
+  const last = seen[seen.length - 1]!;
+  assert.equal(last.linesDone, last.linesTotal);
+  assert.ok(last.speeches > 100);
+  for (let i = 1; i < seen.length; i++) assert.ok(seen[i]!.chunksDone >= seen[i - 1]!.chunksDone);
 });

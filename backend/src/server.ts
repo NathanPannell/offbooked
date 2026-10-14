@@ -42,6 +42,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     await app.close();
     await worker.stop();
     await ctx.jobs.idle();
+    await ctx.tts?.close();
     await sql.end({ timeout: 5 });
     process.exit(0);
   });

@@ -1,10 +1,14 @@
 import { actorApi, type TakeUploadResult } from "../api/actor";
 import { ApiError, errorMessage } from "../api/client";
+import { standins } from "../api/director";
 import { uuid } from "../lib/uuid";
-import { enqueue, nextDue, nextWakeAt, transition, type QueueEvent, type UploadItem } from "./queue";
+import { enqueue, nextDue, nextWakeAt, transition, type QueueEvent, type TakeKind, type UploadItem } from "./queue";
 import { openTakeStore, type TakeStore } from "./store";
 
 export interface NewTake {
+  /** Defaults to "invite". */
+  kind?: TakeKind;
+  /** The invite token, or the production ID for a director stand-in take. */
   token: string;
   lineId: string;
   audio: Blob;
@@ -62,6 +66,7 @@ export class Uploader {
     const store = await this.ready;
     const item: UploadItem = {
       takeId: uuid(),
+      kind: take.kind ?? "invite",
       token: take.token,
       lineId: take.lineId,
       mime: take.audio.type,
@@ -120,12 +125,11 @@ export class Uploader {
     try {
       const audio = await store.audio(item.takeId);
       if (!audio) throw new ApiError(0, "missing_audio", "This take was lost on this device. Record it again.", null);
-      const result = await actorApi(item.token).putTake(
-        item.lineId,
-        new Blob([audio], { type: item.mime }),
-        item.takeId,
-        item.durationMs,
-      );
+      const blob = new Blob([audio], { type: item.mime });
+      const result =
+        item.kind === "director"
+          ? await standins.putTake(item.lineId, blob, item.takeId, item.durationMs)
+          : await actorApi(item.token).putTake(item.lineId, blob, item.takeId, item.durationMs);
       const saved = this.apply(item.takeId, { type: "succeeded" });
       if (saved) this.savedListeners.forEach((l) => l(saved, result));
     } catch (err) {

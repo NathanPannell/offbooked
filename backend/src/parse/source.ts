@@ -23,9 +23,14 @@ export function detectSourceKind(data: Buffer, filename = ""): SourceKind {
 }
 
 export async function extractSourceText(data: Buffer, kind: SourceKind): Promise<string> {
-  if (kind === "pdf") return (await extractPdfText(new Uint8Array(data))).text;
-  if (kind === "docx") return extractDocxText(data);
-  return decodeText(data);
+  return (await extractSource(data, kind)).text;
+}
+
+// The text, plus the page count for PDFs (shown while the script is being read).
+export async function extractSource(data: Buffer, kind: SourceKind): Promise<{ text: string; pages: number | null }> {
+  if (kind === "pdf") return extractPdfText(new Uint8Array(data));
+  if (kind === "docx") return { text: await extractDocxText(data), pages: null };
+  return { text: decodeText(data), pages: null };
 }
 
 // Goes through HTML because mammoth's raw-text export drops soft line breaks (Shift+Enter), which

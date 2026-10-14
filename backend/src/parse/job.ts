@@ -3,7 +3,8 @@ import type { Ctx } from "../context.ts";
 import type { Tx } from "../db.ts";
 import { ScriptInputError } from "./pdf.ts";
 import { parseScriptText } from "./pipeline.ts";
-import { extractSourceText, type SourceKind } from "./source.ts";
+import { extractSource, type SourceKind } from "./source.ts";
+import type { LabelProgress } from "./pipeline.ts";
 import type { StructuredScript } from "./types.ts";
 
 export type ScriptSource = { kind: Exclude<SourceKind, "text">; data: Buffer } | { kind: "text"; text: string; data?: Buffer };
@@ -36,13 +37,22 @@ export async function runScriptParse(ctx: Ctx, scriptId: string): Promise<void> 
     select id, production_id, source_kind, storage_key, raw_text from scripts where id = ${scriptId}`;
   if (!script) return;
   const started = Date.now();
+  const progress = progressWriter(ctx, scriptId);
   try {
+    await progress.set({ stage: "reading" }, true);
     let text = script.rawText;
     if (text === null) {
-      text = await extractSourceText(await ctx.storage.get(script.storageKey), script.sourceKind as SourceKind);
+      const source = await extractSource(await ctx.storage.get(script.storageKey), script.sourceKind as SourceKind);
+      text = source.text;
       await ctx.sql`update scripts set raw_text = ${text} where id = ${scriptId}`;
+      await progress.set({ pages: source.pages }, true);
     }
-    const { structure, usage } = await parseScriptText(text, { labeler: ctx.labeler, log: ctx.log });
+    const { structure, usage } = await parseScriptText(text, {
+      labeler: ctx.labeler,
+      log: ctx.log,
+      onProgress: (p) => void progress.set({ stage: "labelling", ...p }),
+    });
+    await progress.set({ stage: "saving" }, true);
     ctx.log.info({ scriptId, productionId: script.productionId, ms: Date.now() - started, lines: structure.lines.length, ...usage }, "script parsed");
     const current = await ctx.sql.begin(async (tx) => {
       const [latest] = await tx`select id from scripts where production_id = ${script.productionId} order by created_at desc limit 1 for update`;
@@ -61,6 +71,28 @@ export async function runScriptParse(ctx: Ctx, scriptId: string): Promise<void> 
                   where id = ${script.productionId}
                     and ${scriptId} = (select id from scripts where production_id = ${script.productionId} order by created_at desc limit 1)`;
   }
+}
+
+export type ParseProgress = Partial<LabelProgress> & { stage?: "reading" | "labelling" | "saving"; pages?: number | null };
+
+// Saves parse progress for the director's progress bar: at most about once a second, since chunks
+// finish in bursts, and always when forced (stage changes).
+function progressWriter(ctx: Ctx, scriptId: string) {
+  let state: ParseProgress = {};
+  let lastWrite = 0;
+  let pending: Promise<unknown> = Promise.resolve();
+  return {
+    set(update: ParseProgress, force = false): Promise<unknown> {
+      state = { ...state, ...update };
+      if (!force && Date.now() - lastWrite < 1000) return pending;
+      lastWrite = Date.now();
+      const snapshot = JSON.stringify(state);
+      pending = pending
+        .then(() => ctx.sql`update scripts set progress = ${snapshot}::jsonb where id = ${scriptId}`)
+        .catch((err: unknown) => ctx.log.warn({ err: String(err), scriptId }, "could not save parse progress"));
+      return pending;
+    },
+  };
 }
 
 // Replaces sections, characters and lines. Cast assignments are carried over by character name.
@@ -89,6 +121,8 @@ async function saveStructure(tx: Tx, productionId: string, s: StructuredScript):
     text: l.text,
     flagged: l.flagReason !== null,
     flagReason: l.flagReason,
+    sourceLine: l.sourceLine,
+    sourcePage: l.page,
   }));
   for (let i = 0; i < rows.length; i += 1000) await tx`insert into lines ${tx(rows.slice(i, i + 1000))}`;
 

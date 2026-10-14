@@ -34,3 +34,26 @@ export function inviteExpiresAt(performanceDate: string | null, actorCreatedAt: 
 function signature(secret: string, actorId: string, tokenVersion: number): string {
   return hmac(secret, `${actorId.toLowerCase()}:${tokenVersion}`).slice(0, 22);
 }
+
+// The production's join link, shared with the whole cast: same shape as an invite token, signed
+// for a different purpose so one can never be used as the other.
+export function joinToken(secret: string, productionId: string, version: number): string {
+  const id = Buffer.from(productionId.replace(/-/g, ""), "hex").toString("base64url");
+  return `${id}.${version}.${hmac(secret, `join:${productionId.toLowerCase()}:${version}`).slice(0, 22)}`;
+}
+
+export function parseJoinToken(secret: string, token: string): { productionId: string; version: number } | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [idPart, versionPart, sig] = parts as [string, string, string];
+  if (!/^\d{1,9}$/.test(versionPart)) return null;
+  const hex = Buffer.from(idPart, "base64url").toString("hex");
+  if (hex.length !== 32) return null;
+  const productionId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  const version = Number(versionPart);
+  if (!isUuid(productionId) || !safeEqual(sig, hmac(secret, `join:${productionId}:${version}`).slice(0, 22))) return null;
+  return { productionId, version };
+}
+
+export const joinUrl = (appUrl: string, secret: string, productionId: string, version: number) =>
+  `${appUrl}/join/${joinToken(secret, productionId, version)}`;

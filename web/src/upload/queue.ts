@@ -1,10 +1,17 @@
 // Pure state machine for the take upload queue. Persistence and networking live in uploader.ts.
 
 export type UploadStatus = "queued" | "uploading" | "saved" | "failed";
+export type TakeKind = "invite" | "director";
 
 export interface UploadItem {
   /** Client UUID, sent as X-Take-Id so a repeated upload returns the same take. */
   takeId: string;
+  /**
+   * Who uploads it. "invite" (the default, and every take stored before stand-ins existed) uses the
+   * actor's invite token; "director" is a stand-in take sent with the director's session.
+   */
+  kind?: TakeKind;
+  /** The invite token, or the production ID for a director stand-in take. Scopes the queue per screen. */
   token: string;
   lineId: string;
   mime: string;

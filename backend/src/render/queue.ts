@@ -5,18 +5,45 @@ import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
 import { notifyCastComplete } from "../email/notify.ts";
 import { concatToM4a, makeSilence, normalizeTake } from "./ffmpeg.ts";
+import type { TtsRequest } from "../tts/service.ts";
 import { contentHash, planRender, RENDER_SETTINGS, type PlanLine, type TimingEntry } from "./plan.ts";
 
 const MAX_DEBOUNCE_MS = 120_000;
 
-// Dialogue lines in order with their current takes. "cast" marks lines whose character has an actor.
-export async function renderInputs(sql: Sql, productionId: string): Promise<(PlanLine & { cast: boolean })[]> {
-  return sql<(PlanLine & { cast: boolean })[]>`
-    select l.id as line_id, l.section_id, l.text, l.current_take_id as take_id,
-      exists (select 1 from actor_characters ac where ac.character_id = l.character_id) as cast
-    from lines l
+export interface RenderInput extends PlanLine {
+  characterId: string;
+  cast: boolean; // the character has an actor
+  actorRecorded: boolean; // the cast actor has recorded this line (stand-ins don't count)
+}
+
+// Dialogue lines in order with their current takes (the newest take, by the actor or a stand-in).
+export async function renderInputs(sql: Sql, productionId: string): Promise<RenderInput[]> {
+  return sql<RenderInput[]>`
+    select l.id as line_id, l.section_id, l.text, l.character_id, l.current_take_id as take_id, t.recorded_by as take_source,
+      exists (select 1 from actor_characters ac where ac.character_id = l.character_id) as cast,
+      exists (select 1 from takes a where a.line_id = l.id and a.recorded_by = 'actor') as actor_recorded
+    from lines l left join takes t on t.id = l.current_take_id
     where l.production_id = ${productionId} and l.kind = 'dialogue'
     order by l.seq`;
+}
+
+// Render inputs plus a TTS clip for every line without a take, when TTS can run here. The clip
+// hashes are part of the content hash, so a changed line or voice makes the render stale.
+export async function planInputs(ctx: Ctx, productionId: string): Promise<{ lines: RenderInput[]; requests: TtsRequest[] }> {
+  const lines = await renderInputs(ctx.sql, productionId);
+  const requests: TtsRequest[] = [];
+  const engine = ctx.tts ? await ctx.tts.engine() : null;
+  if (ctx.tts && engine && lines.some((l) => !l.takeId)) {
+    const voices = await ctx.tts.voices(productionId);
+    for (const l of lines) {
+      if (l.takeId) continue;
+      const r = ctx.tts.request(engine, voices.get(l.characterId), l.text);
+      if (!r) continue;
+      l.ttsHash = r.hash;
+      requests.push(r);
+    }
+  }
+  return { lines, requests };
 }
 
 // Debounced: each new take pushes the queued job back, up to two minutes after it was first queued.
@@ -87,9 +114,10 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
   const started = Date.now();
   const workDir = await mkdtemp(path.join(tmpdir(), "offbooked-render-"));
   try {
-    const lines = await renderInputs(sql, job.productionId);
+    const { lines, requests } = await planInputs(ctx, job.productionId);
     const hash = contentHash(lines);
-    const allCastRecorded = lines.some((l) => l.cast) && lines.every((l) => !l.cast || l.takeId);
+    // Completion counts only the cast actors' own takes, never stand-ins or TTS.
+    const allCastRecorded = lines.some((l) => l.cast) && lines.every((l) => !l.cast || l.actorRecorded);
 
     const [cached] = job.forced
       ? []
@@ -102,14 +130,25 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
                 timing = ${sql.json(cached.timing as never)}, take_ids = ${cached.takeIds}, all_recorded = ${allCastRecorded}, finished_at = now()
                 where id = ${job.id}`;
     } else {
-      const takeSamples = await prepareTakes(ctx, job.productionId, lines.flatMap((l) => (l.takeId ? [l.takeId] : [])), workDir);
-      const plan = planRender(lines, takeSamples);
+      // Takes normalize while TTS synthesizes on its own worker pool.
+      const [takeSamples, ttsSamples] = await Promise.all([
+        prepareTakes(ctx, job.productionId, lines.flatMap((l) => (l.takeId ? [l.takeId] : [])), workDir),
+        prepareTts(ctx, requests, workDir).then((samples) => {
+          if (requests.length) log.info({ renderId: job.id, lines: requests.length, ready: samples.size, ms: Date.now() - started }, "render tts ready");
+          return samples;
+        }),
+      ]);
+      const plan = planRender(lines, takeSamples, ttsSamples);
       const files: string[] = [];
-      for (const [i, seg] of plan.segments.entries()) {
+      // Gaps between lines come in a few lengths; make each length once.
+      const silences = new Set<number>();
+      for (const seg of plan.segments) {
         if (seg.kind === "take") files.push(path.join(workDir, `take-${seg.takeId}.flac`));
+        else if (seg.kind === "tts") files.push(path.join(workDir, `tts-${seg.hash}.flac`));
         else {
-          const file = path.join(workDir, `silence-${i}.flac`);
-          await makeSilence(seg.samples, file);
+          const file = path.join(workDir, `silence-${seg.samples}.flac`);
+          if (!silences.has(seg.samples)) await makeSilence(seg.samples, file);
+          silences.add(seg.samples);
           files.push(file);
         }
       }
@@ -132,6 +171,31 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+// Synthesizes (or reuses) a clip for each line without a take and downloads them. Lines whose
+// clip failed are left out and render as silence. Returns measured lengths in samples by hash.
+async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (!ctx.tts || !requests.length) return result;
+  const clips = [...(await ctx.tts.ensure(requests)).values()];
+  await eachLimit(clips, 8, async (clip) => {
+    try {
+      await writeFile(path.join(workDir, `tts-${clip.hash}.flac`), await ctx.storage.get(clip.storageKey));
+      result.set(clip.hash, clip.samples);
+    } catch (err) {
+      ctx.log.warn({ err, key: clip.storageKey }, "tts clip missing from storage; rendering silence");
+    }
+  });
+  return result;
+}
+
+async function eachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]!);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 // Downloads each take's normalized audio, normalizing (and caching in storage) any take seen for

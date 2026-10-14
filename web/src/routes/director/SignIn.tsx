@@ -32,7 +32,7 @@ export default function SignIn() {
     <main className="page page-narrow center-page">
       <Brand />
       {state === "sent" ? (
-        <div className="card stack" aria-live="polite">
+        <div className="sticker message-card stack" aria-live="polite">
           <MailCheck size={32} className="accent-icon" aria-hidden="true" />
           <h1 className="display">Check your email</h1>
           <p>
@@ -48,7 +48,7 @@ export default function SignIn() {
           </button>
         </div>
       ) : (
-        <form className="card stack" onSubmit={submit}>
+        <form className="sticker message-card stack" onSubmit={submit}>
           <div className="stack" style={{ gap: 6 }}>
             <h1 className="display">Directors, welcome in</h1>
             <p className="muted">Sign in with your email. No password: we'll send you a link.</p>

@@ -1,4 +1,4 @@
-import { ArrowLeft, CalendarDays, Pencil } from "lucide-react";
+import { ArrowLeft, Check, Pencil } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage } from "../../api/client";
@@ -10,13 +10,13 @@ import { useToast } from "../../components/Toast";
 import { formatDate } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
 import { CastTab } from "./CastTab";
+import { nextStep, type StepTab } from "./nextStep";
 import { RunThroughTab } from "./RunThroughTab";
 import { ScriptTab } from "./ScriptTab";
 
-type Tab = "script" | "cast" | "play";
-const TABS: { id: Tab; label: string }[] = [
+const STEPS: { id: StepTab; label: string }[] = [
   { id: "script", label: "Script" },
-  { id: "cast", label: "Cast & progress" },
+  { id: "cast", label: "Cast" },
   { id: "play", label: "Run-through" },
 ];
 
@@ -38,47 +38,51 @@ export default function ProductionPage() {
   }
 
   const p = production.data;
-  const requested = params.get("tab") as Tab | null;
-  const tab: Tab = requested ?? (p.scriptStatus === "ready" ? "cast" : "script");
-  const selectTab = (next: Tab) => setParams({ tab: next }, { replace: true });
+  const requested = params.get("tab");
+  const tab: StepTab = requested === "script" || requested === "cast" || requested === "play" ? requested : nextStep(p).tab;
+  const selectTab = (next: StepTab) => {
+    setParams({ tab: next }, { replace: true });
+    window.scrollTo({ top: 0 });
+  };
+  const done: Record<StepTab, boolean> = {
+    script: p.scriptStatus === "ready",
+    cast: p.progress.linesTotal > 0 && p.progress.linesRecorded >= p.progress.linesTotal,
+    play: false,
+  };
 
   return (
-    <main className="page page-wide">
-      <Link className="back-link" to="/app">
-        <ArrowLeft size={16} aria-hidden="true" /> Productions
-      </Link>
-      <div className="spread page-head">
-        <div className="stack" style={{ gap: 4 }}>
+    <main className={`page production-page tab-${tab}`}>
+      <div className="production-head">
+        <Link className="back-link" to="/app" aria-label="All productions">
+          <ArrowLeft size={16} aria-hidden="true" /> Productions
+        </Link>
+        <div className="production-title">
           <h1 className="display">{p.title}</h1>
-          {p.performanceDate && (
-            <p className="small muted row" style={{ gap: 6 }}>
-              <CalendarDays size={15} aria-hidden="true" /> Opens {formatDate(p.performanceDate)}
-            </p>
-          )}
+          <button type="button" className="icon-btn" onClick={() => setEditing(true)} aria-label="Edit production" title="Edit production">
+            <Pencil size={17} />
+          </button>
         </div>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
-          <Pencil size={16} aria-hidden="true" /> Edit
-        </button>
+        {p.performanceDate && <p className="small muted">Opens {formatDate(p.performanceDate)}</p>}
       </div>
 
-      <div className="tabs" role="tablist" aria-label="Production">
-        {TABS.map((t) => (
+      <nav className="steps" aria-label="Production steps">
+        {STEPS.map((s, i) => (
           <button
-            key={t.id}
+            key={s.id}
             type="button"
-            role="tab"
-            id={`tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`panel-${t.id}`}
-            className="tab"
-            onClick={() => selectTab(t.id)}
+            className="step"
+            aria-current={tab === s.id ? "page" : undefined}
+            onClick={() => selectTab(s.id)}
           >
-            {t.label}
+            <span className={`step-dot ${done[s.id] ? "is-done" : ""}`} aria-hidden="true">
+              {done[s.id] ? <Check size={13} strokeWidth={3} /> : i + 1}
+            </span>
+            {s.label}
           </button>
         ))}
-      </div>
+      </nav>
 
-      <section className="tab-panel" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+      <section className="step-panel" aria-label={STEPS.find((s) => s.id === tab)!.label}>
         {tab === "script" && (
           <ScriptTab production={p} onChanged={() => void production.reload()} onDone={() => selectTab("cast")} />
         )}
@@ -150,6 +154,7 @@ function EditProduction({
         <label className="field">
           <span>Performance date</span>
           <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <span className="field-hint">Cast links keep working until two weeks after this date.</span>
         </label>
         {error && <p className="field-error">{error}</p>}
         <button className="btn btn-primary" disabled={!title.trim()}>
@@ -157,10 +162,8 @@ function EditProduction({
         </button>
         <hr className="divider" />
         {confirmArchive ? (
-          <div className="stack" style={{ gap: 10 }}>
-            <p className="small">
-              Archiving hides this production and turns off every actor link. Recordings are kept.
-            </p>
+          <div className="stack" style={{ "--gap": "10px" } as React.CSSProperties}>
+            <p className="small">Archiving hides this production and turns off every cast link. Recordings are kept.</p>
             <div className="row">
               <button type="button" className="btn btn-danger btn-sm" onClick={archive}>
                 Archive production
@@ -171,8 +174,8 @@ function EditProduction({
             </div>
           </div>
         ) : (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmArchive(true)}>
-            Archive…
+          <button type="button" className="quiet-link" style={{ alignSelf: "flex-start" }} onClick={() => setConfirmArchive(true)}>
+            Archive this production…
           </button>
         )}
       </form>

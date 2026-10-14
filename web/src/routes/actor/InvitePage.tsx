@@ -8,6 +8,7 @@ import { CharacterName } from "../../components/CharacterName";
 import { InAppBanner } from "../../components/InAppBanner";
 import { Loading } from "../../components/Loading";
 import { firstWord, joinNames, plural } from "../../lib/format";
+import { forgetJoin, joinTokenForInvite } from "../../lib/joinMemory";
 import { useResource } from "../../lib/useResource";
 import { RecordSession } from "./RecordSession";
 
@@ -19,12 +20,12 @@ export default function InvitePage() {
 
   if (invite.loading) return <Loading />;
   if (invite.error instanceof ApiError && (invite.error.status === 410 || invite.error.status === 401 || invite.error.status === 404)) {
-    return <LinkGone body={invite.error.body} />;
+    return <LinkGone body={invite.error.body} token={token} />;
   }
   if (invite.error || !invite.data) {
     return (
       <main className="page page-narrow center-page">
-        <Brand />
+        <Brand to={null} />
         <p role="alert">{errorMessage(invite.error)}</p>
         <button className="btn btn-primary" onClick={() => void invite.reload()}>
           Try again
@@ -109,18 +110,29 @@ function Welcome({ invite, onStart }: { invite: Invite; onStart: (firstName: str
   );
 }
 
-function LinkGone({ body }: { body: Record<string, unknown> | null }) {
+function LinkGone({ body, token }: { body: Record<string, unknown> | null; token: string }) {
   const director = typeof body?.directorName === "string" ? body.directorName : null;
   const title = typeof body?.productionTitle === "string" ? body.productionTitle : null;
+  // Came here through the cast link on this device? Offer to pick a part again.
+  const joinToken = joinTokenForInvite(token);
   return (
     <main className="page page-narrow center-page">
-      <Brand />
-      <div className="card stack">
+      <Brand to={null} />
+      <div className="sticker message-card stack">
         <h1 className="display">This link has closed</h1>
         <p>
           {title ? `The link for ${title} ` : "This link "}has expired or been replaced.{" "}
           {director ? `Ask ${director} for a fresh one.` : "Ask your director for a fresh one."}
         </p>
+        {joinToken && (
+          <a
+            className="btn btn-primary"
+            href={`/join/${joinToken}`}
+            onClick={() => forgetJoin(joinToken)}
+          >
+            Pick your part again
+          </a>
+        )}
       </div>
     </main>
   );

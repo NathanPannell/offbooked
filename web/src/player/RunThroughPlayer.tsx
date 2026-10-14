@@ -24,7 +24,7 @@ import { readStorage, writeStorage } from "../lib/storage";
 import { useInterval, useResource } from "../lib/useResource";
 import { formatAccuracy, overallAccuracy, scoreLabel, verdict } from "../stt/score";
 import { PlayerEngine, type PlayerState } from "./engine";
-import { buildSegments, GAP_MULTIPLIER_MAX, GAP_MULTIPLIER_MIN, type Segment } from "./timing";
+import { audioSourceOf, audioSourceTag, buildSegments, GAP_MULTIPLIER_MAX, GAP_MULTIPLIER_MIN, type Segment } from "./timing";
 import { usePractice } from "./usePractice";
 
 const GAP_KEY = "offbooked.gapMultiplier";
@@ -321,7 +321,7 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
                 ? hasAudio
                   ? "Rendering latest takes… You're hearing the previous version."
                   : "Rendering latest takes…"
-                : "No run-through yet. It renders once the first takes are in."}
+                : "No run-through yet. It's put together as soon as there's something to play."}
           </div>
           {onRender && (render.status === "failed" || render.status === "none" || render.stale) && (
             <button
@@ -347,7 +347,7 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
       )}
       {pendingRender && activeRenderAt && state.playing && (
         <button type="button" className="chip chip-accent update-pill" onClick={applyRender}>
-          New takes are in. Switch to the new version
+          New takes are in · Switch to the new version
         </button>
       )}
       {picking && (
@@ -368,7 +368,8 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
                   const isCurrent = segment !== undefined && segment.index === state.index;
                   const isMine = mine.has(line.id);
                   const inGap = isCurrent && state.gap !== null;
-                  const unrecorded = line.kind === "dialogue" && (!segment || !segment.recorded);
+                  const source = audioSourceOf(segment);
+                  const tag = audioSourceTag(source);
                   const who = line.characterId ? characterName.get(line.characterId) : undefined;
                   const result = practice.results.get(line.id);
                   const classes = [
@@ -402,7 +403,11 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
                         <span className="lyric-who">
                           {who && <CharacterName name={who} />}
                           {isMine && mode === "mine" && <span className="your-line">your line</span>}
-                          {unrecorded && <span className="chip unrecorded">not yet recorded</span>}
+                          {tag && (
+                            <span className={`tag tag-${source}`} title={SOURCE_TITLE[source]}>
+                              {tag}
+                            </span>
+                          )}
                           {result && (
                             <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>
                           )}
@@ -511,6 +516,12 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
     </div>
   );
 }
+
+const SOURCE_TITLE: Record<string, string> = {
+  standin: "Read in by a stand-in until the actor records it",
+  tts: "A computer voice until someone records it",
+  none: "Not recorded yet",
+};
 
 function verdictClass(v: ReturnType<typeof verdict>): string {
   return v === "good" ? "good" : v === "check" ? "check" : "bad";

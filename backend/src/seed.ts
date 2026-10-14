@@ -49,6 +49,7 @@ try {
   for (const a of actors) console.log(`Invite for ${a.name}: ${inviteUrl(config.appUrl, config.inviteSecret, a.id, a.tokenVersion)}`);
 } finally {
   await ctx.jobs.idle();
+  await ctx.tts?.close();
   await sql.end({ timeout: 5 });
 }
 

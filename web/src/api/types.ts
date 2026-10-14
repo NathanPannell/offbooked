@@ -26,6 +26,10 @@ export interface Line {
   text: string;
   flagged: boolean;
   flagReason: string | null;
+  /** 1-based line in the prepared source text (see script/source). Null for older parses. */
+  sourceLine?: number | null;
+  /** PDF page the line came from. Null for DOCX, plain text and older parses. */
+  page?: number | null;
 }
 
 export interface WordOp {
@@ -47,7 +51,12 @@ export interface Take {
   durationMs: number;
   createdAt: string;
   stt: SttResult | null;
+  /** Who recorded it. Missing on older servers, where every take is the actor's. */
+  recordedBy?: "actor" | "standin";
 }
+
+/** Where a line's audio comes from in the run-through: a cast take, a stand-in take, a synthetic voice, or nothing yet. */
+export type AudioSource = "actor" | "standin" | "tts" | "none";
 
 export type ScriptStatus = "none" | "parsing" | "ready" | "failed";
 
@@ -84,6 +93,8 @@ export interface TimingEntry {
   startMs: number;
   endMs: number;
   recorded: boolean;
+  /** Missing on older servers: derive it from `recorded`. */
+  source?: AudioSource;
 }
 
 export interface Render {
@@ -117,6 +128,39 @@ export interface Script {
   characters: Character[];
   lines: Line[];
   flaggedCount: number;
+  /** Non-null while status is "parsing". */
+  progress?: ParseProgress | null;
+}
+
+export interface ParseProgress {
+  stage?: "reading" | "labelling" | "saving";
+  pages?: number | null;
+  chunksDone?: number;
+  chunksTotal?: number;
+  linesDone?: number;
+  linesTotal?: number;
+  scenes?: number;
+  speeches?: number;
+}
+
+export interface ScriptSource {
+  kind: "pdf" | "docx" | "text";
+  pageCount: number | null;
+  from: number;
+  lines: { n: number; text: string; page: number | null }[];
+}
+
+export interface JoinInfo {
+  production: { id: string; title: string; directorName: string };
+  characters: { id: string; name: string; lineCount: number; takenBy: string | null }[];
+}
+
+export interface SectionLine {
+  line: Line;
+  characterName: string;
+  take: Take | null;
+  audioSource: AudioSource;
+  cue: Cue | null;
 }
 
 export interface Invite {
@@ -128,10 +172,18 @@ export interface Invite {
   hasEmail: boolean;
 }
 
+export interface Cue {
+  characterName: string;
+  text: string;
+  audioUrl: string | null;
+  /** Missing on older servers: a take when there is audio. */
+  audioSource?: AudioSource;
+}
+
 export interface ActorLine {
   line: Line;
   sectionTitle: string;
-  cue: { characterName: string; text: string; audioUrl: string | null } | null;
+  cue: Cue | null;
   directions: string[];
   take: Take | null;
 }

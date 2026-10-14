@@ -9,12 +9,13 @@ export interface ParsedLine {
   act: string | null; // only set on heading lines that start an act or scene
   scene: string | null;
   flagReason: string | null;
+  sourceLine?: number | null; // 1-based line of the prepared source text it came from
 }
 
 export interface StructuredScript {
   sections: { act: string | null; scene: string | null; title: string }[];
   characters: { name: string; aliases: string[] }[];
-  lines: { section: number; kind: LineKind; character: string | null; text: string; flagReason: string | null }[];
+  lines: { section: number; kind: LineKind; character: string | null; text: string; flagReason: string | null; sourceLine: number | null; page: number | null }[];
 }
 
 export interface ParseUsage {
