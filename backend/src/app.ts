@@ -5,7 +5,7 @@ import multipart from "@fastify/multipart";
 import Fastify, { type FastifyError } from "fastify";
 import type { Ctx } from "./context.ts";
 import { HttpError } from "./errors.ts";
-import { actorRoutes, MAX_TAKE_BYTES } from "./routes/actor.ts";
+import { actorRoutes } from "./routes/actor.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { castRoutes } from "./routes/cast.ts";
 import { joinRoutes } from "./routes/join.ts";
@@ -14,6 +14,8 @@ import { fileRoutes } from "./routes/files.ts";
 import { MAX_PDF_BYTES, productionRoutes } from "./routes/productions.ts";
 import { runthroughRoutes } from "./routes/runthrough.ts";
 import { scriptRoutes } from "./routes/script.ts";
+import { standinRoutes } from "./routes/standin.ts";
+import { MAX_TAKE_BYTES } from "./takes.ts";
 
 const run = promisify(execFile);
 
@@ -49,10 +51,11 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
   const app = Fastify({ logger: process.env.NODE_ENV !== "test", trustProxy: true });
   const probe = opts.probeFfmpeg ?? ffmpegVersion;
 
+  // TTS is optional: without it unrecorded lines render as silence, so it never fails the check.
   app.get("/health", async (_req, reply) => {
-    const ffmpeg = await probe();
+    const [ffmpeg, tts] = await Promise.all([probe(), opts.ctx?.tts?.engine() ?? null]);
     reply.code(ffmpeg ? 200 : 503);
-    return { ok: Boolean(ffmpeg), service: "offbooked-api", revision: opts.revision ?? "dev", ffmpeg };
+    return { ok: Boolean(ffmpeg), service: "offbooked-api", revision: opts.revision ?? "dev", ffmpeg, tts };
   });
 
   app.setErrorHandler((err: FastifyError | HttpError, req, reply) => {
@@ -102,6 +105,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     castRoutes(api, ctx);
     joinRoutes(api, ctx);
     actorRoutes(api, ctx);
+    standinRoutes(api, ctx);
     runthroughRoutes(api, ctx);
     fileRoutes(api, ctx);
     emailRoutes(api, ctx);

@@ -222,3 +222,12 @@ type AudioSource = "actor" | "standin" | "tts" | "none";
   - `GET /api/productions/:id/sections/:sectionId/lines` (director): `{ section, lines: { line: Line, characterName: string, take: Take \| null, audioSource: AudioSource, cue: ActorLine["cue"] }[] }` for recording a whole scene, partner by partner.
 - When an actor later records their own line it becomes the current take; older takes are kept.
 - Takes gain `recordedBy: "actor" | "standin"`.
+
+### Stand-ins and TTS: details as built
+
+- The stand-in upload response's `linesRecorded`/`linesTotal` are production progress, counting actor takes only (stand-ins never count as an actor's progress or trigger "finished" emails).
+- `ActorLine.take` is the actor's own latest take, never a stand-in.
+- A cue whose TTS clip is still being synthesized comes back with `audioUrl: null, audioSource: "none"` (the lines endpoints wait up to `TTS_CUE_WAIT_MS`, default 2.5 s); it fills in on the next fetch.
+- `GET` run-through may queue a render (first open, or when stale with nothing queued).
+- Stand-in takes count as recordings for the "script can't be replaced once recorded" rule.
+- `/health` reports `tts: "piper <version>" | null` and never fails because of it; without Piper, unrecorded lines render as silence (`source: "none"`).

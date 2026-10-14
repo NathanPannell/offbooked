@@ -23,9 +23,9 @@ test("timing uses 350 ms gaps within a section and 1200 ms at a section change",
   ]);
   const plan = planRender(lines, takes);
   assert.deepEqual(plan.timing, [
-    { lineId: "l1", startMs: 0, endMs: 1000, recorded: true },
-    { lineId: "l2", startMs: 1350, endMs: 3250, recorded: false },
-    { lineId: "l3", startMs: 4450, endMs: 4950, recorded: true },
+    { lineId: "l1", startMs: 0, endMs: 1000, recorded: true, source: "actor" },
+    { lineId: "l2", startMs: 1350, endMs: 3250, recorded: false, source: "none" },
+    { lineId: "l3", startMs: 4450, endMs: 4950, recorded: true, source: "actor" },
   ]);
   assert.equal(plan.totalSamples, 4950 * 48);
   assert.deepEqual(
@@ -36,6 +36,62 @@ test("timing uses 350 ms gaps within a section and 1200 ms at a section change",
       ["take", 24_000],
     ],
   );
+});
+
+test("each line uses its take, else its TTS clip, else a placeholder silence", () => {
+  const lines: PlanLine[] = [
+    { ...line("l1", "s1", "t1"), takeSource: "actor", ttsHash: "h1" },
+    { ...line("l2", "s1", "t2"), takeSource: "standin" },
+    { ...line("l3", "s1", null), ttsHash: "h3" },
+    { ...line("l4", "s2", null, "a b c d e"), ttsHash: "h4" }, // its clip failed: silence
+    line("l5", "s2", null), // TTS unavailable
+    { ...line("l6", "s2", "t6"), takeSource: "actor", ttsHash: "h6" }, // take not measurable: falls back to TTS
+  ];
+  const takes = new Map([
+    ["t1", 48_000],
+    ["t2", 24_000],
+    ["t6", 0],
+  ]);
+  const tts = new Map([
+    ["h1", 9_600],
+    ["h3", 72_000],
+    ["h6", 4_800],
+  ]);
+  const plan = planRender(lines, takes, tts);
+  assert.deepEqual(
+    plan.timing.map((e) => [e.lineId, e.source, e.recorded]),
+    [
+      ["l1", "actor", true],
+      ["l2", "standin", true],
+      ["l3", "tts", false],
+      ["l4", "none", false],
+      ["l5", "none", false],
+      ["l6", "tts", false],
+    ],
+  );
+  assert.deepEqual(plan.timing[2], { lineId: "l3", startMs: 2200, endMs: 3700, recorded: false, source: "tts" });
+  assert.deepEqual(
+    plan.segments.map((s) => [s.kind, s.samples]),
+    [
+      ["take", 48_000],
+      ["silence", 350 * 48],
+      ["take", 24_000],
+      ["silence", 350 * 48],
+      ["tts", 72_000],
+      ["silence", (1200 + 1900 + 350 + 1200 + 350) * 48],
+      ["tts", 4_800],
+    ],
+  );
+  const last = plan.timing[plan.timing.length - 1]!;
+  assert.equal(plan.totalSamples, (last.endMs * 48_000) / 1000);
+});
+
+test("content hash changes when a line's TTS clip changes", () => {
+  const base = [line("l1", "s1", "t1"), { ...line("l2", "s1", null), ttsHash: "a" }];
+  assert.equal(contentHash(base), contentHash([line("l1", "s1", "t1"), { ...line("l2", "s1", null), ttsHash: "a" }]));
+  assert.notEqual(contentHash(base), contentHash([line("l1", "s1", "t1"), { ...line("l2", "s1", null), ttsHash: "b" }]), "new voice or text");
+  assert.notEqual(contentHash(base), contentHash([line("l1", "s1", "t1"), line("l2", "s1", null)]), "TTS became unavailable");
+  assert.notEqual(contentHash(base), contentHash([line("l1", "s1", "t1"), { ...line("l2", "s1", "t2"), ttsHash: "a" }]), "a stand-in or actor take landed");
 });
 
 test("content hash changes with takes, order and section breaks only", () => {

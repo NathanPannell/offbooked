@@ -22,17 +22,21 @@ export interface ProductionRow {
   actorsDone: number;
 }
 
+// Progress counts a line as recorded once the cast actor has a take for it. Stand-in takes and
+// TTS fill the run-through but never count.
+const actorRecorded = (sql: Sql) => sql`exists (select 1 from takes t where t.line_id = l.id and t.recorded_by = 'actor')`;
+
 export async function productionRows(sql: Sql, where: { ownerId: string; id?: string; includeArchived?: boolean }): Promise<ProductionRow[]> {
   return sql<ProductionRow[]>`
     select p.id, p.owner_id, p.title, p.performance_date::text as performance_date, p.script_status, p.script_error,
       p.archived_at, p.created_at,
       (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue') as lines_total,
-      (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue' and l.current_take_id is not null) as lines_recorded,
+      (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue' and ${actorRecorded(sql)}) as lines_recorded,
       (select count(*)::int from actors a where a.production_id = p.id) as actors_total,
       (select count(*)::int from actors a where a.production_id = p.id
         and exists (select 1 from actor_characters ac join lines l on l.character_id = ac.character_id and l.kind = 'dialogue' where ac.actor_id = a.id)
         and not exists (select 1 from actor_characters ac join lines l on l.character_id = ac.character_id and l.kind = 'dialogue'
-                        where ac.actor_id = a.id and l.current_take_id is null)) as actors_done
+                        where ac.actor_id = a.id and not ${actorRecorded(sql)})) as actors_done
     from productions p
     where p.owner_id = ${where.ownerId}
       ${where.id ? sql`and p.id = ${where.id}` : sql``}
@@ -114,6 +118,7 @@ export const charactersOf = (sql: Sql, productionId: string) =>
 export interface TakeRow {
   id: string;
   lineId: string;
+  recordedBy: "actor" | "standin";
   storageKey: string;
   durationMs: number;
   createdAt: Date;
@@ -122,6 +127,8 @@ export interface TakeRow {
   sttOps: unknown[] | null;
 }
 
+export const takeColumns = (sql: Sql) => sql`id, line_id, recorded_by, storage_key, duration_ms, created_at, stt_transcript, stt_accuracy, stt_ops`;
+
 export async function takeView(storage: Storage, t: TakeRow) {
   return {
     id: t.id,
@@ -129,6 +136,7 @@ export async function takeView(storage: Storage, t: TakeRow) {
     audioUrl: await storage.signedUrl(t.storageKey),
     durationMs: t.durationMs,
     createdAt: iso(t.createdAt)!,
+    recordedBy: t.recordedBy,
     stt: t.sttTranscript !== null && t.sttAccuracy !== null ? { transcript: t.sttTranscript, accuracy: t.sttAccuracy, ops: t.sttOps ?? [] } : null,
   };
 }
@@ -159,9 +167,10 @@ export async function castRows(sql: Sql, where: { productionId: string; actorId?
       (select count(*)::int from lines l join actor_characters ac on ac.character_id = l.character_id
         where ac.actor_id = a.id and l.kind = 'dialogue') as lines_total,
       (select count(*)::int from lines l join actor_characters ac on ac.character_id = l.character_id
-        where ac.actor_id = a.id and l.kind = 'dialogue' and l.current_take_id is not null) as lines_recorded,
+        where ac.actor_id = a.id and l.kind = 'dialogue' and ${actorRecorded(sql)}) as lines_recorded,
       (select avg(t.stt_accuracy)::float8 from lines l join actor_characters ac on ac.character_id = l.character_id
-        join takes t on t.id = l.current_take_id
+        cross join lateral (select stt_accuracy from takes x where x.line_id = l.id and x.recorded_by = 'actor'
+                            order by x.created_at desc limit 1) t
         where ac.actor_id = a.id and l.kind = 'dialogue' and t.stt_accuracy is not null) as avg_accuracy
     from actors a
     where a.production_id = ${where.productionId} ${where.actorId ? sql`and a.id = ${where.actorId}` : sql``}

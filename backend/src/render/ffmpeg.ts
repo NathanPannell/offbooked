@@ -64,6 +64,11 @@ export async function concatToM4a(files: string[], workDir: string, output: stri
   await ffmpeg(["-f", "concat", "-safe", "0", "-i", list, "-c:a", "aac", "-b:a", "128k", "-ar", String(RATE), "-ac", "1", "-movflags", "+faststart", output]);
 }
 
+// A synthesized cue line as a small AAC file that every browser's <audio> plays.
+export async function encodeCue(input: string, output: string): Promise<void> {
+  await ffmpeg(["-i", input, "-vn", "-c:a", "aac", "-b:a", "96k", "-ar", String(RATE), "-ac", "1", "-movflags", "+faststart", output]);
+}
+
 // Test and seed helper: a tone of the given length.
 export async function makeTone(seconds: number, frequency: number, output: string): Promise<void> {
   await ffmpeg(["-f", "lavfi", "-i", `sine=frequency=${frequency}:sample_rate=${RATE}:duration=${seconds}`, "-af", "volume=0.3", "-ac", "1", output]);

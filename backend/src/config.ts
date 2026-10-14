@@ -1,6 +1,16 @@
+import { availableParallelism } from "node:os";
+
 export type StorageConfig =
   | { driver: "local"; dir: string }
   | { driver: "s3"; endpoint: string; bucket: string; region: string; accessKeyId: string; secretAccessKey: string };
+
+export interface TtsConfig {
+  driver: "piper" | "off";
+  piperBin: string;
+  voicesDir: string;
+  concurrency: number; // clips synthesized at once (and Piper processes alive at most)
+  cueWaitMs: number; // how long a lines request waits for missing TTS cue clips
+}
 
 export interface Config {
   databaseUrl: string;
@@ -13,6 +23,7 @@ export interface Config {
   email: { driver: "log" | "resend"; resendApiKey: string | null; from: string };
   storage: StorageConfig;
   renderDebounceMs: number;
+  tts: TtsConfig;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -60,5 +71,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     email: { driver: emailDriver, resendApiKey, from: env.EMAIL_FROM?.trim() || "Offbooked <hello@offbooked.com>" },
     storage,
     renderDebounceMs: Number(env.RENDER_DEBOUNCE_MS ?? 15_000),
+    tts: {
+      driver: env.TTS_DRIVER?.trim() === "off" ? "off" : "piper",
+      piperBin: env.PIPER_BIN?.trim() || "/opt/piper/piper",
+      voicesDir: env.PIPER_VOICES_DIR?.trim() || "/opt/piper/voices",
+      concurrency: Math.max(1, Number(env.TTS_CONCURRENCY) || Math.min(2, availableParallelism())),
+      cueWaitMs: Math.max(0, Number(env.TTS_CUE_WAIT_MS ?? 2500)),
+    },
   };
 }
