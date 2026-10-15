@@ -2972,6 +2972,7 @@
 }
 
 .record-progress {
+  white-space: nowrap;
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
@@ -2980,6 +2981,21 @@
 
 .stt-chip {
   font-weight: 500;
+}
+
+.stt-chip-short {
+  display: none;
+}
+
+/* Phones: a short label, so the line count beside it keeps its one line. */
+@media (max-width: 520px) {
+  .stt-chip-long {
+    display: none;
+  }
+
+  .stt-chip-short {
+    display: inline;
+  }
 }
 
 .record-main {

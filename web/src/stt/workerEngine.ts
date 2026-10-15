@@ -44,6 +44,7 @@ export function createWorkerEngine(model: SttModel): SttEngine {
       loadListeners.add(onProgress);
       if (loading) return loading;
       loading = new Promise<void>((resolve, reject) => {
+        const createdAt = performance.now();
         worker = new Worker(new URL("./stt.worker.ts", import.meta.url), { type: "module" });
         worker.onmessage = (event: MessageEvent<FromWorker>) => {
           const message = event.data;
@@ -51,6 +52,7 @@ export function createWorkerEngine(model: SttModel): SttEngine {
             const fraction = message.total > 0 ? Math.min(1, message.loaded / message.total) : null;
             loadListeners.forEach((listener) => listener({ fraction }));
           } else if (message.type === "ready") {
+            if (message.timings) console.debug("[stt] ready", { createdAt: Math.round(createdAt), ...message.timings });
             resolve();
           } else if (message.type === "result") {
             pending.get(message.jobId)?.resolve({ text: message.text });
