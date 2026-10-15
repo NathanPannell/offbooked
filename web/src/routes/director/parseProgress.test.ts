@@ -36,3 +36,15 @@ describe("describeProgress", () => {
     expect(view).toEqual({ stage: 2, fraction: 1, counts: ["5,190 lines", "20 scenes"] });
   });
 });
+
+describe("bar pacing", () => {
+  it("creeps ahead of real progress by elapsed time, within limits", async () => {
+    const { displayFraction, estimateLabelMs } = await import("./parseProgress");
+    expect(displayFraction(0, 5_000, 20_000)).toBeCloseTo(0.12);
+    expect(displayFraction(0.5, 5_000, 20_000)).toBe(0.5);
+    expect(displayFraction(0.5, 15_000, 20_000)).toBeCloseTo(0.62);
+    expect(displayFraction(0.9, 60_000, 20_000)).toBeCloseTo(0.95);
+    expect(displayFraction(1, 0, 20_000)).toBe(1);
+    expect(estimateLabelMs(5000)).toBe(35_000);
+  });
+});

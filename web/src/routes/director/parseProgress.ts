@@ -38,3 +38,17 @@ export function describeProgress(p: ParseProgress | null | undefined, locale?: s
   if (p?.speeches) counts.push(`${count(p.speeches, "speech", "speeches", locale)} found`);
   return { stage, fraction, counts };
 }
+
+/** Rough labelling time for a script of this size, used only to pace the bar between updates. */
+export function estimateLabelMs(linesTotal: number): number {
+  return 15_000 + linesTotal * 4;
+}
+
+/**
+ * The bar's position: the real fraction, nudged forward by elapsed time so it keeps moving while
+ * the model is thinking, but never more than 12% ahead of real progress and never past 95%.
+ */
+export function displayFraction(real: number, elapsedMs: number, estimateMs: number): number {
+  const paced = Math.min(0.95, Math.max(0, elapsedMs / Math.max(1, estimateMs)));
+  return Math.min(1, Math.max(real, Math.min(paced, real + 0.12, 0.95)));
+}
