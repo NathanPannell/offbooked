@@ -1168,9 +1168,55 @@
   gap: 4px;
 }
 
-.production-title h1 {
+.production-title h1,
+.production-title .title-input {
+  flex: 1;
+  min-width: 0;
   font-size: clamp(30px, 6vw, 44px);
   font-weight: 400;
+  line-height: 1.15;
+}
+
+/* The title reads as a heading and edits in place, like a script line. */
+.title-edit {
+  display: block;
+  width: 100%;
+  margin: 0 -8px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.title-edit:hover {
+  border-color: var(--line);
+}
+
+.title-input {
+  margin: 0 -8px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-display);
+  outline: none;
+}
+
+.archive-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+}
+
+.archive-confirm p {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .steps {
@@ -1371,12 +1417,18 @@
   gap: var(--s-4);
 }
 
+/* The script page keeps one row pinned to the top: Next on the left, scenes on the right. The
+   site header scrolls away there. */
+.director:has(.review-bar) .app-header {
+  position: static;
+}
+
 .review-bar {
   position: sticky;
-  top: var(--header-h);
+  top: 0;
   z-index: 20;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--s-2) var(--s-3);
@@ -1432,10 +1484,33 @@
   background: var(--sun);
 }
 
+.review-next {
+  flex: none;
+  gap: 10px;
+}
+
+.review-next .flag-dot {
+  background: #fff;
+  opacity: 0.85;
+}
+
+.review-next-count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.review-bar .section-nav {
+  min-width: 0;
+}
+
 .review-tools {
   display: flex;
   align-items: center;
   gap: 2px;
+  margin-bottom: var(--s-3);
 }
 
 .review-body {
@@ -1507,7 +1582,7 @@
   margin-bottom: var(--s-4);
   padding-bottom: var(--s-3);
   border-bottom: 1px solid var(--line-strong);
-  scroll-margin-top: 140px;
+  scroll-margin-top: 76px;
 }
 
 .section-head h3 {
@@ -1536,7 +1611,7 @@
 }
 
 .script-line-item {
-  scroll-margin: 150px 0 120px;
+  scroll-margin: 90px 0 120px;
 }
 
 .script-row {
@@ -2157,8 +2232,8 @@
   .source-pane {
     display: flex;
     position: sticky;
-    top: calc(var(--header-h) + 76px);
-    height: calc(100dvh - var(--header-h) - 92px);
+    top: 76px;
+    height: calc(100dvh - 92px);
   }
 }
 
@@ -3849,19 +3924,7 @@
     padding-bottom: 8px;
   }
 
-  .flag-nav {
-    width: 100%;
-  }
-
-  .flag-count {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   .review-tools {
-    width: 100%;
     justify-content: space-between;
   }
 

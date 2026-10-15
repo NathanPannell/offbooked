@@ -69,11 +69,17 @@ export function lineInView(g: Pick<ScrollGeometry, "lineTop" | "lineHeight" | "b
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-/** The visible band of the review: under the sticky header and review bar, above the source sheet. */
+/**
+ * The visible band of the review: under the sticky header and review bar, above the source sheet
+ * and above the on-screen keyboard. Phones shrink only the visual viewport for the keyboard, so
+ * window.innerHeight still includes the part it covers.
+ */
 export function visibleBand(): { top: number; bottom: number } {
   const bar = document.querySelector<HTMLElement>(".review-bar");
-  const top = bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0;
-  let bottom = window.innerHeight;
+  const vv = window.visualViewport;
+  const vvTop = vv ? vv.offsetTop : 0;
+  const top = Math.max(vvTop, bar ? Math.max(0, bar.getBoundingClientRect().bottom) : 0);
+  let bottom = vv ? Math.min(window.innerHeight, vvTop + vv.height) : window.innerHeight;
   const sheet = document.querySelector<HTMLElement>(".source-open .source-pane");
   if (sheet && getComputedStyle(sheet).position === "fixed") bottom = Math.min(bottom, sheet.getBoundingClientRect().top);
   return { top, bottom };
@@ -156,4 +162,29 @@ function settled(): Promise<void> {
     requestAnimationFrame(tick);
     setTimeout(finish, 1200);
   });
+}
+
+/**
+ * How far to scroll so a text field being edited sits in the visible band: unchanged when it
+ * already fits, else its top just under the sticky bars (room below for the text to grow), or, for
+ * a field taller than the band, its bottom (where the caret usually is) just above the keyboard.
+ */
+export function fieldScrollDelta(field: { top: number; bottom: number }, band: { top: number; bottom: number }, caretAtEnd = false): number {
+  const pad = 12;
+  const fits = field.bottom - field.top <= band.bottom - band.top - 2 * pad;
+  if (field.top >= band.top + pad - 1 && field.bottom <= band.bottom - pad + 1) return 0;
+  // A tall field that already fills the band: leave it, so typing in it doesn't jump the page.
+  if (!fits && field.top <= band.top + pad + 1 && field.bottom >= band.bottom - pad - 1) return 0;
+  if (fits || !caretAtEnd) return Math.round(field.top - (band.top + pad));
+  return Math.round(field.bottom - (band.bottom - pad));
+}
+
+/** Keeps the field being edited above the keyboard and below the sticky bars. */
+export function keepFieldInView(el: HTMLTextAreaElement | null): void {
+  if (!el) return;
+  current++; // a hop still settling would scroll it away again
+  const r = el.getBoundingClientRect();
+  const caretAtEnd = el.selectionEnd >= el.value.length - 1;
+  const delta = fieldScrollDelta({ top: r.top, bottom: r.bottom }, visibleBand(), caretAtEnd);
+  if (delta) window.scrollBy({ top: delta, behavior: "auto" });
 }

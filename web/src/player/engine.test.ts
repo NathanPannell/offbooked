@@ -130,7 +130,7 @@ describe("playing across a scene change", () => {
 describe("my role", () => {
   const mine = (mode: Part["mode"]): Part => ({ mine: new Set(["b", "e"]), mode });
 
-  it("skip: my lines are not played at all", async () => {
+  it("skip: my lines aren't heard, but a silence as long as each one plays in its place", async () => {
     const { audio, engine } = setup();
     engine.setPart(mine("skip"));
     await flush();
@@ -139,6 +139,9 @@ describe("my role", () => {
     await playTo(audio, "f");
     const clips = audio.played.map((p) => p.src).filter((s) => s.startsWith("clip:"));
     expect(clips).toEqual(["clip:a", "clip:c", "clip:d", "clip:f"]);
+    // a, the gap, then b's silence (longer than a line gap) where b would be.
+    const afterA = audio.played.slice(audio.played.findIndex((p) => p.src === "clip:a") + 1, audio.played.findIndex((p) => p.src === "clip:c"));
+    expect(afterA.length).toBeGreaterThanOrEqual(2);
   });
 
   it("pause, then read: a pause as long as the line takes to say, then the line at normal speed", async () => {

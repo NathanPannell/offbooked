@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, Scissors, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, FileText, Scissors, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { script as api } from "../../api/director";
 import type { Character, Line, LineKind } from "../../api/types";
@@ -6,6 +6,7 @@ import { characterHue } from "../../lib/format";
 import { flagLabel } from "./flagNav";
 import { splitTokens } from "./lineJoin";
 import { caretOffsetAt, splitAtCaret, textRuns } from "./lineText";
+import { keepFieldInView } from "./reviewScroll";
 import type { ReviewActions } from "./ScriptReview";
 
 const KINDS: { kind: LineKind; label: string }[] = [
@@ -14,6 +15,7 @@ const KINDS: { kind: LineKind; label: string }[] = [
   { kind: "heading", label: "Heading" },
 ];
 const NEW_CHARACTER = "__new";
+const MANAGE_CHARACTERS = "__manage";
 
 /** A line's text as the script shows it: [bracketed] directions in spoken lines set as directions. */
 export function LineText({ text, kind }: { text: string; kind: LineKind }) {
@@ -70,6 +72,9 @@ export function LineEditor({
   onClose,
   onDelete,
   onSplit,
+  originalOpen,
+  onToggleOriginal,
+  onManageCharacters,
 }: {
   productionId: string;
   line: Line;
@@ -88,6 +93,11 @@ export function LineEditor({
   onDelete: () => void;
   /** The line was split: carry on with the new second part. */
   onSplit: (second: Line) => void;
+  /** The original script beside (or under) the review, at this line. */
+  originalOpen: boolean;
+  onToggleOriginal: () => void;
+  /** Rename or merge characters. */
+  onManageCharacters: () => void;
 }) {
   const { run, busy } = actions;
   const rowRef = useRef<HTMLDivElement>(null);
@@ -128,7 +138,26 @@ export function LineEditor({
       el.setSelectionRange(caret.current, caret.current);
       caret.current = null;
     }
+    keepFieldInView(el);
   }, [draft]);
+
+  // On a phone the keyboard opens after the field takes focus and covers the bottom of the page:
+  // bring the field back above it whenever the visible area changes while typing.
+  const isTyping = draft !== null;
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!isTyping || !vv) return;
+    let frame = 0;
+    const onResize = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => keepFieldInView(textRef.current));
+    };
+    vv.addEventListener("resize", onResize);
+    return () => {
+      cancelAnimationFrame(frame);
+      vv.removeEventListener("resize", onResize);
+    };
+  }, [isTyping]);
 
   const refocus = useRef(false);
   const focusRow = () => {
@@ -336,6 +365,10 @@ export function LineEditor({
                 onChange={(e) => {
                   const value = e.target.value;
                   if (value === NEW_CHARACTER) return setAdding("");
+                  if (value === MANAGE_CHARACTERS) {
+                    e.target.value = line.characterId ?? "";
+                    return onManageCharacters();
+                  }
                   const c = characters.find((x) => x.id === value);
                   if (c) void pick(c);
                 }}
@@ -362,9 +395,21 @@ export function LineEditor({
                   ))}
                 </optgroup>
                 <option value={NEW_CHARACTER}>New character…</option>
+                <option value={MANAGE_CHARACTERS}>Rename or merge characters…</option>
               </select>
             ))}
           <span className="line-tools">
+            <button
+              type="button"
+              className="icon-btn line-tool"
+              aria-pressed={originalOpen}
+              onMouseDown={keepFocus}
+              onClick={onToggleOriginal}
+              aria-label={originalOpen ? "Hide the original" : "Show this line in the original"}
+              title={originalOpen ? "Hide the original" : "Show this line in the original"}
+            >
+              <FileText size={16} />
+            </button>
             <button
               type="button"
               className="icon-btn line-tool"

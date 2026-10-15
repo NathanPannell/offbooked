@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronUp, FileText, Link2, Pencil, RefreshCw, Undo2, Users, X } from "lucide-react";
+import { ArrowRight, Check, Link2, Pencil, RefreshCw, Undo2, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { errorMessage } from "../../api/client";
 import { script as scriptApi, type DeletedLine } from "../../api/director";
@@ -7,9 +7,8 @@ import { CharacterName } from "../../components/CharacterName";
 import { Dialog } from "../../components/Dialog";
 import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
-import { plural } from "../../lib/format";
 import { CharactersPanel } from "./CharactersPanel";
-import { FLAG_SHORT, flagBucket, flagCounts, flagPosition, nextFlagged, type FlagFilter } from "./flagNav";
+import { flagCounts, flagPosition, nextFlagged, type FlagFilter } from "./flagNav";
 import { canJoinAtSeam, joinPreview, undoJoin } from "./lineJoin";
 import { caretFromClick, FlagNote, LineEditor, LineText } from "./LineEditor";
 import { MergeSuggestions } from "./MergeSuggestions";
@@ -48,7 +47,6 @@ export function ScriptReview({
   const [editingId, setEditingId] = useState<string | null>(null);
   // Where the text caret goes when a line opens from a click on its text (null: just the controls).
   const [startText, setStartText] = useState<number | "end" | null>(null);
-  const [flagFilterPick, setFlagFilter] = useState<FlagFilter>("all");
   const [showCharacters, setShowCharacters] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [undo, setUndo] = useState<Undo | null>(null);
@@ -81,7 +79,8 @@ export function ScriptReview({
   const selected = selectedId ? lineById.get(selectedId) ?? null : null;
   const counts = useMemo(() => flagCounts(lines), [lines]);
   // A reason with nothing left to check falls back to all of them.
-  const flagFilter: FlagFilter = flagFilterPick === "all" || counts.some((c) => c.code === flagFilterPick) ? flagFilterPick : "all";
+  // J/K and Next walk every flagged line (the per-reason filter left the bar to keep it one row).
+  const flagFilter: FlagFilter = "all";
   const position = flagPosition(lines, selectedId, flagFilter);
   const allFlagged = counts.reduce((n, c) => n + c.count, 0);
   const recordingStarted = production.progress.linesRecorded > 0;
@@ -207,14 +206,6 @@ export function ScriptReview({
   };
 
   const moveFlag = (direction: 1 | -1, filter: FlagFilter = flagFilter) => goTo(nextFlagged(lines, lastSeq.current, direction, filter));
-
-  // Clicking a reason's count walks only those lines (clicking it again goes back to all of them).
-  const pickFilter = (picked: FlagFilter) => {
-    const filter = picked === flagFilter && picked !== "all" ? "all" : picked;
-    setFlagFilter(filter);
-    const onOne = selected?.flagged && (filter === "all" || flagBucket(selected) === filter);
-    if (!onOne) moveFlag(1, filter);
-  };
 
   // A fix moves on to the next line to check, if this one was flagged; otherwise the line stays open.
   const afterFix = (line: Line) => {
@@ -369,99 +360,29 @@ export function ScriptReview({
     <div className={`review ${sourceOpen ? "source-open" : ""}`}>
       <div className="review-bar">
         {allFlagged > 0 ? (
-          <div className="flag-nav" role="group" aria-label="Lines to check">
-            <span className="flag-count" aria-live="polite">
-              <span className="flag-dot" aria-hidden="true" />
-              {position.index ? (
-                <>
-                  <strong className="nums">{position.index}</strong> of <strong className="nums">{total}</strong> to check
-                </>
-              ) : (
-                <>
-                  <strong className="nums">{total}</strong>
-                  <span className="hide-sm"> {total === 1 ? "line" : "lines"}</span> to check
-                </>
-              )}
-            </span>
-            <button type="button" className="icon-btn" onClick={() => moveFlag(-1)} aria-label="Previous line to check (K)" title="Previous (K)">
-              <ChevronUp size={20} />
-            </button>
-            <button type="button" className="icon-btn" onClick={() => moveFlag(1)} aria-label="Next line to check (J)" title="Next (J)">
-              <ChevronDown size={20} />
-            </button>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => moveFlag(1)}>
-              {position.index ? "Next" : "Start checking"}
-            </button>
-          </div>
-        ) : (
-          <div className="flag-nav is-clear">
-            <span className="flag-count">
-              <Check size={18} strokeWidth={3} aria-hidden="true" /> Every line checked
-            </span>
-            <button type="button" className="btn btn-primary btn-sm" onClick={onDone}>
-              Share with the cast <ArrowRight size={16} aria-hidden="true" />
-            </button>
-          </div>
-        )}
-        {allFlagged > 0 && (
-          <div className="flag-filters" role="group" aria-label="Which lines to check">
-            <button type="button" className="flag-filter" aria-pressed={flagFilter === "all"} onClick={() => pickFilter("all")}>
-              All <span className="nums">{allFlagged}</span>
-            </button>
-            {counts.map((c) => (
-              <button
-                key={c.code}
-                type="button"
-                className={`flag-filter code-${c.code}`}
-                aria-pressed={flagFilter === c.code}
-                onClick={() => pickFilter(c.code)}
-                title={flagFilter === c.code ? "Show every line to check" : `Only ${FLAG_SHORT[c.code].toLowerCase()} checks (J and K skip the rest)`}
-              >
-                {FLAG_SHORT[c.code]} <span className="nums">{c.count}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="review-tools">
-          <SectionNav sections={sections} idPrefix="section-" />
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCharacters(true)}>
-            <Users size={16} aria-hidden="true" /> {script.characters.length}
-            <span className="hide-sm">{script.characters.length === 1 ? " character" : " characters"}</span>
-          </button>
           <button
             type="button"
-            className="btn btn-ghost btn-sm source-toggle"
-            aria-pressed={sourceOpen}
-            onClick={() => setSourceOpen((o) => !o)}
+            className="btn btn-primary review-next"
+            onClick={() => moveFlag(1)}
+            aria-label={position.index ? `Next line to check (${position.index} of ${total}) (J)` : `Next line to check (${total} left) (J)`}
+            title="Next (J); K goes back"
           >
-            <FileText size={16} aria-hidden="true" /> Original
+            <span className="flag-dot" aria-hidden="true" />
+            Next
+            <span className="review-next-count nums" aria-live="polite">
+              {position.index ? `${position.index}/${total}` : total}
+            </span>
           </button>
-        </div>
+        ) : (
+          <button type="button" className="btn btn-primary review-next is-clear" onClick={onDone}>
+            <Check size={16} strokeWidth={3} aria-hidden="true" /> Share with the cast <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        )}
+        <SectionNav sections={sections} idPrefix="section-" />
       </div>
 
       <div className="review-body">
         <div className="review-main">
-          {allFlagged > 0 && !selected && (
-            <p className="review-intro">
-              We weren't sure about {plural(allFlagged, "line")}. They're highlighted below. Tap <Check size={14} strokeWidth={3} aria-label="the tick" /> if a
-              line is right, or click any line to edit it where it is.{" "}
-              <span className="muted">Keys: J and K move, Enter approves, E edits the text, Delete removes the line.</span>
-            </p>
-          )}
-          {recordingStarted && (
-            <div className="notice notice-warn">
-              <AlertTriangle size={18} aria-hidden="true" />
-              <p>Recording has started. Changing a recorded line keeps its old take until someone records it again.</p>
-            </div>
-          )}
-
-          <MergeSuggestions
-            productionId={production.id}
-            characters={script.characters}
-            busy={busy}
-            onMerge={(from, into) => actions.run(() => scriptApi.mergeCharacter(from.id, into.id))}
-          />
-
           <article className="script-page" aria-label={`${production.title} script`}>
             {sections.map((section) => (
               <ScriptSection
@@ -497,6 +418,9 @@ export function ScriptReview({
                     onApprove={() => approve(line)}
                     onFixed={() => afterFix(line)}
                     onDelete={() => void deleteLine(line)}
+                    originalOpen={sourceOpen}
+                    onToggleOriginal={() => setSourceOpen((o) => !o)}
+                    onManageCharacters={() => setShowCharacters(true)}
                     onClose={() => {
                       setEditingId(null);
                       // After React swaps the editor back for the plain line.
@@ -542,6 +466,12 @@ export function ScriptReview({
       )}
 
       <Dialog open={showCharacters} onClose={() => setShowCharacters(false)} title="Characters">
+        <MergeSuggestions
+          productionId={production.id}
+          characters={script.characters}
+          busy={busy}
+          onMerge={(from, into) => actions.run(() => scriptApi.mergeCharacter(from.id, into.id))}
+        />
         <CharactersPanel productionId={production.id} characters={script.characters} actions={actions} />
       </Dialog>
     </div>

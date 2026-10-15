@@ -92,31 +92,37 @@ export function assignVoices(characters: { id: string; name: string }[], voices:
   return result;
 }
 
-// What the voice should say: no bracketed directions, no markup, one utterance. Empty when there
-// are no words left (a line that is only "—").
+// Keeps the printed line breaks (each one becomes a pause, see TTS_SETTINGS.lineBreakMs), tidies
+// the spaces within each line and drops lines with no words left (a line that is only "—").
+const printedLines = (text: string): string =>
+  text
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter((l) => /[\p{L}\p{N}]/u.test(l))
+    .join("\n");
+
+// What the voice should say: no bracketed directions, no markup, one printed line per text line.
+// Empty when there are no words left.
 export function speakable(text: string): string {
-  const cleaned = text
-    .replace(/\[[^\]]*\]/g, " ")
-    .replace(/\[[^\n]*/g, " ") // an unclosed bracket runs to the end of its line
-    .replace(/\{[^}]*\}/g, " ")
-    .replace(/[_*]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return /[\p{L}\p{N}]/u.test(cleaned) ? cleaned : "";
+  return printedLines(
+    text
+      .replace(/\[[^\]]*\]/g, " ")
+      .replace(/\[[^\n]*/g, " ") // an unclosed bracket runs to the end of its line
+      .replace(/\{[^}]*\}/g, " ")
+      .replace(/[_*]+/g, ""),
+  );
 }
 
 // What the narrator says for a stage direction: the direction itself, without its brackets or
 // markup. Bracketed asides inside dialogue are not read at all (speakable drops them).
 export function speakableDirection(text: string): string {
-  const cleaned = text
-    .replace(/[[\]{}()]/g, " ")
-    .replace(/[_*]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return /[\p{L}\p{N}]/u.test(cleaned) ? cleaned : "";
+  return printedLines(text.replace(/[[\]{}()]/g, " ").replace(/[_*]+/g, ""));
 }
 
-export const TTS_SETTINGS = { version: 1 } as const;
+// lengthScale: Piper speaks about 2.8–3 words a second; 1.1 brings it nearer a stage pace (about
+// 2.5). lineBreakMs: the pause at the end of each printed line, as well as after punctuation, so
+// verse isn't run together.
+export const TTS_SETTINGS = { version: 2, lengthScale: 1.1, lineBreakMs: 300 } as const;
 
 // Cache key for a synthesized clip: engine, voice, spoken text and everything that shapes the
 // normalized audio. Same inputs, same clip, so re-renders only synthesize changed lines.
@@ -125,6 +131,8 @@ export function clipHash(engine: string, voice: Voice, text: string): string {
     .update(
       JSON.stringify({
         v: TTS_SETTINGS.version,
+        lengthScale: TTS_SETTINGS.lengthScale,
+        lineBreakMs: TTS_SETTINGS.lineBreakMs,
         engine,
         model: voice.model,
         speaker: voice.speaker,

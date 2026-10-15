@@ -2,7 +2,6 @@ import type { ClipLoader } from "./clips";
 import {
   gapBetweenMs,
   isMine,
-  isSkipped,
   nextIndex,
   NO_PART,
   playableFrom,
@@ -52,7 +51,7 @@ const WAIT_LOOP_MS = 250;
 type Phase =
   | { kind: "line"; index: number }
   | { kind: "wait"; index: number; afterSpeak: boolean } // the clip is loading; a short silence loops meanwhile
-  | { kind: "speak"; index: number; durationMs: number } // the listener says their line; it plays after
+  | { kind: "speak"; index: number; durationMs: number; then: "read" | "next" } // the listener says their line; then it plays, or the next one does
   | { kind: "pause"; index: number; next: number }; // the pause between two lines
 
 /** Recorded takes time the listener's pause; TTS and silent lines are timed from their words. */
@@ -116,9 +115,13 @@ export class PlayerEngine {
     if (!phase) return;
     const line = this.lines[phase.index];
     const wasSpeaking = phase.kind === "speak" || (phase.kind === "wait" && phase.afterSpeak);
-    // Out of "pause" mid-pause, or the current line is now left out: move on from here.
-    if (wasSpeaking && (part.mode !== "pause" || !isMine(part, line))) this.startLine(phase.index, this.state.playing);
-    else if (phase.kind !== "pause" && isSkipped(part, line) && !isSkipped(before, line)) this.startLine(phase.index, this.state.playing);
+    const silentNow = part.mode !== "read" && isMine(part, line);
+    // Out of a silence that no longer applies: play the line from here.
+    if (wasSpeaking && !silentNow) this.startLine(phase.index, this.state.playing);
+    // Between "pause" and "skip" mid-silence: only what comes after it changes.
+    else if (phase.kind === "speak") this.phase = { ...phase, then: part.mode === "pause" ? "read" : "next" };
+    // A line of mine that is playing now should be a silence instead.
+    else if (phase.kind === "line" && silentNow && before.mode === "read") this.startLine(phase.index, this.state.playing);
     else if (phase.kind === "line") this.applyRate(isMine(part, line));
     if (this.lines.length) this.prefetchFrom(Math.max(0, this.state.index));
   }
@@ -173,9 +176,7 @@ export class PlayerEngine {
   previous() {
     const phase = this.phase;
     const elapsed = phase?.kind === "line" ? this.audio.currentTime * 1000 : phase?.kind === "pause" ? Infinity : 0;
-    let index = previousIndex(this.state.index, elapsed);
-    // Step back over lines that are left out.
-    while (index > 0 && isSkipped(this.part, this.lines[index])) index--;
+    const index = previousIndex(this.state.index, elapsed);
     this.seekToSegment(index, this.state.playing);
   }
 
@@ -287,11 +288,13 @@ export class PlayerEngine {
     }
     if (phase.kind === "wait") return;
     if (phase.kind === "speak") {
-      // The listener has had their turn; now their line plays.
       this.set({ gap: null });
       this.gapListener?.end(this.gapLine(phase.index), true);
-      this.playClip(phase.index, this.token, true);
-      return;
+      // The listener has had their turn; now their line plays ("pause"), or the play moves on ("skip").
+      if (phase.then === "read") {
+        this.playClip(phase.index, this.token, true);
+        return;
+      }
     }
     const next = nextIndex(this.lines, phase.index, this.part);
     if (next === null) {

@@ -6,7 +6,8 @@ import type { Log } from "../log.ts";
 import { encodeCue, normalizeClip } from "../render/ffmpeg.ts";
 import type { Storage } from "../storage/storage.ts";
 import type { Synthesizer } from "./piper.ts";
-import { assignVoices, clipHash, NARRATOR, speakable, speakableDirection, type Voice } from "./voices.ts";
+import { assignVoices, clipHash, NARRATOR, speakable, speakableDirection, TTS_SETTINGS, type Voice } from "./voices.ts";
+import { joinWavs } from "./wav.ts";
 
 export interface TtsClip {
   hash: string;
@@ -222,7 +223,14 @@ export class TtsService {
       const m4a = path.join(dir, "clip.m4a");
       if (!clip) {
         const wav = path.join(dir, "clip.wav");
-        await this.synth.synthesize(r.text, r.voice, wav);
+        // One utterance per printed line, joined with a pause, so verse isn't run together.
+        const printed = r.text.split("\n");
+        if (printed.length === 1) await this.synth.synthesize(r.text, r.voice, wav);
+        else {
+          const parts = printed.map((_, i) => path.join(dir, `line-${i}.wav`));
+          for (const [i, text] of printed.entries()) await this.synth.synthesize(text, r.voice, parts[i]!);
+          await joinWavs(parts, TTS_SETTINGS.lineBreakMs, wav);
+        }
         const samples = await normalizeClip(wav, flac, m4a);
         if (samples <= 0) throw new Error("synthesized clip is empty");
         const storageKey = `tts/${r.hash}.flac`;

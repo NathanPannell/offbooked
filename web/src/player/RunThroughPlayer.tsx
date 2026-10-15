@@ -23,7 +23,7 @@ const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion:
 
 const MODE_LABELS: [MyLineMode, string][] = [
   ["read", "Read"],
-  ["skip", "Skip"],
+  ["skip", "Silent"],
   ["pause", "Pause, then read"],
 ];
 
@@ -369,7 +369,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                         {line.kind === "dialogue" && (
                           <span className="lyric-who">
                             {who && <CharacterName name={who} />}
-                            {isMine && <span className="your-line">{skipped ? "your line, skipped" : "your line"}</span>}
+                            {isMine && <span className="your-line">{skipped ? "your line, silent" : "your line"}</span>}
                             {tag && (
                               <span className={`tag tag-${source}`} title={SOURCE_TITLE[source]}>
                                 {tag}

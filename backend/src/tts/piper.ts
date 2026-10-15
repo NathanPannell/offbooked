@@ -4,7 +4,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import type { Log } from "../log.ts";
-import { VOICE_MODELS, type Voice } from "./voices.ts";
+import { TTS_SETTINGS, VOICE_MODELS, type Voice } from "./voices.ts";
 
 const run = promisify(execFile);
 
@@ -33,7 +33,7 @@ class PiperProcess {
 
   constructor(bin: string, binArgs: string[], modelPath: string, model: string, onExit: (p: PiperProcess) => void) {
     this.model = model;
-    this.proc = spawn(bin, [...binArgs, "-q", "--json-input", "-m", modelPath], { windowsHide: true });
+    this.proc = spawn(bin, [...binArgs, "-q", "--json-input", "--length_scale", String(TTS_SETTINGS.lengthScale), "-m", modelPath], { windowsHide: true });
     this.proc.stdin.on("error", () => {});
     this.proc.stderr.on("data", (d: Buffer) => {
       this.stderr = (this.stderr + d.toString()).slice(-2000);

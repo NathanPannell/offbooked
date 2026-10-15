@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BAND_PAD, lineInView, scrollTarget, type ScrollGeometry } from "./reviewScroll";
+import { BAND_PAD, fieldScrollDelta, lineInView, scrollTarget, type ScrollGeometry } from "./reviewScroll";
 
 // A 375 × 812 phone: header + review bar end at 171px. Desktop: bars end at 131px of 800.
 const phone = { bandTop: 171, bandBottom: 812, maxScroll: 100_000 };
@@ -67,5 +67,31 @@ describe("scrolling a review line into view", () => {
     expect(lineInView(g, scrollTarget(g))).toBe(true);
     expect(lineInView(g, 5000 - 100)).toBe(false); // under the review bar
     expect(lineInView(g, 4000)).toBe(false); // below the fold
+  });
+});
+
+describe("keeping the field being edited above the keyboard", () => {
+  // A phone: sticky bars end at 300, the keyboard starts at 560.
+  const band = { top: 300, bottom: 560 };
+
+  it("leaves a field that is already in view", () => {
+    expect(fieldScrollDelta({ top: 340, bottom: 400 }, band)).toBe(0);
+  });
+
+  it("brings a field hidden by the keyboard up under the bars", () => {
+    expect(fieldScrollDelta({ top: 640, bottom: 700 }, band)).toBe(640 - 312);
+  });
+
+  it("brings a field hidden behind the bars down", () => {
+    expect(fieldScrollDelta({ top: 200, bottom: 260 }, band)).toBe(200 - 312);
+  });
+
+  it("shows the end of a tall field when the caret is at the end", () => {
+    expect(fieldScrollDelta({ top: 400, bottom: 900 }, band, true)).toBe(900 - 548);
+    expect(fieldScrollDelta({ top: 400, bottom: 900 }, band, false)).toBe(400 - 312);
+  });
+
+  it("doesn't move a tall field that already fills the band while typing", () => {
+    expect(fieldScrollDelta({ top: 250, bottom: 900 }, band, true)).toBe(0);
   });
 });
