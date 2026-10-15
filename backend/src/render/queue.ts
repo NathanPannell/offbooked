@@ -48,6 +48,7 @@ export async function planInputs(ctx: Ctx, productionId: string): Promise<{ line
 }
 
 // Debounced: each new take pushes the queued job back, up to two minutes after it was first queued.
+// Wakes the worker so it can sleep until the job is due.
 export async function scheduleRender(ctx: Ctx, productionId: string, opts: { force?: boolean } = {}): Promise<void> {
   const delay = opts.force ? 0 : ctx.config.renderDebounceMs;
   await ctx.sql`
@@ -57,6 +58,7 @@ export async function scheduleRender(ctx: Ctx, productionId: string, opts: { for
       forced = renders.forced or excluded.forced,
       run_after = case when excluded.forced then now()
                        else least(excluded.run_after, renders.created_at + ${MAX_DEBOUNCE_MS} * interval '1 millisecond') end`;
+  ctx.renderWorker.kick();
 }
 
 async function claimNext(sql: Sql): Promise<{ id: string; productionId: string; forced: boolean } | undefined> {
@@ -80,23 +82,64 @@ export async function processDueRenders(ctx: Ctx): Promise<number> {
   return count;
 }
 
-export function startRenderWorker(ctx: Ctx, intervalMs = 2000): { stop: () => Promise<void>; kick: () => void } {
+// Milliseconds until the next claimable queued job is due, or null when nothing is queued.
+// Productions with a render in progress are skipped, as in claimNext.
+export async function nextRenderDueMs(sql: Sql): Promise<number | null> {
+  const [row] = await sql<{ ms: number | null }[]>`
+    select ceil(extract(epoch from min(r.run_after) - now()) * 1000)::float8 as ms from renders r
+    where r.status = 'queued'
+      and not exists (select 1 from renders x where x.production_id = r.production_id and x.status = 'rendering')`;
+  return row?.ms ?? null;
+}
+
+const RETRY_MS = 60_000;
+const MAX_SLEEP_MS = 2 ** 31 - 1;
+
+// Event driven, never polled: an idle server sends no queries, so Neon can scale the database to
+// zero. A pass runs at startup and on every kick (scheduleRender kicks), then the worker sleeps
+// until the next queued job is due.
+export function startRenderWorker(ctx: Ctx): { stop: () => Promise<void>; kick: () => void } {
   let running: Promise<void> | null = null;
+  let kicked = false;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const sleep = (ms: number | null) => {
+    clearTimeout(timer);
+    if (ms === null || stopped) return;
+    timer = setTimeout(tick, Math.min(Math.max(ms, 50), MAX_SLEEP_MS));
+    timer.unref();
+  };
+  const pass = async () => {
+    await processDueRenders(ctx);
+    sleep(await nextRenderDueMs(ctx.sql));
+  };
   const tick = () => {
-    if (running) return;
-    running = processDueRenders(ctx)
-      .then(() => undefined)
-      .catch((err) => ctx.log.error({ err }, "render worker failed"))
+    if (stopped) return;
+    // A kick during a pass may have queued a job the pass already looked past; run again after it.
+    if (running) {
+      kicked = true;
+      return;
+    }
+    clearTimeout(timer);
+    running = pass()
+      .catch((err) => {
+        ctx.log.error({ err }, "render worker failed");
+        sleep(RETRY_MS);
+      })
       .finally(() => {
         running = null;
+        if (kicked) {
+          kicked = false;
+          tick();
+        }
       });
   };
-  const timer = setInterval(tick, intervalMs);
-  timer.unref();
+  tick();
   return {
     kick: tick,
     stop: async () => {
-      clearInterval(timer);
+      stopped = true;
+      clearTimeout(timer);
       await running;
     },
   };

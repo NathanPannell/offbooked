@@ -3,7 +3,6 @@ import { loadConfig } from "./config.ts";
 import { createCtx } from "./context.ts";
 import { createSql, migrate } from "./db.ts";
 import { recoverScriptParses } from "./parse/job.ts";
-import { pruneRateLimits } from "./ratelimit.ts";
 import { recoverRenders, startRenderWorker } from "./render/queue.ts";
 
 const config = loadConfig();
@@ -33,8 +32,6 @@ try {
 
 const worker = startRenderWorker(ctx);
 renderKick.kick = worker.kick;
-const prune = setInterval(() => pruneRateLimits(sql).catch((err) => log.error({ err }, "rate limit prune failed")), 3_600_000);
-prune.unref();
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, async () => {

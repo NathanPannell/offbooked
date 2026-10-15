@@ -28,7 +28,16 @@ export async function consume(sql: Sql, key: string, { limit, windowSeconds }: L
   return row!.count <= limit;
 }
 
+// Old windows are pruned at most hourly and only alongside a request, never on a timer, so an
+// idle server sends no queries and Neon can scale the database to zero.
+const PRUNE_EVERY_MS = 3_600_000;
+let lastPrune = 0;
+
 export async function enforce(sql: Sql, log: Log, key: string, limit: Limit, message = "Too many requests. Try again in a few minutes."): Promise<void> {
+  if (Date.now() - lastPrune > PRUNE_EVERY_MS) {
+    lastPrune = Date.now();
+    pruneRateLimits(sql).catch((err) => log.error({ err }, "rate limit prune failed"));
+  }
   if (await consume(sql, key, limit)) return;
   log.warn({ key }, "rate limit exceeded");
   throw new HttpError(429, "rate_limited", message);
