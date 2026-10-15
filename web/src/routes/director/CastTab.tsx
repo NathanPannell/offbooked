@@ -1,28 +1,24 @@
-import { BellRing, Check, Copy, Headphones, Link2, Mic, MoreHorizontal, Pencil, RotateCcw, Share2, UserPlus } from "lucide-react";
-import { useMemo, useState, type MouseEvent } from "react";
-import { Link } from "react-router";
+import { Check, Copy, Headphones, Mic, Share2 } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router";
 import { errorMessage } from "../../api/client";
-import { cast as castApi, joinLink, script as scriptApi } from "../../api/director";
-import type { CastMember, Character, Production } from "../../api/types";
-import { Avatar } from "../../components/Avatar";
+import { cast as castApi, joinLink } from "../../api/director";
+import type { CallSheetCharacter, Production } from "../../api/types";
 import { CharacterName } from "../../components/CharacterName";
 import { Confetti } from "../../components/Confetti";
-import { Dialog } from "../../components/Dialog";
 import { EmptyStage } from "../../components/Illustrations";
 import { Loading } from "../../components/Loading";
 import { ProgressBar } from "../../components/ProgressBar";
 import { useToast } from "../../components/Toast";
-import { firstWord, joinNames, plural, relativeTime } from "../../lib/format";
-import { copyText, shareOrCopy, type ShareOutcome } from "../../lib/share";
+import { plural } from "../../lib/format";
+import { copyText, shareOrCopy } from "../../lib/share";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useInterval, useResource } from "../../lib/useResource";
-import { ActorForm } from "./ActorForm";
-import { MergeSuggestions } from "./MergeSuggestions";
 
-function minutesFor(lines: number): number {
-  return Math.max(2, Math.ceil((lines * 12) / 60));
-}
-
+/**
+ * The director's cast page: the one cast link up top, a read-only call sheet of every part, and a
+ * way to record a part yourself in the same recording flow the cast uses.
+ */
 export function CastTab({
   production,
   onOpenScript,
@@ -32,97 +28,59 @@ export function CastTab({
   onOpenScript: () => void;
   onOpenPlay: () => void;
 }) {
+  const navigate = useNavigate();
   const toast = useToast();
-  const data = useResource(() => Promise.all([castApi.list(production.id), scriptApi.get(production.id)]), production.id);
-  const [form, setForm] = useState<{ member?: CastMember; characterIds: string[] } | null>(null);
-  const [resetting, setResetting] = useState<CastMember | null>(null);
-  const [merging, setMerging] = useState(false);
+  const sheet = useResource(() => castApi.callSheet(production.id).then((r) => r.characters), `sheet:${production.id}`);
+  const [opening, setOpening] = useState<string | null>(null);
 
-  useInterval(() => void data.reload(), 15_000, !!data.data);
+  useInterval(() => void sheet.reload(), 15_000, !!sheet.data);
 
-  const characters = useMemo(() => new Map((data.data?.[1].characters ?? []).map((c) => [c.id, c])), [data.data]);
+  const recordAs = async (characterId: string) => {
+    setOpening(characterId);
+    try {
+      const { inviteToken } = await castApi.recordAs(production.id, characterId);
+      navigate(`/i/${inviteToken}`);
+    } catch (err) {
+      toast(errorMessage(err));
+      setOpening(null);
+      void sheet.reload();
+    }
+  };
 
-  if (data.loading) return <Loading />;
-  if (data.error || !data.data) {
+  if (sheet.loading) return <Loading />;
+  if (sheet.error || !sheet.data) {
     return (
       <div className="notice notice-error" role="alert">
-        {errorMessage(data.error)}{" "}
-        <button className="link-btn" onClick={() => void data.reload()}>
+        {errorMessage(sheet.error)}{" "}
+        <button className="link-btn" onClick={() => void sheet.reload()}>
           Try again
         </button>
       </div>
     );
   }
-  const [{ cast, uncastCharacterIds }, script] = data.data;
 
-  if (script.status !== "ready") {
+  const parts = sheet.data;
+  if (parts.length === 0) {
     return (
       <div className="empty-state">
         <EmptyStage />
         <h2 className="display">The cast list comes from the script</h2>
         <p className="muted">Once your script is read, every character shows up here, ready for the cast to claim.</p>
         <button type="button" className="btn btn-primary" onClick={onOpenScript}>
-          {script.status === "parsing" ? "See how the script is going" : "Add the script"}
+          {production.scriptStatus === "parsing" ? "See how the script is going" : "Add the script"}
         </button>
       </div>
     );
   }
 
-  const roleNames = (m: CastMember) => joinNames(m.characterIds.map((id) => characters.get(id)?.name ?? "?"));
-  const uncast = uncastCharacterIds
-    .map((id) => characters.get(id))
-    .filter((c): c is Character => !!c && c.lineCount > 0)
-    .sort((a, b) => b.lineCount - a.lineCount);
-  const linesTotal = cast.reduce((n, m) => n + m.linesTotal, 0);
-  const linesRecorded = cast.reduce((n, m) => n + m.linesRecorded, 0);
-  const wrapped = cast.length > 0 && cast.every((m) => m.status === "done") && uncast.length === 0;
-
-  const report = (outcome: ShareOutcome) => {
-    if (outcome === "copied") toast("Message and link copied");
-    if (outcome === "failed") toast("Couldn't share or copy. Copy the link by hand.");
-  };
-
-  const shareMember = async (m: CastMember) =>
-    report(
-      await shareOrCopy({
-        title: `${production.title}: your lines`,
-        text: `Hi ${firstWord(m.firstName || m.name)}! You're ${roleNames(m)} in ${production.title}. Record your lines here. It takes about ${minutesFor(m.linesTotal)} minutes, with no app or account:`,
-        url: m.inviteUrl,
-      }),
-    );
-
-  const nudge = async (m: CastMember) => {
-    const left = m.linesTotal - m.linesRecorded;
-    const who = firstWord(m.firstName || m.name);
-    const text =
-      m.status === "not_opened"
-        ? `Hi ${who}, a quick reminder: your ${plural(m.linesTotal, "line")} for ${roleNames(m)} in ${production.title} are waiting. It only takes a few minutes:`
-        : `Hi ${who}, you've got ${plural(left, "line")} left for ${roleNames(m)} in ${production.title}. Pick up where you left off:`;
-    const outcome = await shareOrCopy({ title: production.title, text, url: m.inviteUrl });
-    report(outcome);
-    if (outcome === "shared" || outcome === "copied") castApi.nudged(m.id).then(() => data.reload(), () => {});
-  };
-
-  const merge = async (from: Character, into: Character) => {
-    setMerging(true);
-    try {
-      await scriptApi.mergeCharacter(from.id, into.id);
-      toast(`Merged ${from.name} into ${into.name}`);
-      void data.reload();
-      return true;
-    } catch (err) {
-      toast(errorMessage(err));
-      return false;
-    } finally {
-      setMerging(false);
-    }
-  };
+  const linesTotal = parts.reduce((n, c) => n + c.lineCount, 0);
+  const linesRecorded = parts.reduce((n, c) => n + c.linesRecorded, 0);
+  const taken = parts.filter((c) => c.takenBy).length;
+  const wrapped = parts.every((c) => c.linesRecorded >= c.lineCount);
 
   return (
     <div className="cast">
-      <CastLink production={production} castCount={cast.length} />
-
-      <MergeSuggestions productionId={production.id} characters={script.characters} busy={merging} onMerge={merge} />
+      <CastLink production={production} />
 
       {wrapped && <WrapBanner productionId={production.id} onListen={onOpenPlay} />}
 
@@ -131,8 +89,11 @@ export function CastTab({
           <div>
             <p className="eyebrow">Call sheet</p>
             <h2 id="call-sheet-title" className="display">
-              {cast.length === 0 ? "Nobody's joined yet" : `${linesRecorded.toLocaleString()} of ${plural(linesTotal, "line")} recorded`}
+              {linesRecorded.toLocaleString()} of {plural(linesTotal, "line")} recorded
             </h2>
+            <p className="small muted">
+              {taken === 0 ? "Nobody has picked a part yet." : `${taken} of ${plural(parts.length, "part")} taken.`}
+            </p>
           </div>
           {linesRecorded > 0 && !wrapped && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenPlay}>
@@ -140,178 +101,115 @@ export function CastTab({
             </button>
           )}
         </header>
-        {cast.length > 0 && <ProgressBar value={linesRecorded} max={linesTotal} label="Lines recorded across the cast" />}
+        <ProgressBar value={linesRecorded} max={linesTotal} label="Lines recorded across the cast" />
 
-        {cast.length === 0 ? (
-          <p className="muted call-sheet-empty">
-            When someone opens the cast link and picks a part, they show up here, and you can watch their lines come in.
-          </p>
-        ) : (
-          <ul className="actor-list" aria-label="Cast">
-            {cast.map((m) => (
-              <li key={m.id} className={`actor-row status-${m.status}`}>
-                <Avatar name={m.firstName || m.name} />
-                <div className="actor-main">
-                  <p className="actor-name">
-                    {m.firstName || m.name}
-                    {m.status === "done" && <span className="stamp"><Check size={12} strokeWidth={2.5} aria-hidden="true" /> All recorded</span>}
-                  </p>
-                  <p className="actor-roles small">
-                    {m.characterIds.map((id, i) => (
-                      <span key={id}>
-                        {i > 0 && ", "}
-                        <CharacterName name={characters.get(id)?.name ?? "?"} />
-                      </span>
-                    ))}
-                  </p>
-                  {m.status !== "done" && (
-                    <div className="actor-progress">
-                      <ProgressBar value={m.linesRecorded} max={m.linesTotal} label={`${m.name}'s lines recorded`} />
-                      <span className="mono nums">
-                        {m.linesRecorded}/{m.linesTotal}
-                      </span>
-                    </div>
-                  )}
-                  <p className="actor-meta small muted">
-                    {m.status === "not_opened" ? "Hasn't opened their link" : `Active ${relativeTime(m.lastActiveAt).toLowerCase()}`}
-                    {m.avgAccuracy !== null && ` · ${Math.round(m.avgAccuracy * 100)}% word-perfect`}
-                    {m.nudgedAt && ` · nudged ${relativeTime(m.nudgedAt).toLowerCase()}`}
-                  </p>
-                </div>
-                <div className="actor-actions">
-                  {m.status !== "done" && (
-                    <button type="button" className="btn btn-secondary btn-sm nudge-btn" onClick={() => nudge(m)} aria-label={`Nudge ${m.firstName || m.name}`}>
-                      <BellRing size={15} aria-hidden="true" /> <span className="hide-sm">Nudge</span>
-                    </button>
-                  )}
-                  <details className="menu">
-                    <summary className="icon-btn" aria-label={`More for ${m.name}`}>
-                      <MoreHorizontal size={20} />
-                    </summary>
-                    <div className="menu-items" role="menu">
-                      <button type="button" role="menuitem" onClick={(e) => (closeMenu(e), void shareMember(m))}>
-                        <Share2 size={16} aria-hidden="true" /> Share their own link
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={async (e) => {
-                          closeMenu(e);
-                          toast((await copyText(m.inviteUrl)) ? "Link copied" : "Couldn't copy");
-                        }}
-                      >
-                        <Link2 size={16} aria-hidden="true" /> Copy their link
-                      </button>
-                      <button type="button" role="menuitem" onClick={(e) => (closeMenu(e), setForm({ member: m, characterIds: m.characterIds }))}>
-                        <Pencil size={16} aria-hidden="true" /> Edit name or parts
-                      </button>
-                      <button type="button" role="menuitem" onClick={(e) => (closeMenu(e), setResetting(m))}>
-                        <RotateCcw size={16} aria-hidden="true" /> Reset their link
-                      </button>
-                    </div>
-                  </details>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+        <ul className="sheet-list" aria-label="Parts">
+          {parts.map((c) => (
+            <SheetRow key={c.id} part={c} busy={opening === c.id} onRecord={() => void recordAs(c.id)} />
+          ))}
+        </ul>
+        <p className="small muted">Until someone records a part, its lines play in a computer voice in the run-through.</p>
       </section>
 
-      {uncast.length > 0 && (
-        <section className="open-roles" aria-labelledby="open-roles-title">
-          <div className="spread">
-            <div>
-              <p className="eyebrow">Open roles</p>
-              <h2 id="open-roles-title" className="display">
-                {plural(uncast.length, "part")} still free
-              </h2>
-            </div>
-            <Link className="btn btn-secondary btn-sm" to={`/app/p/${production.id}/record`}>
-              <Mic size={15} aria-hidden="true" /> Read some yourself
-            </Link>
-          </div>
-          <p className="small muted">
-            Until someone records them, these lines play in a computer voice in the run-through. Anyone can still claim them
-            through the cast link.
-          </p>
-          <ul className="role-list">
-            {uncast.map((c) => (
-              <li key={c.id} className="role-row">
-                <CharacterName name={c.name} />
-                <span className="small muted nums">{plural(c.lineCount, "line")}</span>
-                <span className="grow" />
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setForm({ characterIds: [c.id] })}>
-                  Assign
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <div className="cast-footer">
-        <button type="button" className="quiet-link" onClick={() => setForm({ characterIds: [] })}>
-          <UserPlus size={14} aria-hidden="true" /> Add someone by hand
-        </button>
-        <Link className="quiet-link" to={`/app/p/${production.id}/record`}>
-          <Mic size={14} aria-hidden="true" /> Record stand-in lines
-        </Link>
-      </div>
-
-      <Dialog open={!!form} onClose={() => setForm(null)} title={form?.member ? `Edit ${form.member.name}` : "Add someone"}>
-        {form && (
-          <ActorForm
-            productionId={production.id}
-            member={form.member}
-            initialCharacterIds={form.characterIds}
-            characters={[...characters.values()]}
-            castMembers={cast}
-            onSaved={async (member, created) => {
-              setForm(null);
-              await data.reload();
-              if (created) toast(`${member.name} added. Share their link from the call sheet.`);
-            }}
-          />
-        )}
-      </Dialog>
-
-      <Dialog open={!!resetting} onClose={() => setResetting(null)} title="Reset their link">
-        {resetting && (
-          <ResetLink
-            member={resetting}
-            onReset={async () => {
-              const { member } = await castApi.resetLink(resetting.id);
-              setResetting(member);
-              await data.reload();
-              return member;
-            }}
-            onShare={(m) => void shareMember(m)}
-          />
-        )}
-      </Dialog>
+      <RecordYourself parts={parts} opening={opening} onRecord={(id) => void recordAs(id)} />
     </div>
   );
 }
 
-function closeMenu(e: MouseEvent) {
-  (e.currentTarget as HTMLElement).closest("details")?.removeAttribute("open");
+function SheetRow({ part, busy, onRecord }: { part: CallSheetCharacter; busy: boolean; onRecord: () => void }) {
+  const done = part.linesRecorded >= part.lineCount;
+  const state = done ? "is-done" : part.takenBy ? "is-taken" : "is-open";
+  return (
+    <li className={`sheet-row ${state}`}>
+      <div className="sheet-part">
+        <CharacterName name={part.name} className="sheet-name" />
+        <span className={`sheet-who small ${part.takenBy ? "" : "muted"}`}>
+          {part.mine ? "You" : (part.takenBy ?? "Not taken yet")}
+        </span>
+      </div>
+      <div className="sheet-progress">
+        {done ? (
+          <span className="sheet-done small">
+            <Check size={14} strokeWidth={2.5} aria-hidden="true" /> All {part.lineCount} in
+          </span>
+        ) : (
+          <>
+            <span className="mono nums" aria-label={`${part.linesRecorded} of ${part.lineCount} lines recorded`}>
+              {part.linesRecorded}/{part.lineCount}
+            </span>
+            <ProgressBar value={part.linesRecorded} max={part.lineCount} label={`${part.name} lines recorded`} className="sheet-bar" />
+          </>
+        )}
+      </div>
+      {part.mine && (
+        <button type="button" className="btn btn-ghost btn-sm sheet-record" onClick={onRecord} disabled={busy} aria-label={`Record ${part.name}`}>
+          <Mic size={15} aria-hidden="true" /> <span className="hide-sm">{done ? "Re-record" : "Record"}</span>
+        </button>
+      )}
+    </li>
+  );
+}
+
+/** Pick a free part (or one already yours) and record it in the same flow the cast uses. */
+function RecordYourself({ parts, opening, onRecord }: { parts: CallSheetCharacter[]; opening: string | null; onRecord: (characterId: string) => void }) {
+  const choices = parts.filter((c) => c.mine || !c.takenBy);
+  const [picked, setPicked] = useState("");
+  const value = choices.some((c) => c.id === picked) ? picked : (choices[0]?.id ?? "");
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (value) onRecord(value);
+  };
+
+  return (
+    <section className="record-yourself" aria-labelledby="record-yourself-title">
+      <div>
+        <p className="eyebrow">Reading in</p>
+        <h2 id="record-yourself-title" className="display">
+          Record a part yourself
+        </h2>
+        <p className="small muted">
+          Pick a part and record its lines on this device, just like the cast does. It shows as yours on the call sheet, so nobody else can claim it.
+        </p>
+      </div>
+      {choices.length === 0 ? (
+        <p className="small muted">Every part is taken.</p>
+      ) : (
+        <form className="record-yourself-form" onSubmit={submit}>
+          <label className="field grow">
+            <span className="sr-only">Part to record</span>
+            <select className="input" value={value} onChange={(e) => setPicked(e.target.value)}>
+              {choices.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} · {plural(c.lineCount, "line")}
+                  {c.mine ? " · yours" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="btn btn-secondary" disabled={!value || opening !== null}>
+            <Mic size={16} aria-hidden="true" /> {opening ? "Opening…" : "Start recording"}
+          </button>
+        </form>
+      )}
+    </section>
+  );
 }
 
 /** The one link for the whole cast: the main way people join. */
-function CastLink({ production, castCount }: { production: Production; castCount: number }) {
+function CastLink({ production }: { production: Production }) {
   const toast = useToast();
   const link = useResource(() => joinLink.get(production.id).then((r) => r.joinUrl), `join:${production.id}`);
   const [confirmReset, setConfirmReset] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const message = {
-    title: `${production.title}: record your lines`,
-    text: `Hi all! Record your lines for ${production.title} here. Pick your character and go: it takes a few minutes on your phone, with no app or account.`,
-  };
-
   const share = async () => {
     if (!link.data) return;
-    const outcome = await shareOrCopy({ ...message, url: link.data });
+    const outcome = await shareOrCopy({
+      title: `${production.title}: record your lines`,
+      text: `Hi all! Record your lines for ${production.title} here. Pick your character and go: it takes a few minutes on your phone, with no app or account.`,
+      url: link.data,
+    });
     if (outcome === "copied") toast("Message and link copied. Paste it in the cast chat.");
     if (outcome === "failed") toast("Couldn't copy. Select the link and copy it by hand.");
   };
@@ -333,13 +231,11 @@ function CastLink({ production, castCount }: { production: Production; castCount
   return (
     <section className="cast-link raised" aria-labelledby="cast-link-title">
       <div className="cast-link-copy">
-        <p className="eyebrow">{castCount === 0 ? "Step 2 · Invite your cast" : "Cast link"}</p>
+        <p className="eyebrow">Cast link</p>
         <h2 id="cast-link-title" className="display">
           One link for the whole cast
         </h2>
-        <p className="muted">
-          Drop it in the group chat. Each person picks their character, types their first name and starts recording. No accounts.
-        </p>
+        <p className="muted">Drop it in the group chat. Each person picks their part, types their first name and starts recording. No accounts.</p>
       </div>
       {link.error ? (
         <div className="notice notice-error" role="alert">
@@ -352,20 +248,19 @@ function CastLink({ production, castCount }: { production: Production; castCount
         <>
           <div className="link-ticket">
             <span className="link-ticket-url mono">{link.data ? link.data.replace(/^https?:\/\//, "") : "Making your link…"}</span>
-          </div>
-          <div className="row cast-link-actions">
-            <button type="button" className="btn btn-primary btn-lg" onClick={share} disabled={!link.data}>
-              <Share2 size={18} aria-hidden="true" /> Share the cast link
-            </button>
             <button
               type="button"
-              className="btn btn-secondary"
+              className="icon-btn link-ticket-copy"
               disabled={!link.data}
+              aria-label="Copy the cast link"
               onClick={async () => toast((await copyText(link.data!)) ? "Link copied" : "Couldn't copy")}
             >
-              <Copy size={16} aria-hidden="true" /> Copy
+              <Copy size={18} />
             </button>
           </div>
+          <button type="button" className="btn btn-primary btn-lg cast-link-share" onClick={share} disabled={!link.data}>
+            <Share2 size={18} aria-hidden="true" /> Share the cast link
+          </button>
           {confirmReset ? (
             <div className="reset-confirm">
               <p className="small">The old link stops working for anyone who hasn't joined yet. People already in keep their place.</p>
@@ -379,7 +274,7 @@ function CastLink({ production, castCount }: { production: Production; castCount
               </div>
             </div>
           ) : (
-            <button type="button" className="quiet-link" style={{ alignSelf: "flex-start" }} onClick={() => setConfirmReset(true)}>
+            <button type="button" className="quiet-link cast-link-reset" onClick={() => setConfirmReset(true)}>
               Link shared with the wrong people? Reset it
             </button>
           )}
@@ -407,44 +302,5 @@ function WrapBanner({ productionId, onListen }: { productionId: string; onListen
         <Headphones size={18} aria-hidden="true" /> Hear the run-through
       </button>
     </section>
-  );
-}
-
-function ResetLink({ member, onReset, onShare }: { member: CastMember; onReset: () => Promise<CastMember>; onShare: (m: CastMember) => void }) {
-  const [state, setState] = useState<"confirm" | "busy" | "done">("confirm");
-  const [error, setError] = useState<string | null>(null);
-  if (state === "done") {
-    return (
-      <div className="stack">
-        <p>{member.name}'s old link no longer works. Send them the new one.</p>
-        <p className="link-box mono">{member.inviteUrl}</p>
-        <button type="button" className="btn btn-primary" onClick={() => onShare(member)}>
-          <Share2 size={18} aria-hidden="true" /> Share new link
-        </button>
-      </div>
-    );
-  }
-  return (
-    <div className="stack">
-      <p>This makes a new personal link for {member.name} and turns the old one off. Their recordings stay. Use it if their link went to the wrong person.</p>
-      {error && <p className="field-error">{error}</p>}
-      <button
-        type="button"
-        className="btn btn-danger"
-        disabled={state === "busy"}
-        onClick={async () => {
-          setState("busy");
-          try {
-            await onReset();
-            setState("done");
-          } catch (err) {
-            setError(errorMessage(err));
-            setState("confirm");
-          }
-        }}
-      >
-        Reset link
-      </button>
-    </div>
   );
 }

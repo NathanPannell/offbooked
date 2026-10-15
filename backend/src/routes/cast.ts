@@ -2,8 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { ownedProduction, requireDirector, type Director } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
-import { badRequest, notFound } from "../errors.ts";
+import { badRequest, conflict, notFound } from "../errors.ts";
+import { isUuid } from "../crypto.ts";
 import { body, idOf, optionalEmail, optionalString, requiredString, uuidList } from "../input.ts";
+import { inviteToken, inviteUrl } from "../invite.ts";
 import { castMemberView, castRows } from "../views.ts";
 
 async function ownedActor(sql: Sql, user: Director, actorId: string): Promise<{ id: string; productionId: string }> {
@@ -78,6 +80,60 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
     const actor = await ownedActor(sql, user, idOf(req.params, "actorId"));
     await sql`update actors set token_version = token_version + 1 where id = ${actor.id}`;
     return { member: await member(actor.productionId, actor.id) };
+  });
+
+  // The call sheet: every speaking character, who has taken it (first name) and how many of its
+  // lines the cast has recorded. Read-only; stand-in takes and TTS don't count.
+  app.get("/api/productions/:id/call-sheet", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const rows = await sql<{ id: string; name: string; lineCount: number; linesRecorded: number; takenBy: string | null; mine: boolean }[]>`
+      select c.id, c.name,
+        (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue') as line_count,
+        (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue'
+          and exists (select 1 from takes t where t.line_id = l.id and t.recorded_by = 'actor')) as lines_recorded,
+        coalesce(a.first_name, split_part(a.name, ' ', 1)) as taken_by,
+        coalesce(a.director_user_id = ${user.id}, false) as mine
+      from characters c
+        left join actor_characters ac on ac.character_id = c.id
+        left join actors a on a.id = ac.actor_id
+      where c.production_id = ${p.id}
+      order by line_count desc, lower(c.name)`;
+    return { characters: rows.filter((c) => c.lineCount > 0) };
+  });
+
+  // The director records a part themselves, in the same recording flow the cast uses. They get
+  // one cast member per production (created on first use) that takes the character; a character
+  // someone else has taken is refused.
+  app.post("/api/productions/:id/record-as", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const b = body(req.body);
+    if (!isUuid(b.characterId)) throw badRequest("Pick a character.");
+    const characterId = b.characterId.toLowerCase();
+    const name = user.name?.trim() || "Director";
+    const firstName = name.split(/\s+/)[0]!;
+    const actor = await sql.begin(async (tx) => {
+      const [character] = await tx<{ id: string; ownerId: string | null }[]>`
+        select c.id, ac.actor_id as owner_id from characters c left join actor_characters ac on ac.character_id = c.id
+        where c.id = ${characterId} and c.production_id = ${p.id} for update of c`;
+      if (!character) throw notFound("Character not found.");
+      await tx`
+        insert into actors (production_id, name, first_name, opened_at, director_user_id)
+        values (${p.id}, ${name}, ${firstName}, now(), ${user.id})
+        on conflict (production_id, director_user_id) where director_user_id is not null do nothing`;
+      const [mine] = await tx<{ id: string; tokenVersion: number }[]>`
+        select id, token_version from actors where production_id = ${p.id} and director_user_id = ${user.id}`;
+      if (character.ownerId && character.ownerId !== mine!.id) {
+        throw conflict("character_taken", "Someone in the cast has already taken that part.");
+      }
+      if (!character.ownerId) await tx`insert into actor_characters (actor_id, character_id) values (${mine!.id}, ${character.id})`;
+      return mine!;
+    });
+    return {
+      inviteToken: inviteToken(config.inviteSecret, actor.id, actor.tokenVersion),
+      inviteUrl: inviteUrl(config.appUrl, config.inviteSecret, actor.id, actor.tokenVersion),
+    };
   });
 
   app.post("/api/cast/:actorId/nudged", async (req) => {

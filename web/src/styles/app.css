@@ -2280,43 +2280,60 @@
 .cast {
   display: flex;
   flex-direction: column;
-  gap: var(--s-6);
+  gap: var(--s-8);
+  padding-bottom: var(--s-8);
 }
 
+/* The cast link is the hero of the page. */
 .cast-link {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
-  padding: var(--s-6);
+  padding: var(--s-8) var(--s-6);
 }
 
 .cast-link-copy {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  max-width: 560px;
 }
 
 .cast-link-copy h2 {
-  font-size: clamp(26px, 5vw, 34px);
+  font-size: clamp(30px, 6vw, 42px);
+  line-height: 1.08;
 }
 
 .link-ticket {
-  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 6px 6px 16px;
   border: 1px dashed var(--edge-strong);
   border-radius: var(--radius);
   background: var(--paper);
 }
 
 .link-ticket-url {
-  font-size: 14px;
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
   letter-spacing: 0;
   text-transform: none;
   color: var(--ink);
   word-break: break-all;
 }
 
-.cast-link-actions {
-  gap: var(--s-3);
+.link-ticket-copy {
+  flex: none;
+}
+
+.cast-link-share {
+  align-self: flex-start;
+}
+
+.cast-link-reset {
+  align-self: flex-start;
 }
 
 .reset-confirm {
@@ -2328,8 +2345,20 @@
   background: var(--bad-soft);
 }
 
+@media (max-width: 640px) {
+  .cast-link {
+    padding: var(--s-6) var(--s-4);
+  }
+
+  .cast-link-share {
+    align-self: stretch;
+  }
+}
+
+/* Call sheet: one quiet row per part, read-only. */
+
 .call-sheet,
-.open-roles {
+.record-yourself {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -2344,186 +2373,115 @@
 }
 
 .call-sheet-head h2,
-.open-roles h2 {
+.record-yourself h2 {
   font-size: clamp(22px, 4vw, 28px);
 }
 
-.call-sheet-empty {
-  padding: var(--s-5);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-lg);
-  text-align: center;
-}
-
-.actor-list {
+.sheet-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: #fff;
-  box-shadow: var(--shadow-sm);
+  border-top: 1px solid var(--line-strong);
 }
 
-.actor-row {
+.sheet-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--s-3);
-  padding: var(--s-4);
+  min-height: 60px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
 }
 
-.actor-row + .actor-row {
-  border-top: 1px solid var(--line);
-}
-
-.actor-main {
+.sheet-part {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.actor-name {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.actor-progress {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  max-width: 340px;
-}
-
-.actor-progress .progress {
-  flex: 1;
-}
-
-.actor-progress .mono {
-  color: var(--ink-soft);
-}
-
-.actor-actions {
-  display: flex;
-  align-items: center;
   gap: 2px;
 }
 
-/* A quiet badge for an actor who's recorded everything. */
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 22px;
-  padding: 0 9px;
-  border: 1px solid #cfe3d6;
-  border-radius: var(--radius-pill);
-  background: var(--good-soft);
-  color: var(--good);
-  font: 600 11px/1 var(--font-sans);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  animation: badge-in var(--medium) var(--ease) both;
+.sheet-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
 }
 
-@keyframes badge-in {
-  from {
-    opacity: 0;
-  }
+.sheet-who {
+  color: var(--ink-soft);
 }
 
-.status-done {
-  background: linear-gradient(90deg, rgba(234, 243, 237, 0.7), transparent 55%);
+.sheet-who.muted {
+  color: var(--muted);
 }
 
-.menu {
-  position: relative;
-}
-
-.menu summary {
-  list-style: none;
-}
-
-.menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.menu-items {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 15;
-  min-width: 230px;
-  padding: 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: #fff;
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-}
-
-.menu-items button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: var(--tap);
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  text-align: left;
-  font-weight: 600;
-  font-size: 15px;
-  cursor: pointer;
-}
-
-.menu-items button:hover {
-  background: var(--paper);
-}
-
-.role-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
-}
-
-@media (min-width: 720px) {
-  .role-list {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.role-row {
+.sheet-progress {
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  min-height: 52px;
-  padding: 4px 4px 4px 14px;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
 }
 
-.cast-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2) var(--s-6);
-  padding-bottom: var(--s-8);
+.sheet-progress .mono {
+  min-width: 52px;
+  text-align: right;
+  color: var(--ink-soft);
 }
 
-.cast-footer .quiet-link {
+.sheet-bar {
+  width: 88px;
+}
+
+.sheet-done {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  color: var(--good);
+  font-weight: 600;
+}
+
+.sheet-record {
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .sheet-bar {
+    width: 48px;
+  }
+
+  .sheet-progress .mono {
+    min-width: 0;
+  }
+}
+
+/* Record a part yourself. */
+
+.record-yourself {
+  padding: var(--s-5);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: #fff;
+}
+
+.record-yourself-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--s-2);
+}
+
+.record-yourself-form .field {
+  min-width: 220px;
+}
+
+@media (max-width: 640px) {
+  .record-yourself-form .field,
+  .record-yourself-form .btn {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
 }
 
 .wrap-banner {
@@ -2580,16 +2538,6 @@
     opacity: 0;
     transform: translate(var(--drift), 70vh) rotate(var(--spin));
   }
-}
-
-/* Actor form (by hand) */
-
-.role-picker {
-  border: 0;
-  margin: 0;
-  padding: 0;
-  max-height: 260px;
-  overflow-y: auto;
 }
 
 /* ======================================================================
@@ -3775,17 +3723,6 @@
 @media (max-width: 640px) {
   .hide-sm {
     display: none;
-  }
-}
-
-@media (max-width: 640px) {
-  .nudge-btn {
-    width: 40px;
-    padding: 0;
-  }
-
-  .actor-row {
-    padding: var(--s-3);
   }
 }
 

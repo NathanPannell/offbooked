@@ -269,3 +269,14 @@ interface RunThrough {
 
 - `POST /api/lines/:id/merge-previous` → `{ line }`: joins this line into the one above it. `merge-next` joins the next line into this one. Either way the upper line keeps its id, kind and speaker, the texts are joined with a newline, and the lower line must have no recordings (409 `has_recordings`).
 - The parser keeps each speech as one dialogue line: a stage direction printed inside a speech becomes its own stage-direction line before the speech (or after it, when it follows the last words).
+
+### Cast page: call sheet and recording a part yourself (2026-10-15)
+
+The director's cast page shows the cast link, a read-only call sheet and a way to record a part yourself. It no longer assigns parts, makes per-actor links or collects emails and phones; the `/api/productions/:id/cast` and `/api/cast/:actorId/*` routes stay for now but the web app doesn't use them.
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, takenBy: string \| null, mine: boolean }[] }`: every character with dialogue, biggest parts first. `takenBy` is the first name of whoever took the part; `mine` is true for a part the director took with `record-as`. `linesRecorded` counts the cast's own takes only (not stand-ins or TTS). |
+| POST | `/api/productions/:id/record-as` | director (own production) | `{ characterId }` → `{ inviteToken, inviteUrl }`. The director gets one cast member per production (`actors.director_user_id`), created on first use with their first name and already opened, so `/i/<inviteToken>` goes straight to recording. The character is added to that cast member unless it is already theirs. 409 `character_taken` if someone else has the part; 404 for a character outside the production; 400 for a missing or malformed id. |
+
+- The director's cast member records ordinary actor takes (`recorded_by = 'actor'`), so they count as progress and the part can't be claimed through the cast link. No "finished all lines" email is sent for it.

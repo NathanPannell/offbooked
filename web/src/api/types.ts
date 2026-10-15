@@ -72,6 +72,18 @@ export interface Production {
 
 export type CastStatus = "not_opened" | "opened" | "in_progress" | "done";
 
+/** One speaking character on the director's call sheet. Progress counts the cast's own takes only. */
+export interface CallSheetCharacter {
+  id: string;
+  name: string;
+  lineCount: number;
+  linesRecorded: number;
+  /** First name of whoever took the part, or null while it's free. */
+  takenBy: string | null;
+  /** The director took it to record themselves. */
+  mine: boolean;
+}
+
 export interface CastMember {
   id: string;
   name: string;
