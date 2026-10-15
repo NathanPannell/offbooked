@@ -209,6 +209,20 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(refused.statusCode, 409);
     assert.equal(refused.json().error.code, "has_recordings");
     await t.ctx.sql`delete from takes where line_id = ${recorded.id}`;
+
+    // Undo puts a flag back with its code: on an inserted line and on a PATCH that restores an edit.
+    const flaggedBack = (
+      await send("POST", `/api/productions/${pid}/lines`, { afterLineId: recorded.id, kind: "stage_direction", text: "Thunder.", flagged: true, flagCode: "direction" })
+    ).json().line;
+    assert.equal(flaggedBack.flagCode, "direction");
+    const edited = (await send("PATCH", `/api/lines/${flaggedBack.id}`, { text: "Thunder and lightning." })).json().line;
+    assert.equal(edited.flagged, false);
+    assert.equal(edited.flagCode, null);
+    const undone = (await send("PATCH", `/api/lines/${flaggedBack.id}`, { text: "Thunder.", flagged: true, flagCode: "direction", flagReason: null })).json().line;
+    assert.equal(undone.flagged, true);
+    assert.equal(undone.flagCode, "direction");
+    assert.equal((await send("PATCH", `/api/lines/${flaggedBack.id}`, { flagged: true, flagCode: "nope" })).statusCode, 400);
+    await t.app.inject({ method: "DELETE", url: `/api/lines/${flaggedBack.id}`, headers: bearer(alice) });
   });
 
   test("section breaks and renames", async () => {

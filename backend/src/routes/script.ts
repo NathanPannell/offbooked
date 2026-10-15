@@ -39,6 +39,18 @@ async function tidySections(sql: Tx, productionId: string): Promise<void> {
             where s.id = r.id and s.seq <> r.rn`;
 }
 
+// A flag sent back by undo (split's `second`, an insert, or a PATCH that restores an edit). A client
+// that sends no code gets the reason's nearest one, else the usual one for the kind.
+function flagFrom(b: Record<string, unknown>, kind: LineRow["kind"]): { flagged: boolean; flagCode: FlagCode | null; flagReason: string | null } {
+  const flagged = b.flagged === true;
+  if (!flagged) return { flagged, flagCode: null, flagReason: null };
+  if (b.flagCode !== undefined && b.flagCode !== null && !isFlagCode(b.flagCode)) throw badRequest(`flagCode must be one of ${FLAG_CODES.join(", ")}.`);
+  const flagReason = optionalString(b, "flagReason", 500) ?? null;
+  const kindCode: FlagCode = kind === "dialogue" ? "speaker" : kind === "heading" ? "heading" : "direction";
+  const flagCode = isFlagCode(b.flagCode) ? b.flagCode : (flagReason && classifyFlagReason(flagReason)) || kindCode;
+  return { flagged, flagCode, flagReason };
+}
+
 const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === "23505";
 
 export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -69,8 +81,10 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       characterId = guess.characterId;
       text = guess.text;
     }
-    await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = false, flag_code = null, flag_reason = null, updated_at = now()
-              where id = ${line.id}`;
+    // An edit settles the line; an undo of an edit sends `flagged` (and its code) back.
+    const flag = b.flagged === undefined ? { flagged: false, flagCode: null, flagReason: null } : flagFrom(b, kind);
+    await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = ${flag.flagged}, flag_code = ${flag.flagCode},
+              flag_reason = ${flag.flagReason}, updated_at = now() where id = ${line.id}`;
     return { line: await selectLine(sql, line.id) };
   });
 
@@ -93,12 +107,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!c) throw badRequest("That character isn't in this production.");
     }
     if (kind === "dialogue" && !characterId) throw badRequest("Pick a character for a dialogue line.");
-    const flagged = was.flagged === true;
-    if (flagged && was.flagCode !== undefined && was.flagCode !== null && !isFlagCode(was.flagCode)) throw badRequest(`flagCode must be one of ${FLAG_CODES.join(", ")}.`);
-    const flagReason = flagged ? (optionalString(was, "flagReason", 500) ?? null) : null;
-    // A client that sends no code gets the reason's nearest one, else the usual one for the kind.
-    const kindCode: FlagCode = kind === "dialogue" ? "speaker" : kind === "heading" ? "heading" : "direction";
-    const flagCode: FlagCode | null = !flagged ? null : isFlagCode(was.flagCode) ? was.flagCode : ((flagReason && classifyFlagReason(flagReason)) || kindCode);
+    const { flagged, flagCode, flagReason } = flagFrom(was, kind);
     const sourceLine = Number.isInteger(was.sourceLine) ? (was.sourceLine as number) : line.sourceLine;
     const sourcePage = Number.isInteger(was.sourcePage) ? (was.sourcePage as number) : line.sourcePage;
     const newId = await sql.begin(async (tx) => {
@@ -207,8 +216,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!guess) throw badRequest("Pick a character for a dialogue line.");
       characterId = guess.characterId;
     }
-    const flagged = b.flagged === true;
-    const flagReason = flagged ? optionalString(b, "flagReason", 500) ?? null : null;
+    const { flagged, flagCode, flagReason } = flagFrom(b, kind);
     const sourceLine = Number.isInteger(b.sourceLine) ? (b.sourceLine as number) : null;
     const sourcePage = Number.isInteger(b.sourcePage) ? (b.sourcePage as number) : null;
     const afterId = b.afterLineId == null ? null : idParam(b.afterLineId);
@@ -254,8 +262,8 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
 
       await tx`update lines set seq = seq + 1 where production_id = ${p.id} and seq > ${afterSeq}`;
       const [row] = await tx<{ id: string }[]>`
-        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_reason, source_line, source_page)
-        values (${p.id}, ${targetSection}, ${afterSeq + 1}, ${kind}, ${characterId}, ${text}, ${flagged}, ${flagReason}, ${sourceLine}, ${sourcePage})
+        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_code, flag_reason, source_line, source_page)
+        values (${p.id}, ${targetSection}, ${afterSeq + 1}, ${kind}, ${characterId}, ${text}, ${flagged}, ${flagCode}, ${flagReason}, ${sourceLine}, ${sourcePage})
         returning id`;
       await tidySections(tx, p.id);
       return row!.id;

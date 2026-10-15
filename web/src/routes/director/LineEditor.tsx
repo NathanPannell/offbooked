@@ -149,7 +149,7 @@ export function LineEditor({
     setSaving(next);
     const ok = await run(() => api.updateLine(line.id, { text: next }), {
       label: "Text changed",
-      run: () => api.updateLine(line.id, { text: line.text }),
+      run: () => api.updateLine(line.id, { text: line.text, ...flagBack }),
     });
     setSaving(null);
     if (ok && how === "enter") onFixed();
@@ -188,7 +188,9 @@ export function LineEditor({
 
   // ---- type and speaker ----
 
-  const restore = { characterId: line.characterId, kind: line.kind, text: line.text };
+  // Undo puts the content back and the flag with it (an edit clears the flag).
+  const flagBack = { flagged: line.flagged, flagCode: line.flagCode ?? null, flagReason: line.flagReason };
+  const restore = { characterId: line.characterId, kind: line.kind, text: line.text, ...flagBack };
 
   const setKind = async (kind: LineKind) => {
     if (kind === line.kind) return;
@@ -204,7 +206,7 @@ export function LineEditor({
     if (character.id === line.characterId) return;
     const ok = await run(() => api.updateLine(line.id, { characterId: character.id, kind: "dialogue" }), {
       label: `Speaker set to ${character.name}`,
-      run: () => api.updateLine(line.id, { characterId: restore.characterId, kind: restore.kind }),
+      run: () => api.updateLine(line.id, { characterId: restore.characterId, kind: restore.kind, ...flagBack }),
     });
     if (ok) onFixed();
   };

@@ -47,7 +47,7 @@ describe("joining lines", () => {
     const upper = line(1, { text: "Hail" });
     expect(undoJoin(upper, line(2, { characterId: "m", flagged: true, flagReason: "who?", sourceLine: 7, page: 2 }))).toEqual({
       at: 4,
-      second: { kind: "dialogue", characterId: "m", flagged: true, flagReason: "who?", sourceLine: 7, sourcePage: 2 },
+      second: { kind: "dialogue", characterId: "m", flagged: true, flagCode: null, flagReason: "who?", sourceLine: 7, sourcePage: 2 },
     });
     expect(undoJoin(upper, line(2, { kind: "stage_direction", characterId: "m" })).second.characterId).toBeNull();
   });

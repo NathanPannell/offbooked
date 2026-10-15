@@ -4,6 +4,7 @@ import type { SplitSecond } from "../routes/director/lineJoin";
 import type {
   CallSheetCharacter,
   Character,
+  FlagCode,
   Line,
   LineAudio,
   LineAudioApi,
@@ -35,6 +36,7 @@ export interface InsertLine {
   characterId?: string | null;
   text: string;
   flagged?: boolean;
+  flagCode?: FlagCode | null;
   flagReason?: string | null;
   sourceLine?: number | null;
   sourcePage?: number | null;
@@ -96,7 +98,11 @@ export const script = {
       auth: director,
       json: { text },
     }),
-  updateLine: (lineId: string, input: { characterId?: string | null; kind?: LineKind; text?: string }) =>
+  /** An edit clears the line's flag; undo sends `flagged` (with its code and reason) to put it back. */
+  updateLine: (
+    lineId: string,
+    input: { characterId?: string | null; kind?: LineKind; text?: string; flagged?: boolean; flagCode?: FlagCode | null; flagReason?: string | null },
+  ) =>
     request<{ line: Line }>(`/lines/${lineId}`, { method: "PATCH", auth: director, json: input }),
   /** `second` restores a line that a join removed (undo); without it the new line copies this one. */
   splitLine: (lineId: string, at: number, second?: SplitSecond) =>

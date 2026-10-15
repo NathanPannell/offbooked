@@ -249,6 +249,7 @@ export function ScriptReview({
             characterId: was.characterId,
             text: was.text,
             flagged: was.flagged,
+            flagCode: was.flagCode ?? null,
             flagReason: was.flagReason,
             sourceLine: was.sourceLine ?? null,
             sourcePage: was.page ?? null,

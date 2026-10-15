@@ -1,4 +1,4 @@
-import type { Line, LineKind } from "../../api/types";
+import type { FlagCode, Line, LineKind } from "../../api/types";
 
 // Joining two neighbouring lines and splitting one, as the review shows and undoes them.
 // The server joins the lower line into the upper one with a newline; the upper line keeps its id,
@@ -62,6 +62,7 @@ export interface SplitSecond {
   kind: LineKind;
   characterId: string | null;
   flagged: boolean;
+  flagCode?: FlagCode | null;
   flagReason: string | null;
   sourceLine?: number | null;
   sourcePage?: number | null;
@@ -81,6 +82,7 @@ export function undoJoin(upper: Line, lower: Line): UndoJoin {
       kind: lower.kind,
       characterId: lower.kind === "dialogue" ? lower.characterId : null,
       flagged: lower.flagged,
+      flagCode: lower.flagCode ?? null,
       flagReason: lower.flagReason,
       sourceLine: lower.sourceLine ?? null,
       sourcePage: lower.page ?? null,
