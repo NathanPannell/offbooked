@@ -118,6 +118,21 @@ export class SttSession {
     }
   }
 
+  /**
+   * Transcribes a stretch of a take that is still recording, for live word highlighting. Resolves
+   * null at once when the model isn't ready, so callers fall back to the mic level alone.
+   */
+  async transcribeLive(audio: Float32Array, signal?: AbortSignal): Promise<string | null> {
+    if (this.state.status !== "ready") return null;
+    try {
+      // No expected text: the token budget then follows the audio length, as the model's default does.
+      const { text } = await this.engine.transcribe(audio, "", signal);
+      return text;
+    } catch {
+      return null;
+    }
+  }
+
   /** Frees the worker and model memory. The session can be started again later. */
   dispose(): void {
     this.generation++;

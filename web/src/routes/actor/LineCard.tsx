@@ -1,9 +1,10 @@
 import { AlertCircle, Check, CloudUpload, Pause, Play, RotateCcw } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { ActorLine } from "../../api/types";
 import { AccuracyChip } from "../../components/AccuracyChip";
 import { CharacterName } from "../../components/CharacterName";
 import { WordDiff } from "../../components/WordDiff";
+import { pieceStates, segmentLine } from "../../stt/live";
 import { verdict, VERDICT_MESSAGE } from "../../stt/score";
 import type { UploadItem } from "../../upload/queue";
 import type { Score } from "./RecordSession";
@@ -31,6 +32,9 @@ export function LineCard({
   playing,
   voice,
   noCueLabel = "You open the scene",
+  liveCursor = null,
+  liveHint,
+  notice,
   onPlay,
   onSelect,
   onRerecord,
@@ -50,6 +54,12 @@ export function LineCard({
   voice?: ReactNode;
   /** Shown instead of a cue for the first line of a scene. */
   noCueLabel?: string;
+  /** While recording with live transcription: tokens of the line heard so far. Null shows plain text. */
+  liveCursor?: number | null;
+  /** A short note under the line while it records, e.g. how the take will end. */
+  liveHint?: string;
+  /** Shown under the line, e.g. after a take that stopped itself without moving on. */
+  notice?: ReactNode;
   onPlay: (key: string, url: string) => void;
   onSelect: () => void;
   onRerecord: () => void;
@@ -105,8 +115,10 @@ export function LineCard({
 
       <button type="button" className="my-line" onClick={onSelect} aria-label={`Line ${number}: ${line.text}`}>
         <CharacterName name={speaker} />
-        <span className="my-text">{line.text}</span>
+        <LineText text={line.text} cursor={recording ? liveCursor : null} />
       </button>
+      {recording && liveHint && <p className="live-hint">{liveHint}</p>}
+      {notice}
 
       {recorded && !recording && (
         <div className="line-actions">
@@ -125,6 +137,31 @@ export function LineCard({
       {score && v !== "good" && !showDiff && !recording && <p className={`verdict-hint verdict-${v}`}>{VERDICT_MESSAGE[v!]}</p>}
       {score && showDiff && <WordDiff text={line.text} ops={score.result.ops} transcript={score.result.transcript} />}
     </article>
+  );
+}
+
+/**
+ * The line as written, with [directions] muted. While a take records with live transcription, words
+ * already said are lit and the next word is hinted.
+ */
+function LineText({ text, cursor }: { text: string; cursor: number | null }) {
+  const { pieces } = useMemo(() => segmentLine(text), [text]);
+  const live = cursor !== null;
+  const states = useMemo(() => pieceStates(pieces, cursor ?? 0), [pieces, cursor]);
+  if (!pieces.some((p) => p.kind === "direction") && !live) return <span className="my-text">{text}</span>;
+  return (
+    <span className={`my-text${live ? " is-live" : ""}`}>
+      {pieces.map((piece, i) => {
+        const state = states[i];
+        if (state === "space") return piece.text;
+        if (state === "direction") return <span key={i} className="lw-dir">{piece.text}</span>;
+        return (
+          <span key={i} className={live ? `lw lw-${state}` : undefined}>
+            {piece.text}
+          </span>
+        );
+      })}
+    </span>
   );
 }
 

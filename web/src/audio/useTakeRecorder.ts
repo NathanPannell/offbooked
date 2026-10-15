@@ -85,6 +85,7 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     micError,
     clearMicError: () => setMicError(null),
     analyser: micRef.current?.analyser ?? null,
+    capture: micRef.current?.capture ?? null,
     start,
     stop,
   };
