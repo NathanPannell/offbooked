@@ -2985,7 +2985,7 @@
 .record-main {
   max-width: 720px;
   margin: 0 auto;
-  padding: var(--s-4) var(--s-4) calc(200px + var(--safe-bottom));
+  padding: var(--s-4) var(--s-4) calc(244px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -3008,7 +3008,7 @@
 }
 
 .line-list > li {
-  scroll-margin: 110px 0 210px;
+  scroll-margin: 110px 0 254px;
 }
 
 .line-card {
@@ -3118,6 +3118,56 @@
 .line-card.is-current .my-text,
 .line-card.is-recording .my-text {
   font-size: 23px;
+}
+
+/* Live highlighting while a take records: said words in ink with a soft red underline, the next
+   word hinted, the rest quieter but readable. Colour changes only, no movement. */
+.my-text.is-live .lw {
+  color: var(--muted);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: transparent;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+  transition:
+    color var(--fast) var(--ease),
+    text-decoration-color var(--fast) var(--ease);
+}
+
+.my-text.is-live .lw-lit {
+  color: var(--ink);
+  text-decoration-color: var(--accent-line);
+}
+
+.my-text.is-live .lw-next {
+  color: var(--ink);
+  text-decoration-color: var(--line-strong);
+}
+
+.lw-dir {
+  color: var(--muted);
+  font-size: 0.82em;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.live-hint {
+  margin-top: calc(var(--s-1) * -1);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.take-held {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 12px;
+  border: 1px solid var(--flag-line);
+  border-radius: var(--radius);
+  background: var(--check-soft);
+  color: var(--check);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .line-actions {
@@ -3254,6 +3304,31 @@
   font-size: 14px;
   white-space: nowrap;
   color: var(--ink);
+}
+
+.dock-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: var(--s-5);
+  margin-top: calc(var(--s-1) * -1);
+  margin-bottom: -10px;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+
+.dock-option {
+  gap: var(--s-2);
+}
+
+.dock-option input {
+  width: 18px;
+  height: 18px;
+}
+
+.dock-option.is-off {
+  color: var(--faint);
+  cursor: default;
 }
 
 .waveform {
@@ -3742,6 +3817,10 @@
    ====================================================================== */
 
 @media (prefers-reduced-motion: reduce) {
+  .my-text.is-live .lw {
+    transition: none;
+  }
+
   .rec-dot,
   .record-button.is-recording {
     animation: none;

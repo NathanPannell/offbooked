@@ -1,4 +1,5 @@
 import { Mic, Square } from "lucide-react";
+import type { ReactNode } from "react";
 import type { MicError } from "../audio/recorder";
 import { MAX_TAKE_MS, type MicStatus } from "../audio/useTakeRecorder";
 import { Waveform } from "../audio/Waveform";
@@ -17,6 +18,7 @@ export function RecordDock({
   label,
   onToggle,
   onRetry,
+  children,
 }: {
   recording: boolean;
   elapsed: number;
@@ -30,6 +32,8 @@ export function RecordDock({
   label: string;
   onToggle: () => void;
   onRetry: () => void;
+  /** Extra controls under the button, e.g. recording options. */
+  children?: ReactNode;
 }) {
   return (
     <div className="record-dock">
@@ -64,6 +68,7 @@ export function RecordDock({
       >
         {recording ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
       </button>
+      {children}
     </div>
   );
 }

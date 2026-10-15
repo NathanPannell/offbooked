@@ -1,5 +1,7 @@
 // One microphone stream per session, reused for every take. Opened only from a user tap.
 
+import { LiveCapture } from "./liveCapture";
+
 const MIME_CANDIDATES = ["audio/webm;codecs=opus", "audio/mp4;codecs=mp4a.40.2", "audio/mp4", "audio/webm", "audio/ogg;codecs=opus"];
 
 export function pickMimeType(): string | undefined {
@@ -47,6 +49,8 @@ export class MicSession {
   private context: AudioContext | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   analyser: AnalyserNode | null = null;
+  /** Live 16 kHz samples for word highlighting, where AudioWorklet is available. */
+  capture: LiveCapture | null = null;
 
   constructor(private readonly constraints: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }) {}
 
@@ -78,6 +82,7 @@ export class MicSession {
       this.analyser.fftSize = 1024;
       this.source.connect(this.analyser);
       await this.context.resume().catch(() => {});
+      this.capture = await LiveCapture.attach(this.context, this.source).catch(() => null);
     }
   }
 
@@ -123,11 +128,13 @@ export class MicSession {
 
   close(): void {
     this.stream?.getTracks().forEach((t) => t.stop());
+    this.capture?.disconnect();
     this.source?.disconnect();
     void this.context?.close().catch(() => {});
     this.stream = null;
     this.context = null;
     this.source = null;
     this.analyser = null;
+    this.capture = null;
   }
 }
