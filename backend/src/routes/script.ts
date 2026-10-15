@@ -92,21 +92,34 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     return { lines: [await selectLine(sql, line.id), await selectLine(sql, newId)] };
   });
 
+  // Joins two neighbouring lines into the upper one, which keeps its id, kind and speaker. The
+  // lower line goes away, so it must not have recordings.
+  const join = async (productionId: string, upperSeq: number): Promise<string> =>
+    sql.begin(async (tx) => {
+      const pair = await tx<{ id: string; seq: number; text: string }[]>`
+        select id, seq, text from lines where production_id = ${productionId} and seq in (${upperSeq}, ${upperSeq + 1}) order by seq for update`;
+      const [upper, lower] = pair;
+      if (!upper || !lower) throw badRequest("There is no line on that side to join with.");
+      const [recorded] = await tx`select 1 from takes where line_id = ${lower.id} limit 1`;
+      if (recorded) throw conflict("has_recordings", "The lower line has recordings, so it can't be joined into the one above.");
+      await tx`update lines set text = ${`${upper.text}\n${lower.text}`}, flagged = false, flag_reason = null, updated_at = now() where id = ${upper.id}`;
+      await tx`delete from lines where id = ${lower.id}`;
+      await tx`update lines set seq = seq - 1 where production_id = ${productionId} and seq > ${lower.seq}`;
+      await tidySections(tx, productionId);
+      return upper.id;
+    });
+
   app.post("/api/lines/:id/merge-next", async (req) => {
     const user = await requireDirector(ctx, req);
     const line = await ownedLine(sql, user, idOf(req.params));
-    await sql.begin(async (tx) => {
-      const [next] = await tx<{ id: string; seq: number; text: string }[]>`
-        select id, seq, text from lines where production_id = ${line.productionId} and seq = ${line.seq + 1} for update`;
-      if (!next) throw badRequest("This is the last line, so there is nothing to merge.");
-      const [recorded] = await tx`select 1 from takes where line_id = ${next.id} limit 1`;
-      if (recorded) throw conflict("has_recordings", "The next line has recordings, so it can't be merged into this one.");
-      await tx`update lines set text = ${`${line.text} ${next.text}`}, updated_at = now() where id = ${line.id}`;
-      await tx`delete from lines where id = ${next.id}`;
-      await tx`update lines set seq = seq - 1 where production_id = ${line.productionId} and seq > ${next.seq}`;
-      await tidySections(tx, line.productionId);
-    });
-    return { line: await selectLine(sql, line.id) };
+    return { line: await selectLine(sql, await join(line.productionId, line.seq)) };
+  });
+
+  app.post("/api/lines/:id/merge-previous", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const line = await ownedLine(sql, user, idOf(req.params));
+    if (line.seq <= 1) throw badRequest("This is the first line, so there is nothing above to join with.");
+    return { line: await selectLine(sql, await join(line.productionId, line.seq - 1)) };
   });
 
   app.post("/api/lines/:id/section-break", async (req) => {

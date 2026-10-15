@@ -264,3 +264,8 @@ interface RunThrough {
 - Source rules match the render: the current take's normalized audio (normalized on first use and cached with the render's normalized FLAC, as `takes.stream_key`), else the TTS clip (same voice and cache key as the render; every clip now gets its `.m4a` alongside the FLAC), else silence of `clamp(words × 380 ms, 1200, 8000)`.
 - TTS synthesis runs by priority: play (a GET) before prefetch (`?prefetch=1`, warm, the actor lines page's cue wait) before cue warm-ups before the render. Background work (cues, renders) uses at most `TTS_CONCURRENCY - 1` slots, so a listener's line waits for at most one clip in progress. Concurrent requests for one clip share one synthesis, at the most urgent priority asked.
 - The client plays gaps itself: 350 ms between lines in a section, 1200 ms at a section change or an A–B jump back.
+
+### Joining lines (2026-10-15)
+
+- `POST /api/lines/:id/merge-previous` → `{ line }`: joins this line into the one above it. `merge-next` joins the next line into this one. Either way the upper line keeps its id, kind and speaker, the texts are joined with a newline, and the lower line must have no recordings (409 `has_recordings`).
+- The parser keeps each speech as one dialogue line: a stage direction printed inside a speech becomes its own stage-direction line before the speech (or after it, when it follows the last words).

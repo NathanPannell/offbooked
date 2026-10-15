@@ -93,7 +93,15 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(split[1].seq, split[0].seq + 1);
     assert.equal(split[0].id, line.id, "the first part keeps the line id");
     const merged = (await send("POST", `/api/lines/${line.id}/merge-next`)).json().line;
-    assert.equal(merged.text, "Have you your father's leave, Laertes? What says Polonius?");
+    assert.equal(merged.text, "Have you your father's leave, Laertes?\nWhat says Polonius?");
+    // Split again, then join from the lower line upwards: the upper line keeps its id.
+    const [, lower] = (await send("POST", `/api/lines/${line.id}/split`, { at: 38 })).json().lines;
+    const joinedUp = (await send("POST", `/api/lines/${lower.id}/merge-previous`)).json().line;
+    assert.equal(joinedUp.id, line.id);
+    assert.equal(joinedUp.text, "Have you your father's leave, Laertes?\nWhat says Polonius?");
+    await reload();
+    const first = script.lines.find((l) => l.seq === 1)!;
+    assert.equal((await send("POST", `/api/lines/${first.id}/merge-previous`)).statusCode, 400);
     await reload();
     assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
 
