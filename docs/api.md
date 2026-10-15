@@ -287,3 +287,8 @@ Every flagged line has one standard `flagCode`; `flagReason` is an optional shor
 | `backup` | Check this passage | Read by the backup (heuristic) parser |
 
 A speech that carries on after a stage direction, page break or heading without a new cue keeps the previous speaker and is not flagged. Migration `006_flag_codes.sql` gave older flags a code by matching their text.
+
+### Deleting and inserting lines (2026-10-15)
+
+- `DELETE /api/lines/:id` → `{ line, afterLineId, removedSection }`: deletes a line with no recordings (409 `has_recordings` otherwise) and renumbers the lines after it. `line` is the deleted line as it was, `afterLineId` the line it sat after (null when it was first), and `removedSection` its scene (`Section`) when the line was the scene's only line and the scene went with it, else null. Together they are what undo needs.
+- `POST /api/productions/:id/lines` with `{ afterLineId: string | null, sectionId?, newSection?: { title, act?, scene? }, kind, characterId?, text, flagged?, flagCode?, flagReason?, sourceLine?, sourcePage? }` → `{ line }`: inserts a line after `afterLineId` (null: at the start). It goes in `sectionId`, which must be the scene of the line before or after the place (400 otherwise); or in a new scene `newSection`, which can only start between two scenes; or, with neither, the scene of the line before (else the one after). A dialogue line without `characterId` gets a guessed speaker, as with `PATCH`. The web app uses it to undo a delete: `sectionId` is the deleted line's scene, or `newSection` from `removedSection`.

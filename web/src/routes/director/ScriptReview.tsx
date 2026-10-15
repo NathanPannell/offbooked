@@ -1,7 +1,7 @@
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronUp, FileText, Link2, Pencil, RefreshCw, Undo2, Users, X } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { errorMessage } from "../../api/client";
-import { script as scriptApi } from "../../api/director";
+import { script as scriptApi, type DeletedLine } from "../../api/director";
 import type { Character, Line, Production, Script, Section } from "../../api/types";
 import { CharacterName } from "../../components/CharacterName";
 import { Dialog } from "../../components/Dialog";
@@ -9,9 +9,9 @@ import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
 import { plural } from "../../lib/format";
 import { CharactersPanel } from "./CharactersPanel";
-import { flagPosition, nextFlagged } from "./flagNav";
+import { FLAG_SHORT, flagBucket, flagCounts, flagPosition, nextFlagged, type FlagFilter } from "./flagNav";
 import { canJoinAtSeam, joinPreview, undoJoin } from "./lineJoin";
-import { LineEditor } from "./LineEditor";
+import { caretFromClick, FlagNote, LineEditor, LineText } from "./LineEditor";
 import { MergeSuggestions } from "./MergeSuggestions";
 import { scrollToLine } from "./reviewScroll";
 import { SourcePane } from "./SourcePane";
@@ -46,6 +46,9 @@ export function ScriptReview({
   const toast = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Where the text caret goes when a line opens from a click on its text (null: just the controls).
+  const [startText, setStartText] = useState<number | "end" | null>(null);
+  const [flagFilterPick, setFlagFilter] = useState<FlagFilter>("all");
   const [showCharacters, setShowCharacters] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [undo, setUndo] = useState<Undo | null>(null);
@@ -76,7 +79,11 @@ export function ScriptReview({
   }, [lines]);
   const lineById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
   const selected = selectedId ? lineById.get(selectedId) ?? null : null;
-  const position = flagPosition(lines, selectedId);
+  const counts = useMemo(() => flagCounts(lines), [lines]);
+  // A reason with nothing left to check falls back to all of them.
+  const flagFilter: FlagFilter = flagFilterPick === "all" || counts.some((c) => c.code === flagFilterPick) ? flagFilterPick : "all";
+  const position = flagPosition(lines, selectedId, flagFilter);
+  const allFlagged = counts.reduce((n, c) => n + c.count, 0);
   const recordingStarted = production.progress.linesRecorded > 0;
   if (selected) lastSeq.current = selected.seq;
 
@@ -122,7 +129,10 @@ export function ScriptReview({
     (line: Line | null, open = true) => {
       if (!line) return;
       setSelectedId(line.id);
-      if (open) setEditingId(line.id);
+      if (open) {
+        setEditingId(line.id);
+        setStartText(null);
+      }
       // After React commits (the editor moves to this line), measure and scroll: see reviewScroll.ts.
       scrollToLine(line.id);
       requestAnimationFrame(() =>
@@ -154,7 +164,7 @@ export function ScriptReview({
       // The navigator moves on: if this was the line in hand, go to the next one to check.
       if (line.id === selectedId || editingId === line.id) {
         const remaining = lines.map((l) => (l.id === line.id ? { ...l, flagged: false } : l));
-        const next = nextFlagged(remaining, line.seq, 1);
+        const next = nextFlagged(remaining, line.seq, 1, flagFilter) ?? nextFlagged(remaining, line.seq, 1);
         if (next) goTo(next);
         else {
           setEditingId(null);
@@ -162,7 +172,7 @@ export function ScriptReview({
         }
       }
     },
-    [commitApproval, editingId, flushApprovals, goTo, lines, selectedId, toast],
+    [commitApproval, editingId, flagFilter, flushApprovals, goTo, lines, selectedId, toast],
   );
 
   // ---- other edits ----
@@ -196,15 +206,66 @@ export function ScriptReview({
     } else toast("Undone");
   };
 
-  const moveFlag = (direction: 1 | -1) => goTo(nextFlagged(lines, lastSeq.current, direction));
+  const moveFlag = (direction: 1 | -1, filter: FlagFilter = flagFilter) => goTo(nextFlagged(lines, lastSeq.current, direction, filter));
 
-  // A fix moves on to the next line to check, if this one was flagged.
+  // Clicking a reason's count walks only those lines (clicking it again goes back to all of them).
+  const pickFilter = (picked: FlagFilter) => {
+    const filter = picked === flagFilter && picked !== "all" ? "all" : picked;
+    setFlagFilter(filter);
+    const onOne = selected?.flagged && (filter === "all" || flagBucket(selected) === filter);
+    if (!onOne) moveFlag(1, filter);
+  };
+
+  // A fix moves on to the next line to check, if this one was flagged; otherwise the line stays open.
   const afterFix = (line: Line) => {
-    if (line.flagged) {
-      const next = nextFlagged(lines.map((l) => (l.id === line.id ? { ...l, flagged: false } : l)), line.seq, 1);
-      if (next) return goTo(next);
+    if (!line.flagged) return;
+    const remaining = lines.map((l) => (l.id === line.id ? { ...l, flagged: false } : l));
+    const next = nextFlagged(remaining, line.seq, 1, flagFilter) ?? nextFlagged(remaining, line.seq, 1);
+    if (next) goTo(next);
+  };
+
+  // One click deletes; Undo puts the line back where it was, in its scene, as it was.
+  const deleteLine = async (line: Line) => {
+    const index = lines.indexOf(line);
+    const neighbour = lines[index + 1] ?? lines[index - 1] ?? null;
+    const done: { gone?: DeletedLine } = {};
+    const what = line.kind === "dialogue" ? "Line" : line.kind === "stage_direction" ? "Direction" : "Heading";
+    const ok = await actions.run(
+      async () => {
+        done.gone = await scriptApi.deleteLine(line.id);
+      },
+      {
+        label: `${what} deleted`,
+        run: async () => {
+          const gone = done.gone;
+          if (!gone) return;
+          const { line: was, removedSection } = gone;
+          const { line: back } = await scriptApi.insertLine(production.id, {
+            afterLineId: gone.afterLineId,
+            ...(removedSection
+              ? { newSection: { title: removedSection.title, act: removedSection.act, scene: removedSection.scene } }
+              : { sectionId: was.sectionId }),
+            kind: was.kind,
+            characterId: was.characterId,
+            text: was.text,
+            flagged: was.flagged,
+            flagReason: was.flagReason,
+            sourceLine: was.sourceLine ?? null,
+            sourcePage: was.page ?? null,
+          });
+          setSelectedId(back.id);
+          setEditingId(back.id);
+          setStartText(null);
+          scrollToLine(back.id);
+        },
+      },
+    );
+    if (!ok) return;
+    if (neighbour) goTo(neighbour);
+    else {
+      setSelectedId(null);
+      setEditingId(null);
     }
-    setEditingId(null);
   };
 
   // On small screens the original opens as a sheet over the bottom of the screen: keep the line
@@ -264,14 +325,16 @@ export function ScriptReview({
         e.preventDefault();
         setSelectedId(line.id);
         setEditingId(line.id);
+        setStartText("end");
       }
     },
     [approve, goTo, lines],
   );
 
-  const onOpen = useCallback((line: Line) => {
+  const onOpen = useCallback((line: Line, at: number | "end" | null) => {
     setSelectedId(line.id);
-    setEditingId((id) => (id === line.id ? null : line.id));
+    setEditingId(line.id);
+    setStartText(at);
   }, []);
 
   const nearbySpeakers = (line: Line): Character[] => {
@@ -304,7 +367,7 @@ export function ScriptReview({
   return (
     <div className={`review ${sourceOpen ? "source-open" : ""}`}>
       <div className="review-bar">
-        {total > 0 ? (
+        {allFlagged > 0 ? (
           <div className="flag-nav" role="group" aria-label="Lines to check">
             <span className="flag-count" aria-live="polite">
               <span className="flag-dot" aria-hidden="true" />
@@ -339,6 +402,25 @@ export function ScriptReview({
             </button>
           </div>
         )}
+        {allFlagged > 0 && (
+          <div className="flag-filters" role="group" aria-label="Which lines to check">
+            <button type="button" className="flag-filter" aria-pressed={flagFilter === "all"} onClick={() => pickFilter("all")}>
+              All <span className="nums">{allFlagged}</span>
+            </button>
+            {counts.map((c) => (
+              <button
+                key={c.code}
+                type="button"
+                className={`flag-filter code-${c.code}`}
+                aria-pressed={flagFilter === c.code}
+                onClick={() => pickFilter(c.code)}
+                title={flagFilter === c.code ? "Show every line to check" : `Only ${FLAG_SHORT[c.code].toLowerCase()} checks (J and K skip the rest)`}
+              >
+                {FLAG_SHORT[c.code]} <span className="nums">{c.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="review-tools">
           <SectionNav sections={sections} idPrefix="section-" />
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowCharacters(true)}>
@@ -358,10 +440,11 @@ export function ScriptReview({
 
       <div className="review-body">
         <div className="review-main">
-          {total > 0 && !selected && (
+          {allFlagged > 0 && !selected && (
             <p className="review-intro">
-              We weren't sure about {plural(total, "line")}. They're highlighted below. Tap <Check size={14} strokeWidth={3} aria-label="the tick" /> if a
-              line is right, or tap the line to fix it. <span className="muted">Keys: J and K move, Enter approves, E edits.</span>
+              We weren't sure about {plural(allFlagged, "line")}. They're highlighted below. Tap <Check size={14} strokeWidth={3} aria-label="the tick" /> if a
+              line is right, or click any line to edit it where it is.{" "}
+              <span className="muted">Keys: J and K move, Enter approves, E edits the text, Delete removes the line.</span>
             </p>
           )}
           {recordingStarted && (
@@ -399,13 +482,12 @@ export function ScriptReview({
                     key={line.id}
                     productionId={production.id}
                     line={line}
-                    prevLine={lines[lines.indexOf(line) - 1] ?? null}
-                    nextLine={lines[lines.indexOf(line) + 1] ?? null}
-                    characterName={characterName}
-                    onJoin={(upper, lower) => join(upper, lower)}
+                    startText={startText}
+                    onKey={onLineKey}
                     onSplit={(second) => {
                       setSelectedId(second.id);
                       setEditingId(second.id);
+                      setStartText(null);
                       scrollToLine(second.id);
                     }}
                     characters={script.characters}
@@ -413,7 +495,14 @@ export function ScriptReview({
                     actions={actions}
                     onApprove={() => approve(line)}
                     onFixed={() => afterFix(line)}
-                    onClose={() => setEditingId(null)}
+                    onDelete={() => void deleteLine(line)}
+                    onClose={() => {
+                      setEditingId(null);
+                      // After React swaps the editor back for the plain line.
+                      setTimeout(() =>
+                        document.getElementById(`line-${line.id}`)?.querySelector<HTMLElement>(".script-line")?.focus({ preventScroll: true }),
+                      );
+                    }}
                   />
                 )}
               />
@@ -478,7 +567,7 @@ function ScriptSection({
   characters: Map<string, Character>;
   selectedId: string | null;
   editingId: string | null;
-  onOpen: (line: Line) => void;
+  onOpen: (line: Line, at: number | "end" | null) => void;
   onApprove: (line: Line) => void;
   onLineKey: (e: KeyboardEvent, line: Line) => void;
   onJoin: (upper: Line, lower: Line) => void;
@@ -546,16 +635,18 @@ function ScriptSection({
                 onJoin={onJoin}
               />
             )}
-            <ScriptLine
-              line={line}
-              characterName={line.characterId ? characters.get(line.characterId)?.name ?? null : null}
-              selected={line.id === selectedId}
-              open={line.id === editingId}
-              onOpen={onOpen}
-              onApprove={onApprove}
-              onKey={onLineKey}
-            />
-            {line.id === editingId && renderEditor(line)}
+            {line.id === editingId ? (
+              renderEditor(line)
+            ) : (
+              <ScriptLine
+                line={line}
+                characterName={line.characterId ? characters.get(line.characterId)?.name ?? null : null}
+                selected={line.id === selectedId}
+                onOpen={onOpen}
+                onApprove={onApprove}
+                onKey={onLineKey}
+              />
+            )}
           </li>
         ))}
       </ol>
@@ -567,7 +658,6 @@ const ScriptLine = memo(function ScriptLine({
   line,
   characterName,
   selected,
-  open,
   onOpen,
   onApprove,
   onKey,
@@ -575,33 +665,37 @@ const ScriptLine = memo(function ScriptLine({
   line: Line;
   characterName: string | null;
   selected: boolean;
-  open: boolean;
-  onOpen: (line: Line) => void;
+  onOpen: (line: Line, at: number | "end" | null) => void;
   onApprove: (line: Line) => void;
   onKey: (e: KeyboardEvent, line: Line) => void;
 }) {
-  const classes = ["script-row", `kind-${line.kind}`, line.flagged && "is-flagged", selected && "is-selected", open && "is-open"]
-    .filter(Boolean)
-    .join(" ");
+  const classes = ["script-row", `kind-${line.kind}`, line.flagged && "is-flagged", selected && "is-selected"].filter(Boolean).join(" ");
   const reasonId = `reason-${line.id}`;
+  // A click on the text starts editing it right there; a click on the name opens the line's controls.
+  const open = (e: MouseEvent<HTMLButtonElement>) => {
+    const onText = (e.target as HTMLElement).closest(".script-text");
+    onOpen(line, onText ? caretFromClick(e) ?? "end" : null);
+  };
   return (
     <div className={classes}>
       <button
         type="button"
         className="script-line"
-        onClick={() => onOpen(line)}
+        onClick={open}
         onKeyDown={(e) => onKey(e, line)}
-        aria-expanded={open}
+        aria-expanded={false}
         aria-describedby={line.flagged ? reasonId : undefined}
       >
         {line.kind === "dialogue" &&
           (characterName ? <CharacterName name={characterName} className="script-speaker" /> : <span className="character-name script-speaker missing">Who says this?</span>)}
-        <span className="script-text">{line.text || " "}</span>
+        <span className="script-text">
+          <LineText text={line.text} kind={line.kind} />
+        </span>
         {line.flagged && (
-          <span className="flag-reason" id={reasonId}>
-            <AlertTriangle size={12} aria-hidden="true" /> {line.flagReason ?? "Not sure about this one"}
+          <>
+            <FlagNote line={line} id={reasonId} />
             <span className="sr-only">. Press Enter if it's right, or E to edit.</span>
-          </span>
+          </>
         )}
       </button>
       {line.flagged && (

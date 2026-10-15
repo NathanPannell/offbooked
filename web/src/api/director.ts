@@ -19,6 +19,27 @@ import type {
   User,
 } from "./types";
 
+export interface DeletedLine {
+  line: Line;
+  /** The line it sat after (null: it was the first line). */
+  afterLineId: string | null;
+  /** Its scene, when the line was the scene's only line and the scene went with it. */
+  removedSection: Section | null;
+}
+
+export interface InsertLine {
+  afterLineId: string | null;
+  sectionId?: string;
+  newSection?: { title: string; act?: string | null; scene?: string | null };
+  kind: LineKind;
+  characterId?: string | null;
+  text: string;
+  flagged?: boolean;
+  flagReason?: string | null;
+  sourceLine?: number | null;
+  sourcePage?: number | null;
+}
+
 const director: Auth = { kind: "director" };
 const none: Auth = { kind: "none" };
 
@@ -85,6 +106,11 @@ export const script = {
   /** Joins the line into the one before it, which keeps its id, kind and speaker. */
   mergePrevious: (lineId: string) =>
     request<{ line: Line }>(`/lines/${lineId}/merge-previous`, { method: "POST", auth: director }),
+  /** Deletes a line without recordings; the answer is what `insertLine` needs to undo it. */
+  deleteLine: (lineId: string) =>
+    request<DeletedLine>(`/lines/${lineId}`, { method: "DELETE", auth: director }),
+  insertLine: (productionId: string, input: InsertLine) =>
+    request<{ line: Line }>(`/productions/${productionId}/lines`, { auth: director, json: input }),
   sectionBreak: (lineId: string, input: { title: string; act?: string; scene?: string }) =>
     request<{ sections: Section[] }>(`/lines/${lineId}/section-break`, { auth: director, json: input }),
   resolveLine: (lineId: string) =>

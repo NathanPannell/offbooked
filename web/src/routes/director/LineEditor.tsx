@@ -1,133 +1,243 @@
-import { ArrowDownToLine, ArrowUpToLine, Check, Plus, Scissors, Search, SeparatorHorizontal, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, Check, Scissors, Trash2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { script as api } from "../../api/director";
 import type { Character, Line, LineKind } from "../../api/types";
-import { CharacterName } from "../../components/CharacterName";
-import { joinPreview, splitTokens } from "./lineJoin";
+import { characterHue } from "../../lib/format";
+import { flagLabel } from "./flagNav";
+import { splitTokens } from "./lineJoin";
+import { caretOffsetAt, splitAtCaret, textRuns } from "./lineText";
 import type { ReviewActions } from "./ScriptReview";
 
 const KINDS: { kind: LineKind; label: string }[] = [
-  { kind: "dialogue", label: "Spoken line" },
+  { kind: "dialogue", label: "Dialogue" },
   { kind: "stage_direction", label: "Direction" },
   { kind: "heading", label: "Heading" },
 ];
+const NEW_CHARACTER = "__new";
 
-/** Fixes one line in place, inside the script, so the context stays in view. */
+/** A line's text as the script shows it: [bracketed] directions in spoken lines set as directions. */
+export function LineText({ text, kind }: { text: string; kind: LineKind }) {
+  if (!text) return <> </>;
+  return (
+    <>
+      {textRuns(text, kind).map((run, i) =>
+        run.direction ? (
+          <span key={i} className="inline-direction">
+            {run.text}
+          </span>
+        ) : (
+          run.text
+        ),
+      )}
+    </>
+  );
+}
+
+/** What to check on a flagged line: a chip with the reason, and the parser's note when it left one. */
+export function FlagNote({ line, id }: { line: Line; id: string }) {
+  const label = flagLabel(line);
+  const note = line.flagReason && line.flagReason !== label ? line.flagReason : null;
+  return (
+    <span className="flag-note" id={id}>
+      <span className="flag-chip">
+        <AlertTriangle size={12} aria-hidden="true" /> {label}
+      </span>
+      {note && <span className="flag-detail">{note}</span>}
+    </span>
+  );
+}
+
+/** Where a click on a line's text landed, so editing can start with the caret there. */
+export const caretFromClick = (e: MouseEvent<HTMLElement>): number | null => {
+  const text = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".script-text") ?? e.currentTarget;
+  return caretOffsetAt(text, e.clientX, e.clientY);
+};
+
+/**
+ * The open line, edited in place: the speaker's name becomes the line's controls (its type, who says
+ * it, split, delete) and the text itself is editable where it stands.
+ */
 export function LineEditor({
   productionId,
   line,
-  prevLine,
-  nextLine,
   characters,
-  characterName,
   nearby,
   actions,
+  startText,
+  onKey,
   onApprove,
   onFixed,
   onClose,
-  onJoin,
+  onDelete,
   onSplit,
 }: {
   productionId: string;
   line: Line;
-  prevLine: Line | null;
-  nextLine: Line | null;
   characters: Character[];
-  characterName: (id: string) => string | undefined;
-  /** Speakers just before and after this line: the likely picks. */
+  /** Speakers just before and after this line: listed first. */
   nearby: Character[];
   actions: ReviewActions;
-  /** Marks a flagged line right and moves on. */
+  /** Start editing the text with the caret here when the line opens ("end" for the end). */
+  startText: number | "end" | null;
+  /** Keys on the line itself (approve, move between flags). */
+  onKey: (e: KeyboardEvent, line: Line) => void;
   onApprove: () => void;
-  /** A change fixed the line: move on if it was flagged, else close. */
+  /** A change fixed the line: the review moves on if it was flagged. */
   onFixed: () => void;
   onClose: () => void;
-  /** Joins `lower` into `upper`; the review offers Undo. */
-  onJoin: (upper: Line, lower: Line) => void;
+  onDelete: () => void;
   /** The line was split: carry on with the new second part. */
   onSplit: (second: Line) => void;
 }) {
-  const [text, setText] = useState(line.text);
-  const [searching, setSearching] = useState(false);
-  const [query, setQuery] = useState("");
-  const [breakTitle, setBreakTitle] = useState<string | null>(null);
-  const [splitting, setSplitting] = useState(false);
-  const textRef = useRef<HTMLTextAreaElement>(null);
   const { run, busy } = actions;
+  const rowRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  // Text that is being saved: shown until the script reloads with it.
+  const [saving, setSaving] = useState<string | null>(null);
+  const [splitting, setSplitting] = useState(false);
+  const [adding, setAdding] = useState<string | null>(null);
+  const editing = useRef(false);
+  const caret = useRef<number | null>(null);
 
-  // The server may rewrite the text (a cue taken off the front when it becomes a spoken line).
-  useEffect(() => setText(line.text), [line.text]);
-
-  const speaker = characters.find((c) => c.id === line.characterId) ?? null;
-  const restore = { characterId: line.characterId, kind: line.kind, text: line.text };
-  const resolveIfFlagged = async () => {
-    if (line.flagged) await api.resolveLine(line.id);
+  const startEdit = (at: number | "end" | null) => {
+    setSplitting(false);
+    editing.current = true;
+    caret.current = at === "end" || at === null ? line.text.length : Math.min(at, line.text.length);
+    setDraft(line.text);
   };
 
-  const sorted = [...characters].sort((a, b) => b.lineCount - a.lineCount);
-  const q = query.trim().toLowerCase();
-  const matches = q ? sorted.filter((c) => c.name.toLowerCase().includes(q) || c.aliases.some((a) => a.toLowerCase().includes(q))) : sorted;
-  const exact = sorted.some((c) => c.name.toLowerCase() === q);
-  const quickPicks = nearby.filter((c) => c.id !== line.characterId).slice(0, 4);
+  useEffect(() => {
+    if (startText !== null) startEdit(startText);
+    // Only when the line opens.
+  }, []);
 
-  const pick = async (character: Character) => {
-    const ok = await run(
-      async () => {
-        await api.updateLine(line.id, { characterId: character.id, kind: "dialogue" });
-        await resolveIfFlagged();
-      },
-      { label: `Speaker set to ${character.name}`, run: () => api.updateLine(line.id, { characterId: restore.characterId, kind: restore.kind }) },
-    );
-    if (ok) {
-      setSearching(false);
-      setQuery("");
-      onFixed();
+  // Grow with the text, and put the caret where the click was.
+  useLayoutEffect(() => {
+    if (draft === null && refocus.current) {
+      // Back from typing: keys go to the line again (Enter approves, J and K move).
+      refocus.current = false;
+      rowRef.current?.focus({ preventScroll: true });
+    }
+    const el = textRef.current;
+    if (!el || draft === null) return;
+    el.style.height = "0px";
+    el.style.height = `${el.scrollHeight}px`;
+    if (caret.current !== null) {
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(caret.current, caret.current);
+      caret.current = null;
+    }
+  }, [draft]);
+
+  const refocus = useRef(false);
+  const focusRow = () => {
+    refocus.current = true;
+  };
+
+  const stopEditing = () => {
+    editing.current = false;
+    setDraft(null);
+  };
+
+  const commit = async (how: "enter" | "blur") => {
+    if (!editing.current || draft === null) return;
+    const next = draft;
+    stopEditing();
+    if (how === "enter") focusRow();
+    if (next === line.text || !next.trim()) return;
+    setSaving(next);
+    const ok = await run(() => api.updateLine(line.id, { text: next }), {
+      label: "Text changed",
+      run: () => api.updateLine(line.id, { text: line.text }),
+    });
+    setSaving(null);
+    if (ok && how === "enter") onFixed();
+  };
+
+  const cancel = () => {
+    stopEditing();
+    focusRow();
+  };
+
+  const onTextKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    e.stopPropagation();
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void commit("enter");
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancel();
     }
   };
 
-  const createAndPick = async () => {
-    const name = query.trim().toUpperCase();
-    const ok = await run(async () => {
-      const { character } = await api.createCharacter(productionId, name);
-      await api.updateLine(line.id, { characterId: character.id, kind: "dialogue" });
-      await resolveIfFlagged();
+  const onRowKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (splitting) setSplitting(false);
+      else onClose();
+    } else if (e.key === "e" || e.key === "E") {
+      e.preventDefault();
+      startEdit("end");
+    } else if (e.key === "Delete") {
+      e.preventDefault();
+      onDelete();
+    } else onKey(e, line);
+  };
+
+  // ---- type and speaker ----
+
+  const restore = { characterId: line.characterId, kind: line.kind, text: line.text };
+
+  const setKind = async (kind: LineKind) => {
+    if (kind === line.kind) return;
+    const ok = await run(() => api.updateLine(line.id, { kind }), {
+      label: `Marked as ${KINDS.find((k) => k.kind === kind)!.label.toLowerCase()}`,
+      run: () => api.updateLine(line.id, restore),
+    });
+    // A new spoken line gets a guessed speaker: leave it open to check the guess.
+    if (ok && kind !== "dialogue") onFixed();
+  };
+
+  const pick = async (character: Character) => {
+    if (character.id === line.characterId) return;
+    const ok = await run(() => api.updateLine(line.id, { characterId: character.id, kind: "dialogue" }), {
+      label: `Speaker set to ${character.name}`,
+      run: () => api.updateLine(line.id, { characterId: restore.characterId, kind: restore.kind }),
     });
     if (ok) onFixed();
   };
 
-  // One tap: the server guesses the speaker for a new spoken line (a cue at the start, else the
-  // previous speaker). The guess shows straight away and stays changeable here.
-  const setKind = async (kind: LineKind) => {
-    if (kind === line.kind) return;
-    const ok = await run(
-      async () => {
-        await api.updateLine(line.id, { kind });
-        if (kind !== "dialogue") await resolveIfFlagged();
-      },
-      {
-        label: `Marked as ${KINDS.find((k) => k.kind === kind)!.label.toLowerCase()}`,
-        run: () => api.updateLine(line.id, restore),
-      },
-    );
-    if (ok && kind !== "dialogue") onFixed();
+  const createAndPick = async (raw: string) => {
+    const name = raw.trim().toUpperCase();
+    if (!name) return;
+    const existing = characters.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setAdding(null);
+      return pick(existing);
+    }
+    const ok = await run(async () => {
+      const { character } = await api.createCharacter(productionId, name);
+      await api.updateLine(line.id, { characterId: character.id, kind: "dialogue" });
+    });
+    if (ok) {
+      setAdding(null);
+      onFixed();
+    }
   };
 
-  const saveText = async () => {
-    const ok = await run(
-      async () => {
-        await api.updateLine(line.id, { text });
-        await resolveIfFlagged();
-      },
-      { label: "Text changed", run: () => api.updateLine(line.id, { text: line.text }) },
-    );
-    if (ok) onFixed();
-  };
+  const nearbyIds = new Set(nearby.map((c) => c.id));
+  const everyone = [...characters].filter((c) => !nearbyIds.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
+  const speaker = characters.find((c) => c.id === line.characterId) ?? null;
 
-  // Split: tap the word the new line starts with. The new line opens next, to pick its speaker.
+  // ---- split ----
+
   const tokens = splitTokens(line.text);
   const canSplit = tokens.some((t) => t.at !== null);
   const split = async (at: number) => {
     let second: Line | null = null;
+    stopEditing();
     const ok = await run(
       async () => {
         second = (await api.splitLine(line.id, at)).lines[1];
@@ -145,188 +255,191 @@ export function LineEditor({
     if (ok && second) onSplit(second);
   };
 
-  const joinUp = prevLine && joinPreview(prevLine, line, characterName);
-  const joinDown = nextLine && joinPreview(line, nextLine, characterName);
+  const onSplitClick = () => {
+    // While typing, split where the caret is (once the typing is saved or undone).
+    if (draft !== null && textRef.current) {
+      if (draft !== line.text) return;
+      const at = splitAtCaret(line.text, textRef.current.selectionStart);
+      if (at !== null) return void split(at);
+      stopEditing();
+    }
+    setSplitting((s) => !s);
+  };
+
+  // Buttons beside the text keep the text field focused, so a split can read the caret.
+  const keepFocus = (e: MouseEvent) => e.preventDefault();
+  const typing = draft !== null && draft !== line.text;
+
+  const classes = ["script-row", `kind-${line.kind}`, line.flagged && "is-flagged", "is-selected", "is-open"].filter(Boolean).join(" ");
+  const reasonId = `reason-${line.id}`;
 
   return (
-    <div className="line-editor" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onClose())}>
-      <div className="editor-row">
-        <div className="segmented" role="group" aria-label="This line is a">
-          {KINDS.map((k) => (
-            <button key={k.kind} type="button" aria-pressed={line.kind === k.kind} disabled={busy} onClick={() => void setKind(k.kind)}>
-              {k.label}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="icon-btn editor-close" onClick={onClose} aria-label="Close editor">
-          <X size={18} />
-        </button>
-      </div>
-
-      {line.kind === "dialogue" && (
-        <div className="speaker-picker">
-          <span className="field-label">Said by</span>
-          <div className="row speaker-chips">
-            {speaker ? (
-              <span className="speaker-current">
-                <CharacterName name={speaker.name} />
-              </span>
-            ) : (
-              <span className="speaker-current is-missing">Nobody yet</span>
-            )}
-            {quickPicks.map((c) => (
-              <button key={c.id} type="button" className="speaker-chip" disabled={busy} onClick={() => void pick(c)}>
-                <CharacterName name={c.name} />
-              </button>
+    <div className={classes}>
+      <div
+        ref={rowRef}
+        className="script-line is-editing"
+        tabIndex={0}
+        role="group"
+        aria-label="Line being edited"
+        aria-describedby={line.flagged ? reasonId : undefined}
+        onKeyDown={onRowKey}
+      >
+        <div className="line-controls">
+          <select
+            className="line-select kind-select"
+            aria-label="Line type"
+            value={line.kind}
+            disabled={busy}
+            onChange={(e) => void setKind(e.target.value as LineKind)}
+          >
+            {KINDS.map((k) => (
+              <option key={k.kind} value={k.kind}>
+                {k.label}
+              </option>
             ))}
-            <button type="button" className="speaker-chip speaker-other" aria-expanded={searching} onClick={() => setSearching((s) => !s)}>
-              <Search size={14} aria-hidden="true" /> Someone else
-            </button>
-          </div>
-          {searching && (
-            <div className="picker">
-              <input
-                className="input"
-                placeholder="Find or add a character"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label="Find or add a character"
-                autoFocus
-              />
-              <ul className="picker-list">
-                {matches.map((c) => (
-                  <li key={c.id}>
-                    <button
-                      type="button"
-                      className={`picker-item ${c.id === line.characterId ? "is-selected" : ""}`}
-                      aria-pressed={c.id === line.characterId}
-                      disabled={busy}
-                      onClick={() => (c.id === line.characterId ? setSearching(false) : void pick(c))}
-                    >
-                      <CharacterName name={c.name} />
-                      <span className="small muted">{c.lineCount} lines</span>
-                    </button>
-                  </li>
-                ))}
-                {q && !exact && (
-                  <li>
-                    <button type="button" className="picker-item" disabled={busy} onClick={createAndPick}>
-                      <span>
-                        <Plus size={15} aria-hidden="true" /> Add “{query.trim().toUpperCase()}”
-                      </span>
-                    </button>
-                  </li>
-                )}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
-      {splitting ? (
-        <div className="split-mode">
-          <p className="split-hint" id={`split-hint-${line.id}`}>
-            <Scissors size={14} aria-hidden="true" /> Tap the word the new line starts with.
-          </p>
-          <p className="split-text" role="group" aria-describedby={`split-hint-${line.id}`}>
-            {tokens.map((t, i) =>
-              t.at === null ? (
-                <span key={i}>{t.text}</span>
-              ) : (
-                <button key={i} type="button" className="split-word" disabled={busy} onClick={() => void split(t.at!)} aria-label={`Start a new line at “${t.text}”`}>
-                  {t.text}
+          </select>
+          {line.kind === "dialogue" &&
+            (adding !== null ? (
+              <form
+                className="new-character"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void createAndPick(adding);
+                }}
+              >
+                <input
+                  className="line-select new-character-input"
+                  placeholder="NAME"
+                  aria-label="New character's name"
+                  value={adding}
+                  maxLength={80}
+                  onChange={(e) => setAdding(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Escape") setAdding(null);
+                  }}
+                  autoFocus
+                />
+                <button className="icon-btn line-tool" disabled={busy || !adding.trim()} aria-label="Add character">
+                  <Check size={16} strokeWidth={3} />
                 </button>
-              ),
-            )}
-          </p>
+              </form>
+            ) : (
+              <select
+                className={`line-select speaker-select ${speaker ? "" : "is-missing"}`}
+                aria-label="Said by"
+                value={line.characterId ?? ""}
+                disabled={busy}
+                style={speaker ? ({ "--hue": characterHue(speaker.name) } as CSSProperties) : undefined}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === NEW_CHARACTER) return setAdding("");
+                  const c = characters.find((x) => x.id === value);
+                  if (c) void pick(c);
+                }}
+              >
+                {!speaker && (
+                  <option value="" disabled>
+                    Who says this?
+                  </option>
+                )}
+                {nearby.length > 0 && (
+                  <optgroup label="Nearby">
+                    {nearby.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label={nearby.length > 0 ? "Everyone else" : "Characters"}>
+                  {everyone.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <option value={NEW_CHARACTER}>New character…</option>
+              </select>
+            ))}
+          <span className="line-tools">
+            <button
+              type="button"
+              className="icon-btn line-tool"
+              aria-pressed={splitting}
+              disabled={busy || !canSplit || typing}
+              onMouseDown={keepFocus}
+              onClick={onSplitClick}
+              aria-label={draft !== null ? "Split at the cursor" : splitting ? "Cancel split" : "Split this line in two"}
+              title={typing ? "Save or undo your typing first" : draft !== null ? "Split at the cursor" : "Split this line in two"}
+            >
+              <Scissors size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn line-tool line-delete"
+              disabled={busy}
+              onMouseDown={keepFocus}
+              onClick={() => {
+                stopEditing();
+                onDelete();
+              }}
+              aria-label="Delete this line"
+              title="Delete this line (Delete)"
+            >
+              <Trash2 size={16} />
+            </button>
+            <button type="button" className="icon-btn line-tool" onMouseDown={keepFocus} onClick={onClose} aria-label="Close" title="Close (Esc)">
+              <X size={16} />
+            </button>
+          </span>
         </div>
-      ) : (
-        <label className="field">
-          <span className="sr-only">Line text</span>
+
+        {splitting ? (
+          <div className="split-mode">
+            <p className="split-hint" id={`split-hint-${line.id}`}>
+              <Scissors size={14} aria-hidden="true" /> Tap the word the new line starts with.
+            </p>
+            <p className="split-text" role="group" aria-describedby={`split-hint-${line.id}`}>
+              {tokens.map((t, i) =>
+                t.at === null ? (
+                  <span key={i}>{t.text}</span>
+                ) : (
+                  <button key={i} type="button" className="split-word" disabled={busy} onClick={() => void split(t.at!)} aria-label={`Start a new line at “${t.text}”`}>
+                    {t.text}
+                  </button>
+                ),
+              )}
+            </p>
+          </div>
+        ) : draft !== null ? (
           <textarea
             ref={textRef}
-            className="input editor-text"
-            value={text}
-            rows={Math.min(10, Math.max(2, text.split("\n").length + 1))}
-            onChange={(e) => setText(e.target.value)}
+            className="script-text inline-text"
+            aria-label="Line text. Enter saves, Shift+Enter starts a new line, Escape cancels."
+            value={draft}
+            rows={1}
             spellCheck={false}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onTextKey}
+            onBlur={() => void commit("blur")}
           />
-        </label>
-      )}
-
-      <div className="editor-actions">
-        {text !== line.text ? (
-          <>
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={saveText}>
-              Save text
-            </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setText(line.text)}>
-              Undo typing
-            </button>
-          </>
         ) : (
-          line.flagged && (
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={onApprove}>
-              <Check size={16} strokeWidth={3} aria-hidden="true" /> Looks right
-            </button>
-          )
+          <span
+            className="script-text is-editable"
+            onClick={(e) => startEdit(caretOffsetAt(e.currentTarget, e.clientX, e.clientY))}
+            title="Click to edit"
+          >
+            <LineText text={saving ?? line.text} kind={line.kind} />
+          </span>
         )}
-        <span className="grow" />
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          aria-pressed={splitting}
-          disabled={busy || !canSplit || text !== line.text}
-          title={text !== line.text ? "Save or undo your typing first" : canSplit ? "Split this line in two" : "One word can't be split"}
-          onClick={() => setSplitting((v) => !v)}
-        >
-          <Scissors size={15} aria-hidden="true" /> {splitting ? "Cancel split" : "Split"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled={busy || !prevLine}
-          title={joinUp ? joinUp.description : "This is the first line"}
-          aria-label={joinUp ? joinUp.description : "Join with the line above"}
-          onClick={() => prevLine && onJoin(prevLine, line)}
-        >
-          <ArrowUpToLine size={15} aria-hidden="true" /> Join above
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          disabled={busy || !nextLine}
-          title={joinDown ? joinDown.description : "This is the last line"}
-          aria-label={joinDown ? joinDown.description : "Join with the line below"}
-          onClick={() => nextLine && onJoin(line, nextLine)}
-        >
-          <ArrowDownToLine size={15} aria-hidden="true" /> Join below
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" aria-expanded={breakTitle !== null} onClick={() => setBreakTitle((t) => (t === null ? "" : null))}>
-          <SeparatorHorizontal size={15} aria-hidden="true" /> New scene here
-        </button>
-      </div>
 
-      {breakTitle !== null && (
-        <form
-          className="section-break"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (await run(() => api.sectionBreak(line.id, { title: breakTitle.trim() }))) onClose();
-          }}
-        >
-          <input
-            className="input grow"
-            placeholder="Scene title, e.g. Act 1, Scene 2"
-            aria-label="New scene title"
-            value={breakTitle}
-            onChange={(e) => setBreakTitle(e.target.value)}
-            autoFocus
-          />
-          <button className="btn btn-secondary btn-sm" disabled={busy || !breakTitle.trim()}>
-            Start scene
-          </button>
-        </form>
+        {line.flagged && <FlagNote line={line} id={reasonId} />}
+      </div>
+      {line.flagged && (
+        <button type="button" className="approve-btn" onClick={onApprove} aria-label="Looks right" title="Looks right (Enter)">
+          <Check size={18} strokeWidth={3} />
+        </button>
       )}
     </div>
   );
