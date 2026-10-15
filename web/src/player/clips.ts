@@ -17,7 +17,10 @@ interface Entry {
 const MAX_BLOBS = 60;
 // Signed URLs last an hour; refetch a remote one well before that.
 const REMOTE_TTL_MS = 40 * 60_000;
-const NOT_READY_RETRIES = 6;
+// The line someone is waiting for asks again this many times (the server holds each request up
+// to 20 s while the clip is made) before it plays as silence. A prefetch asks once (the server
+// holds it up to 8 s) and is asked for again from the next line, so it never blocks the ones after.
+export const PLAY_RETRIES = 2;
 const RETRY_MS = 600;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -29,7 +32,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export class ClipLoader {
   private entries = new Map<string, Entry>();
-  private loading = new Map<string, Promise<Clip>>();
+  private loading = new Map<string, { promise: Promise<Clip>; prefetch: boolean }>();
   private warmed = new Set<string>();
   private disposed = false;
   /** Called when a line's audio source becomes known, for the run-through's tags. */
@@ -60,17 +63,28 @@ export class ClipLoader {
 
   /**
    * The clip for a line, fetching it when needed. Waits while the server is still making it. On
-   * failure the line plays as silence of placeholder length, so playback never stalls.
+   * failure the line plays as silence of placeholder length, so playback never stalls for good.
+   *
+   * The line the player is waiting on is always asked for at play priority, even while a prefetch
+   * of it is still out: otherwise it would wait behind every other prefetch and warm-up on the
+   * server, at the moment it matters most (that was the stall at the start of a new scene).
    */
   load(lineId: string, opts: { prefetch?: boolean } = {}): Promise<Clip> {
     const have = this.ready(lineId);
     if (have) return Promise.resolve(have);
-    let p = this.loading.get(lineId);
-    if (!p) {
-      p = this.fetchClip(lineId, Boolean(opts.prefetch)).finally(() => this.loading.delete(lineId));
-      this.loading.set(lineId, p);
-    }
-    return p;
+    const prefetch = Boolean(opts.prefetch);
+    const running = this.loading.get(lineId);
+    if (running && (prefetch || !running.prefetch)) return running.promise;
+    const promise: Promise<Clip> = this.fetchClip(lineId, prefetch).finally(() => {
+      if (this.loading.get(lineId)?.promise === promise) this.loading.delete(lineId);
+    });
+    this.loading.set(lineId, { promise, prefetch });
+    return promise;
+  }
+
+  /** True while a line's clip is being fetched at play priority (for tests). */
+  waitingOn(lineId: string): boolean {
+    return this.loading.get(lineId)?.prefetch === false;
   }
 
   /** Downloads the next few clips (in order, two at a time). */
@@ -98,10 +112,11 @@ export class ClipLoader {
   private async fetchClip(lineId: string, prefetch: boolean): Promise<Clip> {
     let audio: LineAudio | null = null;
     try {
-      for (let attempt = 0; attempt <= NOT_READY_RETRIES; attempt++) {
+      const attempts = prefetch ? 1 : 1 + PLAY_RETRIES;
+      for (let attempt = 0; attempt < attempts && !this.disposed; attempt++) {
+        if (attempt > 0) await sleep(RETRY_MS);
         audio = await this.api.line(lineId, { prefetch });
         if (audio.ready) break;
-        await sleep(RETRY_MS);
       }
     } catch {
       audio = null;

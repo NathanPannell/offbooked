@@ -31,9 +31,9 @@ class PiperProcess {
   private stderr = "";
   private idleTimer: NodeJS.Timeout | null = null;
 
-  constructor(bin: string, modelPath: string, model: string, onExit: (p: PiperProcess) => void) {
+  constructor(bin: string, binArgs: string[], modelPath: string, model: string, onExit: (p: PiperProcess) => void) {
     this.model = model;
-    this.proc = spawn(bin, ["-q", "--json-input", "-m", modelPath], { windowsHide: true });
+    this.proc = spawn(bin, [...binArgs, "-q", "--json-input", "-m", modelPath], { windowsHide: true });
     this.proc.stdin.on("error", () => {});
     this.proc.stderr.on("data", (d: Buffer) => {
       this.stderr = (this.stderr + d.toString()).slice(-2000);
@@ -91,8 +91,12 @@ class PiperProcess {
 
 // A small pool of Piper processes, at most maxProcs at once. A process keeps its model; when the
 // pool is full, an idle process with another model is replaced. Idle processes exit after a minute.
+// Replacing one means loading a model again (about a second locally, several on a shared CPU), so
+// maxProcs should be at least the number of models: with fewer, a scene whose speakers use
+// different models reloads a model for nearly every line (see pooledProcs).
 export class PiperSynthesizer implements Synthesizer {
   private bin: string;
+  private binArgs: string[];
   private voicesDir: string;
   private maxProcs: number;
   private idleMs: number;
@@ -101,8 +105,12 @@ export class PiperSynthesizer implements Synthesizer {
   private waiters: (() => void)[] = [];
   private probed: Promise<string | null> | null = null;
 
-  constructor(opts: { bin: string; voicesDir: string; maxProcs: number; idleMs?: number; log: Log }) {
+  /** Processes started so far (for logs and tests). */
+  started = 0;
+
+  constructor(opts: { bin: string; binArgs?: string[]; voicesDir: string; maxProcs: number; idleMs?: number; log: Log }) {
     this.bin = opts.bin;
+    this.binArgs = opts.binArgs ?? [];
     this.voicesDir = opts.voicesDir;
     this.maxProcs = Math.max(1, opts.maxProcs);
     this.idleMs = opts.idleMs ?? 60_000;
@@ -116,7 +124,7 @@ export class PiperSynthesizer implements Synthesizer {
           await access(this.modelPath(model));
           await access(`${this.modelPath(model)}.json`);
         }
-        const { stdout } = await run(this.bin, ["--version"], { timeout: 15_000, windowsHide: true });
+        const { stdout } = await run(this.bin, [...this.binArgs, "--version"], { timeout: 15_000, windowsHide: true });
         return `piper ${stdout.trim().split("\n")[0]}`;
       } catch (err) {
         this.log.warn({ bin: this.bin, voicesDir: this.voicesDir, err: String((err as Error).message ?? err) }, "Piper TTS unavailable; unrecorded lines render as silence");
@@ -138,13 +146,13 @@ export class PiperSynthesizer implements Synthesizer {
         return same;
       }
       if (this.procs.length < this.maxProcs) {
-        const p = new PiperProcess(this.bin, this.modelPath(model), model, (dead) => this.remove(dead));
+        const p = this.spawn(model);
         p.busy = true;
-        this.procs.push(p);
         return p;
       }
       const idle = this.procs.find((p) => !p.busy);
       if (idle) {
+        this.log.info({ model, replacing: idle.model }, "piper model switch");
         idle.kill();
         this.remove(idle);
         continue;
@@ -160,10 +168,16 @@ export class PiperSynthesizer implements Synthesizer {
     if (loaded()) return;
     void this.probe().then((engine) => {
       if (!engine || loaded()) return;
-      const p = new PiperProcess(this.bin, this.modelPath(model), model, (dead) => this.remove(dead));
-      this.procs.push(p);
-      this.release(p);
+      this.release(this.spawn(model));
     });
+  }
+
+  private spawn(model: string): PiperProcess {
+    const p = new PiperProcess(this.bin, this.binArgs, this.modelPath(model), model, (dead) => this.remove(dead));
+    this.procs.push(p);
+    this.started++;
+    this.log.info({ model, procs: this.procs.length, started: this.started }, "piper process started");
+    return p;
   }
 
   private release(p: PiperProcess) {
@@ -207,4 +221,11 @@ export class PiperSynthesizer implements Synthesizer {
     for (const p of this.procs) p.kill();
     this.procs = [];
   }
+}
+
+// Piper processes to allow: enough that every model keeps a loaded process even while
+// `concurrency` utterances run at once (two of them maybe on the same model), so no model is
+// ever unloaded to make room for another while a run-through plays.
+export function pooledProcs(concurrency: number): number {
+  return Math.max(1, concurrency) + VOICE_MODELS.length - 1;
 }

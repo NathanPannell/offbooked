@@ -10,7 +10,7 @@ import { SEED_SCENE } from "./seed-scene.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "./test/helpers.ts";
 import { FakeSynthesizer } from "./test/tts.ts";
 import { PriorityPool, TTS_PRIORITY } from "./tts/service.ts";
-import { speakable, type Voice } from "./tts/voices.ts";
+import { NARRATOR_VOICE_ID, speakable, type Voice } from "./tts/voices.ts";
 
 interface Line {
   id: string;
@@ -121,6 +121,7 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
   let lines: Line[];
   let hamlet: { inviteUrl: string };
   let hamletId: string;
+  let extraCalls = 0; // synthesized outside the render: the narrator test
   let wav: Buffer;
   const dialogue = () => lines.filter((l) => l.kind === "dialogue");
   const get = (url: string, headers: Record<string, string>) => t.app.inject({ method: "GET", url, headers });
@@ -153,8 +154,8 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     const line = dialogue()[0]!;
     assert.equal((await get(`/api/productions/${pid}/lines/${line.id}/audio`, {})).statusCode, 401);
     assert.equal((await audio(line.id, bob)).statusCode, 404, "another director's production");
-    const direction = lines.find((l) => l.kind === "stage_direction")!;
-    assert.equal((await audio(direction.id)).statusCode, 404, "only dialogue has audio");
+    const heading = lines.find((l) => l.kind === "heading");
+    if (heading) assert.equal((await audio(heading.id)).statusCode, 404, "headings have no audio");
     assert.equal((await audio(randomUUID())).statusCode, 404);
     assert.equal((await warm([line.id], bob)).statusCode, 404);
     assert.equal((await warm(["nope"])).statusCode, 400);
@@ -171,6 +172,33 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     assert.equal(warmed.statusCode, 200);
     assert.deepEqual(warmed.json().lines.map((l: { lineId: string }) => l.lineId), [line.id], "lines from elsewhere are left out");
     await t.ctx.jobs.idle();
+  });
+
+  test("stage directions are read by the narrator, a voice no character has; asides in dialogue are not read", async () => {
+    const direction = lines.find((l) => l.kind === "stage_direction" && l.text.includes("Flourish"))!;
+    const before = synth.calls.length;
+    const res = await audio(direction.id);
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(res.json().source, "tts");
+    assert.equal(res.json().ready, true);
+    const call = synth.calls.slice(before).find((c) => c.text.startsWith("Flourish"))!;
+    assert.ok(call, "the direction is spoken without its brackets");
+    assert.equal(call.voice, NARRATOR_VOICE_ID);
+    const characterVoices = new Set([...(await t.ctx.tts!.voices(pid)).values()].map((v) => v.id));
+    assert.ok(!characterVoices.has(NARRATOR_VOICE_ID), "no character shares the narrator's voice");
+
+    // A direction kept inside a speech, as the newer parser does.
+    const aside = dialogue()[20]!;
+    await t.ctx.sql`update lines set text = 'Now go. [To the Servant.] Was it not' where id = ${aside.id}`;
+    const n = synth.calls.length;
+    await audio(aside.id);
+    await t.ctx.sql`update lines set text = ${aside.text} where id = ${aside.id}`;
+    const spoken = synth.calls.slice(n);
+    assert.deepEqual(spoken.map((c) => c.text), ["Now go. Was it not"], "the bracketed direction is left out");
+    assert.notEqual(spoken[0]!.voice, NARRATOR_VOICE_ID, "dialogue stays in the character's voice");
+    const sources = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json().sources;
+    assert.equal(sources[direction.id], "tts", "the run-through lists directions with their source");
+    extraCalls += synth.calls.length - before;
   });
 
   test("an unrecorded line is synthesized on demand, once, and the clip plays", async () => {
@@ -229,7 +257,7 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     assert.equal(rt.render.status, "ready", JSON.stringify(rt.render.status));
     const unique = new Set(dialogue().map((l) => `${l.characterId}|${l.text}`)).size;
     // The test above synthesized three render lines with a stand-in voice; everything else once.
-    assert.equal(synth.calls.length, unique + 3);
+    assert.equal(synth.calls.length, unique + 3 + extraCalls);
     const before = synth.calls.length;
     const all = await warm(dialogue().slice(0, 30).map((l) => l.id));
     assert.ok(all.json().lines.every((l: { ready: boolean; audioUrl: string }) => l.ready && l.audioUrl), "every clip is ready after the render");

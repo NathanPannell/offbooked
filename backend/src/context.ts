@@ -6,7 +6,7 @@ import type { Log } from "./log.ts";
 import { createClaudeLabeler, type Labeler } from "./parse/label.ts";
 import { createStorage } from "./storage/index.ts";
 import type { Storage } from "./storage/storage.ts";
-import { PiperSynthesizer, type Synthesizer } from "./tts/piper.ts";
+import { PiperSynthesizer, pooledProcs, type Synthesizer } from "./tts/piper.ts";
 import { TtsService } from "./tts/service.ts";
 
 // Everything a route or background job needs. Tests build one with fakes.
@@ -29,7 +29,7 @@ export function createCtx(config: Config, sql: Sql, log: Log, overrides: Partial
     overrides.synthesizer !== undefined
       ? overrides.synthesizer
       : config.tts.driver === "piper"
-        ? new PiperSynthesizer({ bin: config.tts.piperBin, voicesDir: config.tts.voicesDir, maxProcs: config.tts.concurrency, log })
+        ? new PiperSynthesizer({ bin: config.tts.piperBin, voicesDir: config.tts.voicesDir, maxProcs: pooledProcs(config.tts.concurrency), log })
         : null;
   return {
     config,

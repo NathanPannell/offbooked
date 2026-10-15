@@ -8,7 +8,7 @@ export interface TtsConfig {
   driver: "piper" | "off";
   piperBin: string;
   voicesDir: string;
-  concurrency: number; // clips synthesized at once (and Piper processes alive at most)
+  concurrency: number; // clips synthesized at once (Piper keeps one process per model on top, see pooledProcs)
   cueWaitMs: number; // how long a lines request waits for missing TTS cue clips
 }
 

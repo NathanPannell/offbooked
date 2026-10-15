@@ -6,7 +6,7 @@ import type { Log } from "../log.ts";
 import { encodeCue, normalizeClip } from "../render/ffmpeg.ts";
 import type { Storage } from "../storage/storage.ts";
 import type { Synthesizer } from "./piper.ts";
-import { assignVoices, clipHash, speakable, type Voice } from "./voices.ts";
+import { assignVoices, clipHash, NARRATOR, speakable, speakableDirection, type Voice } from "./voices.ts";
 
 export interface TtsClip {
   hash: string;
@@ -153,6 +153,13 @@ export class TtsService {
     const spoken = speakable(text);
     if (!voice || !spoken) return null;
     return { hash: clipHash(engine, voice, spoken), text: spoken, voice };
+  }
+
+  // A stage direction, read by the narrator (a voice no character has).
+  directionRequest(engine: string, text: string): TtsRequest | null {
+    const spoken = speakableDirection(text);
+    if (!spoken) return null;
+    return { hash: clipHash(engine, NARRATOR, spoken), text: spoken, voice: NARRATOR };
   }
 
   async cached(hashes: string[]): Promise<Map<string, TtsClip>> {

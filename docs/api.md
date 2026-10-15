@@ -266,7 +266,14 @@ interface RunThrough {
 
 - Source rules match the render: the current take's normalized audio (normalized on first use and cached with the render's normalized FLAC, as `takes.stream_key`), else the TTS clip (same voice and cache key as the render; every clip now gets its `.m4a` alongside the FLAC), else silence of `clamp(words × 380 ms, 1200, 8000)`.
 - TTS synthesis runs by priority: play (a GET) before prefetch (`?prefetch=1`, warm, the actor lines page's cue wait) before cue warm-ups before the render. Background work (cues, renders) uses at most `TTS_CONCURRENCY - 1` slots, so a listener's line waits for at most one clip in progress. Concurrent requests for one clip share one synthesis, at the most urgent priority asked.
-- The client plays gaps itself: 350 ms between lines in a section, 1200 ms at a section change or an A–B jump back.
+- The client plays gaps itself: 350 ms between lines in a section, 1200 ms at a section change.
+
+### Run-through v2 (2026-10-15)
+
+- Stage directions play too, read by the narrator: one reserved TTS voice (`NARRATOR_VOICE_ID`, VCTK p225) that no character is ever given. The line-audio GET and warm accept `stage_direction` line ids as well as dialogue (headings are still 404 / left out), and `RunThrough.sources` lists directions. A direction is spoken without its brackets; one with nothing to say comes back `{ audioUrl: null, durationMs: 0, source: "none" }`. Takes never apply to directions.
+- `[Bracketed]` directions inside a dialogue line are not read at all: the character's TTS voice leaves them out (as before; an unclosed `[` now runs to the end of its line), and a recorded take is played as recorded.
+- A GET with `?prefetch=1` now waits at most 8 s (a play GET still waits 20 s); the player asks for a prefetched line again from the next line instead of retrying.
+- Takes are cut to their speech when normalized (`render/trim.ts`): leading and trailing silence and room noise go, with 120 ms kept before the first sound and 200 ms after the last; nothing inside the speech is cut. `LineAudio.durationMs` is the trimmed length. Takes normalized before this are trimmed again on first use (the normalized key now ends in `.t2.flac`/`.t2.m4a`), and `RENDER_SETTINGS.version` is 3, so renders made before are stale.
 
 ### Joining lines (2026-10-15)
 

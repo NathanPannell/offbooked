@@ -2,8 +2,9 @@ import type { Ctx } from "./context.ts";
 import { badRequest, notFound } from "./errors.ts";
 import { body, uuidList } from "./input.ts";
 import { placeholderMs, RENDER_SETTINGS, type AudioSource } from "./render/plan.ts";
-import { normalizedTake, type TakeAudioRow } from "./render/takeaudio.ts";
-import { TTS_PRIORITY, type TtsClip, type TtsPriority, type TtsRequest } from "./tts/service.ts";
+import { isCurrentNormalized, normalizedTake, type TakeAudioRow } from "./render/takeaudio.ts";
+import { TTS_PRIORITY, type TtsClip, type TtsPriority, type TtsRequest, type TtsService } from "./tts/service.ts";
+import type { Voice } from "./tts/voices.ts";
 
 // Line-by-line playback: each dialogue line's audio as its own small .m4a, so the run-through can
 // start on the first line instead of waiting for the whole play to be stitched. The source rules
@@ -20,6 +21,7 @@ export interface LineAudioView {
 
 interface LineAudioRow {
   id: string;
+  kind: "dialogue" | "stage_direction";
   characterId: string | null;
   text: string;
   takeId: string | null;
@@ -30,7 +32,10 @@ interface LineAudioRow {
   streamKey: string | null;
 }
 
+// How long a GET waits for a clip still being made: the line someone is waiting on holds on longer
+// than a prefetch, which the player simply asks for again on the next line.
 export const LINE_AUDIO_WAIT_MS = 20_000;
+export const PREFETCH_WAIT_MS = 8_000;
 export const MAX_WARM_LINES = 30;
 
 const samplesToMs = (samples: number) => Math.round((samples * 1000) / RENDER_SETTINGS.sampleRate);
@@ -38,13 +43,22 @@ const samplesToMs = (samples: number) => Math.round((samples * 1000) / RENDER_SE
 async function rowsFor(ctx: Ctx, productionId: string, lineIds: string[]): Promise<LineAudioRow[]> {
   if (!lineIds.length) return [];
   return ctx.sql<LineAudioRow[]>`
-    select l.id, l.character_id, l.text, l.current_take_id as take_id, t.recorded_by, t.storage_key,
-      t.normalized_key, t.normalized_samples, t.stream_key
-    from lines l left join takes t on t.id = l.current_take_id
-    where l.production_id = ${productionId} and l.kind = 'dialogue' and l.id = any(${lineIds}::uuid[])`;
+    select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id,
+      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key
+    from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'
+    where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') and l.id = any(${lineIds}::uuid[])`;
 }
 
-// Audio for some of a production's dialogue lines, in the order asked (unknown ids are left out).
+// The clip request for a line without a take: the character's voice for dialogue (bracketed
+// asides left out), the narrator for a stage direction.
+const requestFor = (tts: TtsService, engine: string, voices: Map<string, Voice>, r: { kind: string; characterId: string | null; text: string }) =>
+  r.kind === "stage_direction" ? tts.directionRequest(engine, r.text) : tts.request(engine, voices.get(r.characterId ?? ""), r.text);
+
+// A line with nothing to play: dialogue keeps a silence as long as the render's; a stage direction
+// is simply passed over.
+const silentMs = (r: { kind: string; text: string }) => (r.kind === "stage_direction" ? 0 : placeholderMs(r.text));
+
+// Audio for some of a production's dialogue lines and stage directions, in the order asked (unknown ids are left out).
 // With `waitMs`, waits that long for clips still being made; without it, starts making them in the
 // background and answers at once (ready: false for those). `priority` orders TTS synthesis.
 export async function lineAudio(
@@ -69,7 +83,7 @@ export async function lineAudio(
     if (!r.takeId || !r.storageKey) continue;
     const source = r.recordedBy ?? "actor";
     const row: TakeAudioRow = { id: r.takeId, storageKey: r.storageKey, normalizedKey: r.normalizedKey, normalizedSamples: r.normalizedSamples, streamKey: r.streamKey };
-    if (r.streamKey && r.normalizedSamples) {
+    if (r.streamKey && r.normalizedSamples && isCurrentNormalized(r.normalizedKey)) {
       takeViews.set(r.id, { lineId: r.id, audioUrl: await ctx.storage.signedUrl(r.streamKey), durationMs: samplesToMs(r.normalizedSamples), source, ready: true });
       continue;
     }
@@ -98,7 +112,7 @@ export async function lineAudio(
     const voices = await tts.voices(productionId);
     for (const r of ordered) {
       if (r.takeId) continue;
-      const req = tts.request(engine, voices.get(r.characterId ?? ""), r.text);
+      const req = requestFor(tts, engine, voices, r);
       if (req) requests.set(r.id, req);
     }
     tts.prewarm([...requests.values()].map((q) => q.voice));
@@ -130,15 +144,16 @@ export async function lineAudio(
         return { lineId: r.id, audioUrl: await ctx.storage.signedUrl(key), durationMs: samplesToMs(clips.get(req.hash)!.samples), source: "tts", ready: true };
       }
       // Still being synthesized, or no TTS here (or synthesis failed): silent, like the render.
-      if (req && !ttsSettled) return { lineId: r.id, audioUrl: null, durationMs: placeholderMs(r.text), source: "tts", ready: false };
-      return { lineId: r.id, audioUrl: null, durationMs: placeholderMs(r.text), source: "none", ready: true };
+      if (req && !ttsSettled) return { lineId: r.id, audioUrl: null, durationMs: silentMs(r), source: "tts", ready: false };
+      return { lineId: r.id, audioUrl: null, durationMs: silentMs(r), source: "none", ready: true };
     }),
   );
 }
 
-// One line, waiting for its clip. 404 when the line isn't a dialogue line of this production.
+// One line, waiting for its clip. 404 when the line isn't a dialogue line or stage direction of this production.
 export async function oneLineAudio(ctx: Ctx, productionId: string, lineId: string, priority: TtsPriority): Promise<LineAudioView> {
-  const [view] = await lineAudio(ctx, productionId, [lineId], { priority, waitMs: LINE_AUDIO_WAIT_MS });
+  const waitMs = priority === TTS_PRIORITY.play ? LINE_AUDIO_WAIT_MS : PREFETCH_WAIT_MS;
+  const [view] = await lineAudio(ctx, productionId, [lineId], { priority, waitMs });
   if (!view) throw notFound("Line not found.");
   return view;
 }
@@ -152,13 +167,14 @@ export function warmIds(raw: unknown): string[] {
 
 export const playPriority = (prefetch: unknown): TtsPriority => (prefetch === "1" || prefetch === "true" ? TTS_PRIORITY.prefetch : TTS_PRIORITY.play);
 
-// Where each dialogue line's audio will come from, without making anything: the current take's
-// recorder, else "tts" when TTS can voice it, else "none". The player shows these as tags.
+// Where each dialogue line's (and stage direction's) audio will come from, without making
+// anything: the current take's recorder, else "tts" when TTS can voice it, else "none". The player
+// shows these as tags.
 export async function lineSources(ctx: Ctx, productionId: string): Promise<Record<string, AudioSource>> {
-  const rows = await ctx.sql<{ id: string; characterId: string | null; text: string; recordedBy: "actor" | "standin" | null; takeId: string | null }[]>`
-    select l.id, l.character_id, l.text, l.current_take_id as take_id, t.recorded_by
-    from lines l left join takes t on t.id = l.current_take_id
-    where l.production_id = ${productionId} and l.kind = 'dialogue' order by l.seq`;
+  const rows = await ctx.sql<{ id: string; kind: string; characterId: string | null; text: string; recordedBy: "actor" | "standin" | null; takeId: string | null }[]>`
+    select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id, t.recorded_by
+    from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'
+    where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') order by l.seq`;
   const tts = ctx.tts;
   const engine = tts && rows.some((r) => !r.takeId) ? await tts.engine() : null;
   const voices = tts && engine ? await tts.voices(productionId) : new Map();
@@ -167,7 +183,7 @@ export async function lineSources(ctx: Ctx, productionId: string): Promise<Recor
   for (const r of rows) {
     if (r.takeId) out[r.id] = r.recordedBy ?? "actor";
     else {
-      const req = tts && engine ? tts.request(engine, voices.get(r.characterId ?? ""), r.text) : null;
+      const req = tts && engine ? requestFor(tts, engine, voices, r) : null;
       out[r.id] = req ? "tts" : "none";
       if (req && upcoming.length < 12) upcoming.push(req);
     }

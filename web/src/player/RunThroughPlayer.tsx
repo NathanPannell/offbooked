@@ -1,14 +1,4 @@
-import {
-  Crosshair,
-  Headphones,
-  Mic,
-  Pause,
-  Play,
-  Repeat,
-  SkipBack,
-  SkipForward,
-  X,
-} from "lucide-react";
+import { Crosshair, Gauge, Headphones, Mic, Pause, Play, SkipBack, SkipForward, UserRound } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { errorMessage } from "../api/client";
 import type { AudioSource, Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
@@ -20,17 +10,22 @@ import { SectionNav } from "../components/SectionNav";
 import { useToast } from "../components/Toast";
 import { WordDiff } from "../components/WordDiff";
 import { plural } from "../lib/format";
-import { readStorage, writeStorage } from "../lib/storage";
 import { useResource } from "../lib/useResource";
 import { formatAccuracy, overallAccuracy, scoreLabel, verdict } from "../stt/score";
 import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
-import { placeholderMs, type QueueLine } from "./queue";
-import { audioSourceTag, GAP_MULTIPLIER_MAX, GAP_MULTIPLIER_MIN } from "./timing";
+import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
+import { defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
+import { audioSourceTag, isSpeed, SPEEDS } from "./timing";
 import { usePractice } from "./usePractice";
 
-const GAP_KEY = "offbooked.gapMultiplier";
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+const MODE_LABELS: [MyLineMode, string][] = [
+  ["read", "Read"],
+  ["skip", "Skip"],
+  ["pause", "Pause, then read"],
+];
 
 interface Props {
   load: () => Promise<RunThrough>;
@@ -38,7 +33,7 @@ interface Props {
   audio: LineAudioApi;
   /** Actor only: save a "Score me" practice run. */
   onPracticeDone?: (results: PracticeResult[]) => Promise<unknown>;
-  /** Start in my-part mode. */
+  /** "mine" opens with the listener's lines on "Pause, then read". */
   initialMode?: "full" | "mine";
 }
 
@@ -47,29 +42,49 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   const rt = useResource(load, "runthrough");
   const audioRef = useRef<HTMLAudioElement>(null);
   const [engine, setEngine] = useState<PlayerEngine | null>(null);
-  const [mode, setMode] = useState<"full" | "mine">(initialMode);
-  const [multiplier, setMultiplier] = useState(() => {
-    const stored = Number(readStorage(GAP_KEY));
-    return stored >= GAP_MULTIPLIER_MIN && stored <= GAP_MULTIPLIER_MAX ? stored : 1.2;
-  });
+  const [stored, setStored] = useState<PlayerSettings | null>(null);
   const [following, setFollowing] = useState(true);
-  const [picking, setPicking] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const lineRefs = useRef(new Map<string, HTMLElement>());
 
   const data = rt.data;
   const lines = useMemo(() => (data ? [...data.lines].sort((a, b) => a.seq - b.seq) : []), [data]);
   const lineById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
-  const characterName = useMemo(() => new Map((data?.characters ?? []).map((c) => [c.id, c.name])), [data]);
-  const mine = useMemo(() => {
-    const ids = new Set(data?.myCharacterIds ?? []);
-    return new Set(lines.filter((l) => l.kind === "dialogue" && l.characterId && ids.has(l.characterId)).map((l) => l.id));
-  }, [data, lines]);
-  const isActor = (data?.myCharacterIds.length ?? 0) > 0;
+  const characters = useMemo(() => [...(data?.characters ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [data]);
+  const characterName = useMemo(() => new Map(characters.map((c) => [c.id, c.name])), [characters]);
+  const myCharacterIds = useMemo(() => data?.myCharacterIds ?? [], [data]);
+  const isActor = myCharacterIds.length > 0;
 
-  // The play queue: dialogue lines in order. A line's index in it is its "segment".
+  // Role, my-line mode and speed: remembered per production, read once the run-through loads.
+  const productionId = data?.production.id;
+  useEffect(() => {
+    if (!productionId) return;
+    const roles = new Set([...(isActor ? [MY_PART] : []), ...characters.map((c) => c.id)]);
+    const loaded = loadSettings(productionId, defaultSettings(isActor, initialMode), roles);
+    setStored(initialMode === "mine" ? { ...loaded, role: loaded.role || (isActor ? MY_PART : ""), mode: "pause" } : loaded);
+    // Only when the production changes: later reloads of the same run-through keep the settings.
+  }, [productionId]);
+  const settings = stored ?? defaultSettings(isActor, initialMode);
+  const update = (patch: Partial<PlayerSettings>) => {
+    const next = { ...settings, ...patch };
+    setStored(next);
+    if (productionId) saveSettings(productionId, next);
+  };
+
+  const mine = useMemo(() => {
+    const ids = roleCharacters(settings.role, myCharacterIds);
+    return new Set(lines.filter((l) => l.kind === "dialogue" && l.characterId && ids.has(l.characterId)).map((l) => l.id));
+  }, [settings.role, myCharacterIds, lines]);
+  const hasRole = settings.role !== "";
+  const part = useMemo<Part>(() => (hasRole ? { mine, mode: settings.mode } : NO_PART), [hasRole, mine, settings.mode]);
+  const pausing = hasRole && settings.mode === "pause";
+
+  // The play queue: dialogue and stage directions (read by the narrator), in order.
   const queue = useMemo<QueueLine[]>(
-    () => lines.filter((l) => l.kind === "dialogue").map((l) => ({ lineId: l.id, sectionId: l.sectionId, text: l.text })),
+    () =>
+      lines
+        .filter((l) => l.kind === "dialogue" || l.kind === "stage_direction")
+        .map((l) => ({ lineId: l.id, sectionId: l.sectionId, text: l.text, kind: l.kind === "stage_direction" ? "stage_direction" : "dialogue" })),
     [lines],
   );
   const segmentByLine = useMemo(() => new Map(queue.map((q, index) => [q.lineId, index])), [queue]);
@@ -85,7 +100,11 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
-    const clips = new ClipLoader(audio, (lineId) => placeholderMs(linesRef.current.get(lineId)?.text ?? ""));
+    const clips = new ClipLoader(audio, (lineId) => {
+      const line = linesRef.current.get(lineId);
+      // A direction nobody can voice is passed over; dialogue keeps the render's silence.
+      return line?.kind === "stage_direction" ? 0 : placeholderMs(line?.text ?? "");
+    });
     clips.onSource = (lineId, source) => setSources((s) => (s[lineId] === source ? s : { ...s, [lineId]: source }));
     const e = new PlayerEngine(el, clips);
     setEngine(e);
@@ -99,23 +118,25 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     engine?.setLines(queue);
   }, [engine, queue]);
 
-  const state = useSyncExternalStore(
-    engine?.subscribe ?? noopSubscribe,
-    engine?.getState ?? initialState,
-  );
+  const state = useSyncExternalStore(engine?.subscribe ?? noopSubscribe, engine?.getState ?? initialState);
 
   useEffect(() => {
-    engine?.setMine(mode === "mine" ? mine : null);
-  }, [engine, mode, mine]);
+    engine?.setPart(part);
+  }, [engine, part]);
 
   useEffect(() => {
-    engine?.setGapMultiplier(multiplier);
-    writeStorage(GAP_KEY, String(multiplier));
-  }, [engine, multiplier]);
+    engine?.setSpeed(settings.speed);
+  }, [engine, settings.speed]);
 
   useEffect(() => {
-    if (engine) engine.gapListener = mode === "mine" ? practice.gapListener : null;
+    if (engine) engine.gapListener = pausing ? practice.gapListener : null;
   });
+
+  // "Score me" listens during the pauses, so it only runs in "Pause, then read".
+  const { enabled: practiceOn, disable: stopPractice } = practice;
+  useEffect(() => {
+    if (!pausing && practiceOn) stopPractice();
+  }, [pausing, practiceOn, stopPractice]);
 
   const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
@@ -189,40 +210,54 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
 
   const hasAudio = queue.length > 0;
   const sections = [...data.sections].sort((a, b) => a.seq - b.seq);
+  const ownNames = myCharacterIds.map((id) => characterName.get(id)).filter(Boolean).join(" & ");
 
   const onLineTap = (line: Line) => {
     if (!engine || !hasAudio) return;
     const index = segmentByLine.get(line.id) ?? queue.findIndex((q) => (lineById.get(q.lineId)?.seq ?? 0) > line.seq);
     if (index < 0) return;
-    if (picking) {
-      engine.setAbPoint(index);
-      if (engine.getState().ab.b !== null) setPicking(false);
-      return;
-    }
     setFollowing(true);
     engine.seekToSegment(index);
   };
 
-  const ab = state.ab;
-  const abSet = ab.a !== null && ab.b !== null;
-  const inAb = (index: number | undefined) =>
-    index !== undefined && ab.a !== null && index >= Math.min(ab.a, ab.b ?? ab.a) && index <= Math.max(ab.a, ab.b ?? ab.a);
-
   return (
-    <div className={`player ${mode === "mine" ? "is-my-part" : ""}`}>
+    <div className={`player ${hasRole ? "is-my-part" : ""}`}>
       <audio ref={audioRef} preload="auto" playsInline />
 
       <div className="player-toolbar">
-        {isActor && (
-          <div className="segmented" role="group" aria-label="Playback mode">
-            <button type="button" aria-pressed={mode === "full"} onClick={() => setMode("full")}>
-              Full cast
-            </button>
-            <button type="button" aria-pressed={mode === "mine"} onClick={() => setMode("mine")}>
-              My part
-            </button>
-          </div>
-        )}
+        <label className="pill-select">
+          <UserRound size={17} aria-hidden="true" />
+          <span className="sr-only">My role</span>
+          <select className="input" value={settings.role} onChange={(e) => update({ role: e.target.value })}>
+            {isActor && <option value={MY_PART}>{ownNames ? `Me (${ownNames})` : "My part"}</option>}
+            <option value="">No role, just listen</option>
+            {characters
+              .filter((c) => !(isActor && myCharacterIds.length === 1 && c.id === myCharacterIds[0]))
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="pill-select">
+          <Gauge size={17} aria-hidden="true" />
+          <span className="sr-only">Speed of other people's lines</span>
+          <select
+            className="input"
+            value={String(settings.speed)}
+            onChange={(e) => {
+              const speed = Number(e.target.value);
+              if (isSpeed(speed)) update({ speed });
+            }}
+          >
+            {SPEEDS.map((s) => (
+              <option key={s} value={String(s)}>
+                {hasRole ? `Others ${s}×` : `${s}×`}
+              </option>
+            ))}
+          </select>
+        </label>
         <SectionNav
           sections={sections}
           onJump={(sectionId) => {
@@ -231,22 +266,17 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
             else document.getElementById(`rt-section-${sectionId}`)?.scrollIntoView({ block: "start" });
           }}
         />
-        {mode === "mine" && (
-          <div className="my-part-settings">
-            <label className="gap-setting">
-              <span className="small">
-                Pause for my lines <strong>{multiplier.toFixed(1)}×</strong>
-              </span>
-              <input
-                type="range"
-                min={GAP_MULTIPLIER_MIN}
-                max={GAP_MULTIPLIER_MAX}
-                step={0.1}
-                value={multiplier}
-                onChange={(e) => setMultiplier(Number(e.target.value))}
-              />
-            </label>
-            {onPracticeDone && (
+        {hasRole && (
+          <div className="my-lines-setting" role="group" aria-label="My lines">
+            <span className="eyebrow">My lines</span>
+            <div className="segmented">
+              {MODE_LABELS.map(([mode, label]) => (
+                <button key={mode} type="button" aria-pressed={settings.mode === mode} onClick={() => update({ mode })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {pausing && onPracticeDone && (
               <label className="checkbox score-toggle">
                 <input
                   type="checkbox"
@@ -260,7 +290,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
         )}
       </div>
 
-      {mode === "mine" && onPracticeDone && !practice.enabled && !practice.micError && (
+      {pausing && onPracticeDone && !practice.enabled && !practice.micError && (
         <p className="small muted practice-tip">
           <Headphones size={15} aria-hidden="true" /> Turn on “Score me” to check your lines as you say them. Headphones
           help: the mic hears only you.
@@ -290,11 +320,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
           <div className="grow">There are no lines to play yet.</div>
         </div>
       )}
-      {picking && (
-        <p className="notice notice-accent" role="status">
-          {ab.a === null ? "Tap the first line of the bit to repeat." : "Now tap the last line."}
-        </p>
-      )}
 
       <ol className="lyrics" aria-label={`${data.production.title} script`}>
         {sections.map((section) => (
@@ -307,9 +332,10 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                   const segment = segmentByLine.get(line.id);
                   const isCurrent = segment !== undefined && segment === state.index;
                   const isMine = mine.has(line.id);
+                  const skipped = isMine && settings.mode === "skip";
                   const inGap = isCurrent && state.gap !== null;
                   const source = sourceOf(line.id);
-                  const tag = audioSourceTag(source);
+                  const tag = line.kind === "dialogue" ? audioSourceTag(source) : null;
                   const who = line.characterId ? characterName.get(line.characterId) : undefined;
                   const result = practice.results.get(line.id);
                   const classes = [
@@ -318,11 +344,11 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                     isCurrent && "is-current",
                     line.seq < currentSeq && "is-past",
                     isMine && "is-mine",
-                    inAb(segment) && "in-ab",
+                    skipped && "is-skipped",
                   ]
                     .filter(Boolean)
                     .join(" ");
-                  if (line.kind !== "dialogue") {
+                  if (segment === undefined) {
                     return (
                       <li key={line.id} className={classes}>
                         <p className="lyric-text">{line.text}</p>
@@ -340,18 +366,20 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                       aria-current={isCurrent ? "true" : undefined}
                     >
                       <button type="button" className="lyric-button" onClick={() => onLineTap(line)} disabled={!hasAudio}>
-                        <span className="lyric-who">
-                          {who && <CharacterName name={who} />}
-                          {isMine && mode === "mine" && <span className="your-line">your line</span>}
-                          {tag && (
-                            <span className={`tag tag-${source}`} title={SOURCE_TITLE[source]}>
-                              {tag}
-                            </span>
-                          )}
-                          {result && (
-                            <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>
-                          )}
-                        </span>
+                        {line.kind === "dialogue" && (
+                          <span className="lyric-who">
+                            {who && <CharacterName name={who} />}
+                            {isMine && <span className="your-line">{skipped ? "your line, skipped" : "your line"}</span>}
+                            {tag && (
+                              <span className={`tag tag-${source}`} title={SOURCE_TITLE[source]}>
+                                {tag}
+                              </span>
+                            )}
+                            {result && (
+                              <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>
+                            )}
+                          </span>
+                        )}
                         <span className="lyric-text">{line.text}</span>
                       </button>
                       {inGap && state.gap && (
@@ -402,25 +430,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
         </button>
         <button type="button" className="icon-btn" onClick={() => engine?.next()} disabled={!hasAudio} aria-label="Next line">
           <SkipForward size={24} />
-        </button>
-        <button
-          type="button"
-          className={`icon-btn ab-button ${abSet || picking ? "is-on" : ""}`}
-          disabled={!hasAudio}
-          aria-pressed={abSet || picking}
-          aria-label={abSet ? "Stop repeating" : "Repeat a section: tap two lines"}
-          onClick={() => {
-            if (abSet || picking) {
-              engine?.clearAb();
-              setPicking(false);
-            } else {
-              engine?.clearAb();
-              setPicking(true);
-            }
-          }}
-        >
-          {abSet ? <X size={22} /> : <Repeat size={22} />}
-          <span className="ab-label">A–B</span>
         </button>
       </div>
 
@@ -536,6 +545,6 @@ function PracticeSummary({
   );
 }
 
-const IDLE: PlayerState = { index: -1, playing: false, gap: null, ab: { a: null, b: null }, ended: false, waiting: false };
+const IDLE: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false };
 const initialState = () => IDLE;
 const noopSubscribe = () => () => {};
