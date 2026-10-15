@@ -269,3 +269,8 @@ interface RunThrough {
 
 - `POST /api/lines/:id/merge-previous` → `{ line }`: joins this line into the one above it. `merge-next` joins the next line into this one. Either way the upper line keeps its id, kind and speaker, the texts are joined with a newline, and the lower line must have no recordings (409 `has_recordings`).
 - The parser keeps each speech as one dialogue line: a stage direction printed inside a speech becomes its own stage-direction line before the speech (or after it, when it follows the last words).
+
+### Deleting and inserting lines (2026-10-15)
+
+- `DELETE /api/lines/:id` → `{ line, afterLineId, removedSection }`: deletes a line with no recordings (409 `has_recordings` otherwise) and renumbers the lines after it. `line` is the deleted line as it was, `afterLineId` the line it sat after (null when it was first), and `removedSection` its scene (`Section`) when the line was the scene's only line and the scene went with it, else null. Together they are what undo needs.
+- `POST /api/productions/:id/lines` with `{ afterLineId: string | null, sectionId?, newSection?: { title, act?, scene? }, kind, characterId?, text, flagged?, flagReason?, sourceLine?, sourcePage? }` → `{ line }`: inserts a line after `afterLineId` (null: at the start). It goes in `sectionId`, which must be the scene of the line before or after the place (400 otherwise); or in a new scene `newSection`, which can only start between two scenes; or, with neither, the scene of the line before (else the one after). A dialogue line without `characterId` gets a guessed speaker, as with `PATCH`. The web app uses it to undo a delete: `sectionId` is the deleted line's scene, or `newSection` from `removedSection`.

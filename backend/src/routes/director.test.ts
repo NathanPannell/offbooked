@@ -122,6 +122,90 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal((await send("POST", `/api/lines/${flagged.id}/resolve`)).json().line.flagged, false);
   });
 
+  test("deleting a line and putting it back", async () => {
+    await reload();
+    const before = script.lines.map((l) => l.id);
+    const target = script.lines.find((l) => l.kind === "dialogue" && l.seq > 3)!;
+    // Bob can't delete or insert.
+    assert.equal((await t.app.inject({ method: "DELETE", url: `/api/lines/${target.id}`, headers: bearer(bob) })).statusCode, 404);
+    assert.equal((await send("POST", `/api/productions/${pid}/lines`, { afterLineId: null, kind: "heading", text: "x" }, bob)).statusCode, 404);
+
+    const res = await t.app.inject({ method: "DELETE", url: `/api/lines/${target.id}`, headers: bearer(alice) });
+    assert.equal(res.statusCode, 200, res.body);
+    const gone = res.json();
+    assert.equal(gone.line.id, target.id);
+    assert.equal(gone.line.text, target.text);
+    assert.equal(gone.afterLineId, script.lines.find((l) => l.seq === target.seq - 1)!.id);
+    assert.equal(gone.removedSection, null);
+    await reload();
+    assert.equal(script.lines.length, before.length - 1);
+    assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
+
+    // Undo: insert it back in the same place, scene, speaker and flag.
+    const back = (
+      await send("POST", `/api/productions/${pid}/lines`, {
+        afterLineId: gone.afterLineId,
+        sectionId: gone.line.sectionId,
+        kind: gone.line.kind,
+        characterId: gone.line.characterId,
+        text: gone.line.text,
+        flagged: true,
+        flagReason: "Who speaks?",
+        sourceLine: 12,
+      })
+    ).json().line;
+    assert.equal(back.seq, target.seq);
+    assert.equal(back.characterId, target.characterId);
+    assert.equal(back.sectionId, target.sectionId);
+    assert.equal(back.flagged, true);
+    assert.equal(back.flagReason, "Who speaks?");
+    assert.equal(back.sourceLine, 12);
+    await reload();
+    assert.equal(script.lines.length, before.length);
+    assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
+    // Deleting the only line of a scene drops the scene; undo brings it back with its title.
+    const lone = script.lines.at(-1)!;
+    await send("POST", `/api/lines/${lone.id}/section-break`, { title: "Epilogue" });
+    await reload();
+    const sectionsBefore = script.sections.length;
+    const dropped = (await t.app.inject({ method: "DELETE", url: `/api/lines/${lone.id}`, headers: bearer(alice) })).json();
+    assert.equal(dropped.removedSection.title, "Epilogue");
+    await reload();
+    assert.equal(script.sections.length, sectionsBefore - 1);
+    const lineBack = (
+      await send("POST", `/api/productions/${pid}/lines`, {
+        afterLineId: dropped.afterLineId,
+        newSection: { title: dropped.removedSection.title },
+        kind: dropped.line.kind,
+        characterId: dropped.line.characterId,
+        text: dropped.line.text,
+      })
+    ).json().line;
+    await reload();
+    assert.equal(script.sections.length, sectionsBefore);
+    assert.equal((script.sections.at(-1) as { title?: string }).title, "Epilogue");
+    assert.equal(lineBack.sectionId, script.sections.at(-1)!.id);
+    // A new scene can't be wedged into the middle of one.
+    const mid = script.lines.find((l) => l.seq === 2)!;
+    assert.equal((await send("POST", `/api/productions/${pid}/lines`, { afterLineId: mid.id, newSection: { title: "x" }, kind: "heading", text: "x" })).statusCode, 400);
+    // …and a scene that isn't next to the place is refused.
+    assert.equal((await send("POST", `/api/productions/${pid}/lines`, { afterLineId: null, sectionId: lineBack.sectionId, kind: "heading", text: "x" })).statusCode, 400);
+    // Put the line back in the first scene for the tests after this one (no sectionId: the scene of the line before).
+    const again = (await t.app.inject({ method: "DELETE", url: `/api/lines/${lineBack.id}`, headers: bearer(alice) })).json();
+    await send("POST", `/api/productions/${pid}/lines`, { afterLineId: again.afterLineId, kind: again.line.kind, characterId: again.line.characterId, text: again.line.text });
+    await reload();
+    assert.equal(script.sections.length, 1);
+
+    // A line with recordings can't be deleted.
+    const recorded = script.lines.find((l) => l.kind === "dialogue")!;
+    await t.ctx.sql`insert into takes (id, production_id, line_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms)
+                    select gen_random_uuid(), p.id, ${recorded.id}, 'standin', p.owner_id, 'x', 'audio/webm', 1, 1000 from productions p where p.id = ${pid}`;
+    const refused = await t.app.inject({ method: "DELETE", url: `/api/lines/${recorded.id}`, headers: bearer(alice) });
+    assert.equal(refused.statusCode, 409);
+    assert.equal(refused.json().error.code, "has_recordings");
+    await t.ctx.sql`delete from takes where line_id = ${recorded.id}`;
+  });
+
   test("section breaks and renames", async () => {
     const at = script.lines.find((l) => l.text === "[Enter Horatio, Marcellus and Bernardo.]")!;
     const sections = (await send("POST", `/api/lines/${at.id}/section-break`, { title: "Horatio arrives", act: "1", scene: "2b" })).json().sections;

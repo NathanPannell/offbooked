@@ -17,6 +17,9 @@ export interface Character {
   lineCount: number;
 }
 
+/** Why the parser flagged a line (null: no particular reason given). */
+export type FlagCode = "speaker" | "missed_cue" | "direction" | "text" | "heading" | "backup";
+
 export interface Line {
   id: string;
   seq: number;
@@ -26,6 +29,8 @@ export interface Line {
   text: string;
   flagged: boolean;
   flagReason: string | null;
+  /** What to check on a flagged line; older parses and servers leave it out. */
+  flagCode?: FlagCode | null;
   /** 1-based line in the prepared source text (see script/source). Null for older parses. */
   sourceLine?: number | null;
   /** PDF page the line came from. Null for DOCX, plain text and older parses. */
