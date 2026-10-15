@@ -1,5 +1,6 @@
 import type { Ctx } from "./context.ts";
 import type { AudioSource } from "./render/plan.ts";
+import { TTS_PRIORITY } from "./tts/service.ts";
 import { takeColumns, type LineRow, type TakeRow } from "./views.ts";
 
 export interface CueView {
@@ -53,7 +54,8 @@ async function ttsCueUrls(ctx: Ctx, productionId: string, lines: LineRow[], wait
   let clips = await tts.cached(requests.map((r) => r.hash));
   const missing = requests.filter((r) => !clips.get(r.hash)?.cueKey);
   if (missing.length) {
-    const pending = tts.ensure(missing, { cue: true });
+    // An actor waiting on the lines page outranks a warm-up started when they opened their link.
+    const pending = tts.ensure(missing, { cue: true, priority: waitMs > 0 ? TTS_PRIORITY.prefetch : TTS_PRIORITY.cue });
     ctx.jobs.run("tts cue warm-up", () => pending.then(() => undefined));
     if (waitMs > 0) {
       let timer: NodeJS.Timeout | undefined;

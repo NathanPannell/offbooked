@@ -63,7 +63,7 @@ export function Landing() {
             <Link className="btn btn-primary btn-lg" to={startTo}>
               Start a production <ArrowRight size={18} aria-hidden="true" />
             </Link>
-            <button type="button" className="btn btn-sticker btn-lg" onClick={hearDemo}>
+            <button type="button" className="btn btn-secondary btn-lg" onClick={hearDemo}>
               <Play size={17} fill="currentColor" aria-hidden="true" /> Hear a demo
             </button>
           </div>
@@ -190,7 +190,7 @@ export function Landing() {
           Places, everyone.
         </h2>
         <p>Add your script tonight, drop one link in the cast chat, and wake up to a run-through.</p>
-        <Link className="btn btn-sticker btn-lg" to={startTo}>
+        <Link className="btn btn-primary btn-lg" to={startTo}>
           Start a production <ArrowRight size={18} aria-hidden="true" />
         </Link>
       </section>
@@ -221,7 +221,7 @@ function HeroScene() {
   return (
     <div className="hero-scene" aria-hidden="true">
       <svg className="hero-spot" viewBox="0 0 400 400">
-        <path d="M200 0 60 400h280z" fill="var(--sun)" opacity="0.28" />
+        <path d="M200 0 60 400h280z" fill="var(--marker)" opacity="0.35" />
       </svg>
       <div className="phone">
         <div className="phone-notch" />
@@ -245,7 +245,7 @@ function HeroScene() {
           <span className="phone-rec-hint">Tap, say your line, tap to stop</span>
         </div>
       </div>
-      <div className="hero-lyrics sticker">
+      <div className="hero-lyrics raised">
         <p className="mono hero-lyrics-label">Run-through</p>
         {lyrics.map((l, i) => (
           <p key={i} className={`hero-lyric ${i === beat ? "is-current" : i < beat ? "is-past" : ""} ${l.you ? "is-you" : ""}`}>

@@ -147,21 +147,21 @@ export function ScriptUpload({
   );
 }
 
-/** A little script page with a marker swipe, for the empty upload state. */
+/** A little script page with one line marked, for the empty upload state. */
 function ScriptIllustration() {
   return (
-    <svg className="upload-art" width="120" height="104" viewBox="0 0 120 104" aria-hidden="true">
-      <rect x="30" y="10" width="66" height="86" rx="6" fill="var(--paper)" stroke="var(--ink)" strokeWidth="2" transform="rotate(6 63 53)" />
-      <rect x="22" y="6" width="66" height="86" rx="6" fill="#fff" stroke="var(--ink)" strokeWidth="2" />
-      <rect x="32" y="20" width="22" height="5" rx="2.5" fill="var(--ink)" />
-      <rect x="32" y="31" width="46" height="4" rx="2" fill="var(--line-strong)" />
-      <rect x="29" y="42" width="52" height="11" rx="3" fill="var(--sun)" opacity="0.85" />
-      <rect x="32" y="45.5" width="44" height="4" rx="2" fill="var(--ink)" />
-      <rect x="32" y="60" width="18" height="5" rx="2.5" fill="var(--ink)" />
-      <rect x="32" y="71" width="40" height="4" rx="2" fill="var(--line-strong)" />
-      <rect x="32" y="80" width="30" height="4" rx="2" fill="var(--line-strong)" />
-      <circle cx="98" cy="22" r="10" fill="var(--accent)" stroke="var(--ink)" strokeWidth="2" />
-      <path d="M93 22h10M98 17v10" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" />
+    <svg className="upload-art" width="120" height="104" viewBox="0 0 120 104" aria-hidden="true" fill="none">
+      <rect x="28" y="12" width="66" height="86" rx="4" fill="var(--paper)" stroke="var(--line-strong)" strokeWidth="1.25" />
+      <rect x="22" y="6" width="66" height="86" rx="4" fill="#fff" stroke="var(--edge-strong)" strokeWidth="1.25" />
+      <rect x="32" y="20" width="22" height="3" rx="1.5" fill="var(--edge-strong)" />
+      <rect x="32" y="30" width="46" height="2.5" rx="1.25" fill="var(--line-strong)" />
+      <rect x="29" y="40" width="52" height="11" rx="2" fill="var(--marker)" />
+      <rect x="32" y="44.5" width="44" height="2.5" rx="1.25" fill="var(--ink-soft)" />
+      <rect x="32" y="60" width="18" height="3" rx="1.5" fill="var(--edge-strong)" />
+      <rect x="32" y="70" width="40" height="2.5" rx="1.25" fill="var(--line-strong)" />
+      <rect x="32" y="78" width="30" height="2.5" rx="1.25" fill="var(--line-strong)" />
+      <circle cx="98" cy="22" r="10" fill="var(--accent)" />
+      <path d="M93.5 22h9M98 17.5v9" stroke="#fff" strokeWidth="1.75" strokeLinecap="round" />
     </svg>
   );
 }

@@ -1,9 +1,12 @@
 import { API_URL, request, type Auth } from "./client";
 import type { TakeUploadResult } from "./actor";
+import type { SplitSecond } from "../routes/director/lineJoin";
 import type {
   CastMember,
   Character,
   Line,
+  LineAudio,
+  LineAudioApi,
   LineKind,
   Production,
   Render,
@@ -41,6 +44,12 @@ export const productions = {
   runthrough: (id: string) => request<RunThrough>(`/productions/${id}/runthrough`, { auth: director }),
   render: (id: string) =>
     request<{ render: Render }>(`/productions/${id}/render`, { method: "POST", auth: director }),
+  /** Line-by-line audio for the run-through player. */
+  lineAudio: (id: string): LineAudioApi => ({
+    line: (lineId, opts = {}) =>
+      request<LineAudio>(`/productions/${id}/lines/${lineId}/audio${opts.prefetch ? "?prefetch=1" : ""}`, { auth: director, signal: opts.signal }),
+    warm: (lineIds) => request<{ lines: LineAudio[] }>(`/productions/${id}/lines/audio/warm`, { auth: director, json: { lineIds } }),
+  }),
 };
 
 export const script = {
@@ -68,10 +77,14 @@ export const script = {
     }),
   updateLine: (lineId: string, input: { characterId?: string | null; kind?: LineKind; text?: string }) =>
     request<{ line: Line }>(`/lines/${lineId}`, { method: "PATCH", auth: director, json: input }),
-  splitLine: (lineId: string, at: number) =>
-    request<{ lines: [Line, Line] }>(`/lines/${lineId}/split`, { auth: director, json: { at } }),
+  /** `second` restores a line that a join removed (undo); without it the new line copies this one. */
+  splitLine: (lineId: string, at: number, second?: SplitSecond) =>
+    request<{ lines: [Line, Line] }>(`/lines/${lineId}/split`, { auth: director, json: { at, second } }),
   mergeNext: (lineId: string) =>
     request<{ line: Line }>(`/lines/${lineId}/merge-next`, { method: "POST", auth: director }),
+  /** Joins the line into the one before it, which keeps its id, kind and speaker. */
+  mergePrevious: (lineId: string) =>
+    request<{ line: Line }>(`/lines/${lineId}/merge-previous`, { method: "POST", auth: director }),
   sectionBreak: (lineId: string, input: { title: string; act?: string; scene?: string }) =>
     request<{ sections: Section[] }>(`/lines/${lineId}/section-break`, { auth: director, json: input }),
   resolveLine: (lineId: string) =>

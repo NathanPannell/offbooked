@@ -59,16 +59,36 @@ export async function parseScriptText(
     usage.chunks = ranges.length;
     usage.model = PARSE_MODEL;
     const contentIn = (from: number, to: number) => docLines.slice(from - 1, to).filter((l) => l.trim()).length;
-    const progress: LabelProgress = { chunksDone: 0, chunksTotal: ranges.length, linesDone: 0, linesTotal: contentIn(1, docLines.length), scenes: 0, speeches: 0 };
-    opts.onProgress?.({ ...progress });
+    const linesTotal = contentIn(1, docLines.length);
+    const progress: LabelProgress = { chunksDone: 0, chunksTotal: ranges.length, linesDone: 0, linesTotal, scenes: 0, speeches: 0 };
+    // Live counts per chunk, updated as rows stream in, so progress moves while every chunk is
+    // still running (they all start together and would otherwise finish together).
+    const live = ranges.map(() => ({ upTo: 0, scenes: 0, speeches: 0 }));
+    const report = () => {
+      progress.linesDone = live.reduce((n, c, i) => n + (c.upTo ? contentIn(ranges[i]![0], Math.min(c.upTo, ranges[i]![1])) : 0), 0);
+      progress.scenes = live.reduce((n, c) => n + c.scenes, 0);
+      progress.speeches = live.reduce((n, c) => n + c.speeches, 0);
+      opts.onProgress?.({ ...progress });
+    };
+    report();
     const results = await mapLimit(ranges, MAX_PARALLEL_CHUNKS, async ([from, to], index) => {
       // Keep every valid row and re-ask from the first unlabelled line: the model sometimes stops
       // early or skips a stretch, and relabelling only the rest is cheaper and more reliable.
       const kept: Segment[] = [];
       let cursor = from;
+      const onRows = (rows: Segment[]) => {
+        const c = live[index]!;
+        for (const r of rows) {
+          if (r.from < cursor || r.to > to) continue;
+          c.upTo = Math.max(c.upTo, r.to);
+          if (r.type === "speech") c.speeches++;
+          if (r.type === "heading" && (r.act || r.scene)) c.scenes++;
+        }
+        report();
+      };
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && cursor <= to; attempt++) {
         try {
-          const res = await labeler({ lines: docLines, from: cursor, to, knownSpeakers: [] });
+          const res = await labeler({ lines: docLines, from: cursor, to, knownSpeakers: [], onRows });
           usage.inputTokens += res.usage.inputTokens;
           usage.outputTokens += res.usage.outputTokens;
           usage.cacheReadTokens += res.usage.cacheReadTokens;
@@ -86,10 +106,12 @@ export async function parseScriptText(
         fallback = heuristicParse(docLines.slice(cursor - 1, to).join("\n")).map((l) => ({ ...l, flagReason: l.flagReason ?? FALLBACK_NOTE }));
       }
       progress.chunksDone++;
-      progress.linesDone += contentIn(from, to);
-      progress.scenes += kept.filter((sg) => sg.type === "heading" && (sg.act || sg.scene)).length;
-      progress.speeches += kept.filter((sg) => sg.type === "speech").length + fallback.filter((l) => l.kind === "dialogue").length;
-      opts.onProgress?.({ ...progress });
+      live[index] = {
+        upTo: to,
+        scenes: kept.filter((sg) => sg.type === "heading" && (sg.act || sg.scene)).length,
+        speeches: kept.filter((sg) => sg.type === "speech").length + fallback.filter((l) => l.kind === "dialogue").length,
+      };
+      report();
       return { segments: kept, fallback };
     });
     // Cues are learnt across the whole script, then used to repair each chunk's blocks.

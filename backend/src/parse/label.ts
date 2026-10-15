@@ -24,6 +24,8 @@ export interface LabelRequest {
   from: number; // first line to label (1-based)
   to: number; // last line to label (inclusive)
   knownSpeakers: string[];
+  // Called with each complete row as the model streams it, for live progress.
+  onRows?: (rows: Segment[]) => void;
 }
 
 export interface LabelUsage {
@@ -56,7 +58,7 @@ Speeches:
 - SPEAKER is the character's full name in capitals, spelled as the script prints it (never modernise old spellings: "EUERY MAN" stays) and the same way every time (HAMLET even when the cue reads "HAM." or "Ham."; KING for "King."; "SECOND OFFICER" for "Sec. Off.").
 - After "|", give only the speaker cue as printed, never the spoken words: for "HAM. To be, or not to be" write "| HAM."; for "BARNARDO Who's there?" write "| BARNARDO". Leave out "| ..." only when the speech has no cue (a C row never has one).
 - Cues can sit on their own line above the speech, at the start of the first line, or after a line reference. A new cue always starts a new S row: a line that is only a character name, like "POLONIUS" or "HAMLET, aside", is the cue of the next speech.
-- If a stage direction is printed inside a speech, on the same line as spoken words, add " >> <the direction text exactly as printed>" to the row for each one, e.g. "Give you good night. Francisco exits." gives ">> Francisco exits." and "[Aside] I'll do it." gives ">> [Aside]". A direction on its own line between two parts of a speech is its own D row instead. Parentheses inside verse or prose that are part of what the character says are not directions; a parenthesis is a direction only when it describes action or delivery, like "(aside)" or "(to Ben)".
+- A stage direction printed on the same line as spoken words never splits the speech: keep the whole speech as ONE S row, including the words before and after the direction, and add " >> <the direction text exactly as printed>" to that row for each direction, e.g. "Give you good night. Francisco exits." gives ">> Francisco exits." and "[Aside] I'll do it." gives ">> [Aside]". A direction on its own line between two parts of a speech is its own D row instead. Parentheses inside verse or prose that are part of what the character says are not directions; a parenthesis is a direction only when it describes action or delivery, like "(aside)" or "(to Ben)".
 - Songs, prologues, epilogues and choruses that are spoken or sung are speeches.
 - A speech carries on across stage directions, page breaks and blank lines. Spoken words that follow a direction with no new cue still belong to the previous speaker: label them "S <that same SPEAKER>" without "| cue" (or C at the very start of the excerpt). Only add "??" when it is genuinely unclear who is speaking.
 - A speech can open with a direction before the words, e.g. "NORA." then "_In a low voice._—Where is she?" or "HAM. [Aside] A little more than kin". That line is still part of the speech: label it with the speech and mark the direction with ">>".
@@ -111,6 +113,17 @@ export function createClaudeLabeler(apiKey: string): Labeler {
         { role: "user", content: prompt },
       ],
     });
+    if (req.onRows) {
+      let buffer = "";
+      stream.on("text", (delta) => {
+        buffer += delta;
+        const end = buffer.lastIndexOf("\n");
+        if (end < 0) return;
+        const rows = parseRows(buffer.slice(0, end));
+        buffer = buffer.slice(end + 1);
+        if (rows.length) req.onRows!(rows);
+      });
+    }
     const message = await stream.finalMessage();
     if (message.stop_reason === "refusal") throw new Error("Claude declined to label this excerpt");
     if (message.stop_reason === "max_tokens") throw new Error("Claude ran out of output tokens on this excerpt");

@@ -37,7 +37,7 @@ export default function Verify() {
   return (
     <main className="page page-narrow center-page">
       <Brand />
-      <div className="sticker message-card stack">
+      <div className="raised message-card stack">
         <h1 className="display">That link didn't work</h1>
         <p className="muted">{error} Sign-in links work once and expire after 15 minutes.</p>
         <Link className="btn btn-primary" to="/signin">

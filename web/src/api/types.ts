@@ -112,7 +112,27 @@ export interface RunThrough {
   characters: Character[];
   lines: Line[];
   render: Render;
+  /** Where each dialogue line's audio comes from, by line ID. Missing on older servers. */
+  sources?: Record<string, AudioSource>;
   myCharacterIds: string[];
+}
+
+/** One line's audio for line-by-line playback (GET …/lines/:lineId/audio). */
+export interface LineAudio {
+  lineId: string;
+  /** A small .m4a, or null for a silent line (or one still being made). */
+  audioUrl: string | null;
+  /** The clip's length; for a silent line, how long to stay silent. */
+  durationMs: number;
+  source: AudioSource;
+  /** False while the clip is still being made: ask again. */
+  ready: boolean;
+}
+
+/** Line audio calls, scoped to a director's production or an actor's invite. */
+export interface LineAudioApi {
+  line: (lineId: string, opts?: { prefetch?: boolean; signal?: AbortSignal }) => Promise<LineAudio>;
+  warm: (lineIds: string[]) => Promise<{ lines: LineAudio[] }>;
 }
 
 export interface User {

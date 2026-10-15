@@ -86,7 +86,7 @@ export const Demo = forwardRef<DemoHandle>(function Demo(_, ref) {
   const inGap = playing && current?.source === "you" && mode === "mine";
 
   return (
-    <div className="demo sticker">
+    <div className="demo raised">
       <div className="demo-bar">
         <button
           type="button"

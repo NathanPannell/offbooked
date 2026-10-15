@@ -1,8 +1,9 @@
-import { Check, Combine, Plus, Scissors, Search, SeparatorHorizontal, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpToLine, Check, Plus, Scissors, Search, SeparatorHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { script as api } from "../../api/director";
 import type { Character, Line, LineKind } from "../../api/types";
 import { CharacterName } from "../../components/CharacterName";
+import { joinPreview, splitTokens } from "./lineJoin";
 import type { ReviewActions } from "./ScriptReview";
 
 const KINDS: { kind: LineKind; label: string }[] = [
@@ -15,18 +16,24 @@ const KINDS: { kind: LineKind; label: string }[] = [
 export function LineEditor({
   productionId,
   line,
+  prevLine,
   nextLine,
   characters,
+  characterName,
   nearby,
   actions,
   onApprove,
   onFixed,
   onClose,
+  onJoin,
+  onSplit,
 }: {
   productionId: string;
   line: Line;
+  prevLine: Line | null;
   nextLine: Line | null;
   characters: Character[];
+  characterName: (id: string) => string | undefined;
   /** Speakers just before and after this line: the likely picks. */
   nearby: Character[];
   actions: ReviewActions;
@@ -35,12 +42,16 @@ export function LineEditor({
   /** A change fixed the line: move on if it was flagged, else close. */
   onFixed: () => void;
   onClose: () => void;
+  /** Joins `lower` into `upper`; the review offers Undo. */
+  onJoin: (upper: Line, lower: Line) => void;
+  /** The line was split: carry on with the new second part. */
+  onSplit: (second: Line) => void;
 }) {
   const [text, setText] = useState(line.text);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
   const [breakTitle, setBreakTitle] = useState<string | null>(null);
-  const [caret, setCaret] = useState<number | null>(null);
+  const [splitting, setSplitting] = useState(false);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const { run, busy } = actions;
 
@@ -112,14 +123,30 @@ export function LineEditor({
     if (ok) onFixed();
   };
 
-  const canSplit = caret !== null && caret > 0 && caret < line.text.length && text === line.text;
-  const split = async () => {
-    if (caret === null) return;
-    const ok = await run(() => api.splitLine(line.id, caret), { label: "Line split", run: () => api.mergeNext(line.id) });
-    if (ok) onClose();
+  // Split: tap the word the new line starts with. The new line opens next, to pick its speaker.
+  const tokens = splitTokens(line.text);
+  const canSplit = tokens.some((t) => t.at !== null);
+  const split = async (at: number) => {
+    let second: Line | null = null;
+    const ok = await run(
+      async () => {
+        second = (await api.splitLine(line.id, at)).lines[1];
+      },
+      {
+        label: "Split in two. Check who says the new line",
+        // Joining puts a line break where the split was: put the original text back exactly.
+        run: async () => {
+          const { line: joined } = await api.mergeNext(line.id);
+          if (joined.text !== line.text) await api.updateLine(line.id, { text: line.text });
+        },
+      },
+    );
+    setSplitting(false);
+    if (ok && second) onSplit(second);
   };
 
-  const trackCaret = () => setCaret(textRef.current?.selectionStart ?? null);
+  const joinUp = prevLine && joinPreview(prevLine, line, characterName);
+  const joinDown = nextLine && joinPreview(line, nextLine, characterName);
 
   return (
     <div className="line-editor" onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), onClose())}>
@@ -196,20 +223,36 @@ export function LineEditor({
         </div>
       )}
 
-      <label className="field">
-        <span className="sr-only">Line text</span>
-        <textarea
-          ref={textRef}
-          className="input editor-text"
-          value={text}
-          rows={Math.min(10, Math.max(2, text.split("\n").length + 1))}
-          onChange={(e) => setText(e.target.value)}
-          onSelect={trackCaret}
-          onKeyUp={trackCaret}
-          onClick={trackCaret}
-          spellCheck={false}
-        />
-      </label>
+      {splitting ? (
+        <div className="split-mode">
+          <p className="split-hint" id={`split-hint-${line.id}`}>
+            <Scissors size={14} aria-hidden="true" /> Tap the word the new line starts with.
+          </p>
+          <p className="split-text" role="group" aria-describedby={`split-hint-${line.id}`}>
+            {tokens.map((t, i) =>
+              t.at === null ? (
+                <span key={i}>{t.text}</span>
+              ) : (
+                <button key={i} type="button" className="split-word" disabled={busy} onClick={() => void split(t.at!)} aria-label={`Start a new line at “${t.text}”`}>
+                  {t.text}
+                </button>
+              ),
+            )}
+          </p>
+        </div>
+      ) : (
+        <label className="field">
+          <span className="sr-only">Line text</span>
+          <textarea
+            ref={textRef}
+            className="input editor-text"
+            value={text}
+            rows={Math.min(10, Math.max(2, text.split("\n").length + 1))}
+            onChange={(e) => setText(e.target.value)}
+            spellCheck={false}
+          />
+        </label>
+      )}
 
       <div className="editor-actions">
         {text !== line.text ? (
@@ -232,22 +275,32 @@ export function LineEditor({
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          disabled={busy || !canSplit}
-          title={canSplit ? "Split at the cursor" : "Put the cursor where the new line should start"}
-          onClick={split}
+          aria-pressed={splitting}
+          disabled={busy || !canSplit || text !== line.text}
+          title={text !== line.text ? "Save or undo your typing first" : canSplit ? "Split this line in two" : "One word can't be split"}
+          onClick={() => setSplitting((v) => !v)}
         >
-          <Scissors size={15} aria-hidden="true" /> Split
+          <Scissors size={15} aria-hidden="true" /> {splitting ? "Cancel split" : "Split"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={busy || !prevLine}
+          title={joinUp ? joinUp.description : "This is the first line"}
+          aria-label={joinUp ? joinUp.description : "Join with the line above"}
+          onClick={() => prevLine && onJoin(prevLine, line)}
+        >
+          <ArrowUpToLine size={15} aria-hidden="true" /> Join above
         </button>
         <button
           type="button"
           className="btn btn-ghost btn-sm"
           disabled={busy || !nextLine}
-          title={nextLine ? `Join with: ${nextLine.text.slice(0, 60)}` : "This is the last line"}
-          onClick={async () => {
-            if (await run(() => api.mergeNext(line.id))) onClose();
-          }}
+          title={joinDown ? joinDown.description : "This is the last line"}
+          aria-label={joinDown ? joinDown.description : "Join with the line below"}
+          onClick={() => nextLine && onJoin(line, nextLine)}
         >
-          <Combine size={15} aria-hidden="true" /> Join next
+          <ArrowDownToLine size={15} aria-hidden="true" /> Join below
         </button>
         <button type="button" className="btn btn-ghost btn-sm" aria-expanded={breakTitle !== null} onClick={() => setBreakTitle((t) => (t === null ? "" : null))}>
           <SeparatorHorizontal size={15} aria-hidden="true" /> New scene here

@@ -1,7 +1,8 @@
 import { Check } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ParseProgress } from "../../api/types";
 import { useTweenedNumbers } from "../../lib/useTween";
-import { describeProgress, PARSE_STAGES } from "./parseProgress";
+import { describeProgress, displayFraction, estimateLabelMs, PARSE_STAGES } from "./parseProgress";
 
 /** Live progress while the script is read: the stage, a bar over lines labelled, and counts that tick up. */
 export function ParseProgressView({ progress, fileName }: { progress: ParseProgress | null | undefined; fileName?: string | null }) {
@@ -11,10 +12,24 @@ export function ParseProgressView({ progress, fileName }: { progress: ParseProgr
     speeches: progress?.speeches ?? 0,
   });
   const view = describeProgress({ ...progress, ...(progress?.linesTotal ? tweened : { scenes: tweened.scenes, speeches: tweened.speeches }) });
-  const percent = view.fraction === null ? null : Math.round(view.fraction * 100);
+  // Keep the bar moving between server updates (the model thinks before its first rows arrive).
+  const labelling = view.stage === 1 && view.fraction !== null;
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!labelling) return;
+    setStartedAt((s) => s ?? Date.now());
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [labelling]);
+  const fraction =
+    labelling && startedAt !== null
+      ? displayFraction(view.fraction!, now - startedAt, estimateLabelMs(progress?.linesTotal ?? 0))
+      : view.fraction;
+  const percent = fraction === null ? null : Math.round(fraction * 100);
 
   return (
-    <section className="parse sticker" aria-labelledby="parse-title">
+    <section className="parse raised" aria-labelledby="parse-title">
       <div className="parse-head">
         <p className="eyebrow">{fileName ? fileName : "Your script"}</p>
         <h2 id="parse-title" className="display">

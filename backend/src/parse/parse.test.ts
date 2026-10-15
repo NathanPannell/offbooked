@@ -460,3 +460,13 @@ test("progress is reported as chunks finish, ending with every line labelled", a
   assert.ok(last.speeches > 100);
   for (let i = 1; i < seen.length; i++) assert.ok(seen[i]!.chunksDone >= seen[i - 1]!.chunksDone);
 });
+
+test("a direction printed inside a speech is lifted out and the speech stays one line", () => {
+  const lines = ["HAMLET To be, or not to be [He draws his dagger] that is the question. [Exit.]"];
+  const out = assembleSegments(parseRows("1 S HAMLET | HAMLET >> [He draws his dagger] >> [Exit.]"), lines);
+  assert.deepEqual(out.map((l) => [l.kind, l.text]), [
+    ["stage_direction", "[He draws his dagger]"],
+    ["dialogue", "To be, or not to be that is the question."],
+    ["stage_direction", "[Exit.]"],
+  ]);
+});

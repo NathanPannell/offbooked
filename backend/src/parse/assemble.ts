@@ -152,18 +152,20 @@ function emitSpeech(
   pieces: Piece[],
   who: { speaker: string | null; cue: string | null; note: string | null; continuation: boolean },
 ): boolean {
-  let first = true;
-  for (const p of pieces) {
-    if (p.direction) {
-      out.push(line("stage_direction", null, null, p.text, null));
-      continue;
-    }
-    const l: AssembledLine = line("dialogue", who.speaker, who.cue, p.text, first ? who.note : null);
-    if (who.continuation && first) l.continuation = true;
-    out.push(l);
-    first = false;
+  // One speech stays one line for the actor to record: directions printed inside it are lifted out
+  // and placed before the speech, except ones after its last words, which follow it.
+  const spoken = pieces.filter((p) => !p.direction);
+  if (!spoken.length) {
+    for (const p of pieces) out.push(line("stage_direction", null, null, p.text, null));
+    return false;
   }
-  return !first;
+  const lastSpoken = pieces.lastIndexOf(spoken[spoken.length - 1]!);
+  for (const [i, p] of pieces.entries()) if (p.direction && i < lastSpoken) out.push(line("stage_direction", null, null, p.text, null));
+  const l: AssembledLine = line("dialogue", who.speaker, who.cue, spoken.map((p) => p.text).join(" "), who.note);
+  if (who.continuation) l.continuation = true;
+  out.push(l);
+  for (const [i, p] of pieces.entries()) if (p.direction && i > lastSpoken) out.push(line("stage_direction", null, null, p.text, null));
+  return true;
 }
 
 const HAS_NUMBER = /\d|\b[IVXLC]+\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final)\b/i;

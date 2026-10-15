@@ -139,7 +139,8 @@ interface RunThrough {
   sections: Section[];
   characters: Character[];
   lines: Line[];                    // all lines, including stage directions (shown dimmed, not timed)
-  render: Render;
+  render: Render;                   // the stitched file; the player now plays line by line (see the end)
+  sources: Record<string, AudioSource>; // by dialogue line ID
   myCharacterIds: string[];         // empty for the director
 }
 ```
@@ -231,3 +232,40 @@ type AudioSource = "actor" | "standin" | "tts" | "none";
 - `GET` run-through may queue a render (first open, or when stale with nothing queued).
 - Stand-in takes count as recordings for the "script can't be replaced once recorded" rule.
 - `/health` reports `tts: "piper <version>" | null` and never fails because of it; without Piper, unrecorded lines render as silence (`source: "none"`).
+
+# Additions (2026-10-14): line-by-line playback
+
+The run-through player plays each dialogue line's own clip in turn instead of one stitched render, so the first line plays about a second after pressing play rather than after the whole play is synthesized and stitched. The stitched render still builds in the background (it shares every clip) and stays in `RunThrough.render`.
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| GET | `/api/productions/:id/lines/:lineId/audio` | director (own production) | `LineAudio`. Waits up to 20 s for a clip still being made. `?prefetch=1` asks at prefetch priority instead of play priority. |
+| GET | `/api/invite/lines/:lineId/audio` | actor | Same, for any dialogue line in the actor's production (the run-through shows them the whole script). |
+| POST | `/api/productions/:id/lines/audio/warm` | director | `{ lineIds: string[] }` (at most 30, in playback order) → `{ lines: LineAudio[] }` at once: ready clips have URLs, the rest are queued at prefetch priority with `ready: false`. |
+| POST | `/api/invite/lines/audio/warm` | actor | Same. |
+
+Lines that aren't dialogue lines of that production are 404 on GET and left out of a warm response. Bad `lineIds` are 400.
+
+```ts
+interface LineAudio {
+  lineId: string;
+  audioUrl: string | null;  // signed .m4a (AAC, 48 kHz mono); null for a silent line or one not ready yet
+  durationMs: number;       // the clip's length; for a silent line, the render's placeholder silence
+  source: AudioSource;      // "actor" | "standin" | "tts" | "none"
+  ready: boolean;           // false while the clip is still being made: ask again
+}
+
+interface RunThrough {
+  // ...as before, plus:
+  sources: Record<string, AudioSource>; // each dialogue line's source, without making anything
+}
+```
+
+- Source rules match the render: the current take's normalized audio (normalized on first use and cached with the render's normalized FLAC, as `takes.stream_key`), else the TTS clip (same voice and cache key as the render; every clip now gets its `.m4a` alongside the FLAC), else silence of `clamp(words × 380 ms, 1200, 8000)`.
+- TTS synthesis runs by priority: play (a GET) before prefetch (`?prefetch=1`, warm, the actor lines page's cue wait) before cue warm-ups before the render. Background work (cues, renders) uses at most `TTS_CONCURRENCY - 1` slots, so a listener's line waits for at most one clip in progress. Concurrent requests for one clip share one synthesis, at the most urgent priority asked.
+- The client plays gaps itself: 350 ms between lines in a section, 1200 ms at a section change or an A–B jump back.
+
+### Joining lines (2026-10-15)
+
+- `POST /api/lines/:id/merge-previous` → `{ line }`: joins this line into the one above it. `merge-next` joins the next line into this one. Either way the upper line keeps its id, kind and speaker, the texts are joined with a newline, and the lower line must have no recordings (409 `has_recordings`).
+- The parser keeps each speech as one dialogue line: a stage direction printed inside a speech becomes its own stage-direction line before the speech (or after it, when it follows the last words).

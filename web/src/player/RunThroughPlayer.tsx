@@ -9,9 +9,9 @@ import {
   SkipForward,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { errorMessage } from "../api/client";
-import type { Line, PracticeResult, RunThrough } from "../api/types";
+import type { AudioSource, Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
 import { CharacterName } from "../components/CharacterName";
 import { Dialog } from "../components/Dialog";
 import { Loading } from "../components/Loading";
@@ -21,10 +21,12 @@ import { useToast } from "../components/Toast";
 import { WordDiff } from "../components/WordDiff";
 import { plural } from "../lib/format";
 import { readStorage, writeStorage } from "../lib/storage";
-import { useInterval, useResource } from "../lib/useResource";
+import { useResource } from "../lib/useResource";
 import { formatAccuracy, overallAccuracy, scoreLabel, verdict } from "../stt/score";
+import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
-import { audioSourceOf, audioSourceTag, buildSegments, GAP_MULTIPLIER_MAX, GAP_MULTIPLIER_MIN, type Segment } from "./timing";
+import { placeholderMs, type QueueLine } from "./queue";
+import { audioSourceTag, GAP_MULTIPLIER_MAX, GAP_MULTIPLIER_MIN } from "./timing";
 import { usePractice } from "./usePractice";
 
 const GAP_KEY = "offbooked.gapMultiplier";
@@ -32,20 +34,19 @@ const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion:
 
 interface Props {
   load: () => Promise<RunThrough>;
-  /** Director only: force a fresh render. */
-  onRender?: () => Promise<unknown>;
+  /** Per-line audio: the player fetches each line's clip as it goes, instead of one stitched file. */
+  audio: LineAudioApi;
   /** Actor only: save a "Score me" practice run. */
   onPracticeDone?: (results: PracticeResult[]) => Promise<unknown>;
   /** Start in my-part mode. */
   initialMode?: "full" | "mine";
 }
 
-export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode = "full" }: Props) {
+export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "full" }: Props) {
   const toast = useToast();
   const rt = useResource(load, "runthrough");
   const audioRef = useRef<HTMLAudioElement>(null);
   const [engine, setEngine] = useState<PlayerEngine | null>(null);
-  const [activeRenderAt, setActiveRenderAt] = useState<string | null>(null);
   const [mode, setMode] = useState<"full" | "mine">(initialMode);
   const [multiplier, setMultiplier] = useState(() => {
     const stored = Number(readStorage(GAP_KEY));
@@ -54,11 +55,9 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
   const [following, setFollowing] = useState(true);
   const [picking, setPicking] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const [rendering, setRendering] = useState(false);
   const lineRefs = useRef(new Map<string, HTMLElement>());
 
   const data = rt.data;
-  const render = data?.render;
   const lines = useMemo(() => (data ? [...data.lines].sort((a, b) => a.seq - b.seq) : []), [data]);
   const lineById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
   const characterName = useMemo(() => new Map((data?.characters ?? []).map((c) => [c.id, c.name])), [data]);
@@ -68,43 +67,42 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
   }, [data, lines]);
   const isActor = (data?.myCharacterIds.length ?? 0) > 0;
 
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const segmentByLine = useMemo(() => new Map(segments.map((s) => [s.lineId, s])), [segments]);
+  // The play queue: dialogue lines in order. A line's index in it is its "segment".
+  const queue = useMemo<QueueLine[]>(
+    () => lines.filter((l) => l.kind === "dialogue").map((l) => ({ lineId: l.id, sectionId: l.sectionId, text: l.text })),
+    [lines],
+  );
+  const segmentByLine = useMemo(() => new Map(queue.map((q, index) => [q.lineId, index])), [queue]);
+  // Each line's audio source: what the run-through said, updated as clips arrive (a take may land meanwhile).
+  const [sourceUpdates, setSources] = useState<Record<string, AudioSource>>({});
+  const sourceOf = (lineId: string): AudioSource => sourceUpdates[lineId] ?? data?.sources?.[lineId] ?? "none";
 
   const practice = usePractice((lineId) => lineById.get(lineId)?.text ?? "");
 
-  // The engine owns the <audio> element for the life of the screen.
+  // The engine owns the <audio> element and the clip cache for the life of the screen.
+  const linesRef = useRef(lineById);
+  linesRef.current = lineById;
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const e = new PlayerEngine(audio);
+    const el = audioRef.current;
+    if (!el) return;
+    const clips = new ClipLoader(audio, (lineId) => placeholderMs(linesRef.current.get(lineId)?.text ?? ""));
+    clips.onSource = (lineId, source) => setSources((s) => (s[lineId] === source ? s : { ...s, [lineId]: source }));
+    const e = new PlayerEngine(el, clips);
     setEngine(e);
-    return () => e.destroy();
-  }, [data !== undefined]);
+    return () => {
+      e.destroy();
+      clips.dispose();
+    };
+  }, [data !== undefined, audio]);
+
+  useEffect(() => {
+    engine?.setLines(queue);
+  }, [engine, queue]);
 
   const state = useSyncExternalStore(
     engine?.subscribe ?? noopSubscribe,
     engine?.getState ?? initialState,
   );
-
-  // Apply a render when it's new, but don't yank the audio out from under someone mid-line.
-  const pendingRender = render?.status === "ready" && render.audioUrl && render.createdAt !== activeRenderAt ? render : null;
-  const applyRender = useCallback(() => {
-    if (!engine || !pendingRender || !audioRef.current) return;
-    const audio = audioRef.current;
-    const currentLine = segments[engine.getState().index]?.lineId;
-    const nextSegments = buildSegments(pendingRender.timing);
-    audio.src = pendingRender.audioUrl!;
-    setActiveRenderAt(pendingRender.createdAt);
-    setSegments(nextSegments);
-    engine.setTimeline(nextSegments, new Map(lines.map((l) => [l.id, l.text])));
-    const resumeAt = nextSegments.find((s) => s.lineId === currentLine);
-    if (resumeAt) audio.currentTime = resumeAt.startMs / 1000;
-  }, [engine, pendingRender, segments, lines]);
-
-  useEffect(() => {
-    if (pendingRender && engine && (!activeRenderAt || !state.playing)) applyRender();
-  }, [pendingRender, engine, activeRenderAt, state.playing, applyRender]);
 
   useEffect(() => {
     engine?.setMine(mode === "mine" ? mine : null);
@@ -119,30 +117,7 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
     if (engine) engine.gapListener = mode === "mine" ? practice.gapListener : null;
   });
 
-  const needsPoll = !!render && (render.stale || (render.status !== "ready" && render.status !== "failed"));
-  useInterval(() => void rt.reload(), 8000, needsPoll);
-
-  // Signed audio URLs expire after about an hour. Fetch a fresh one and carry on from the same spot.
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const onError = async () => {
-      const at = audio.currentTime;
-      try {
-        const fresh = await load();
-        if (fresh.render.audioUrl) {
-          audio.src = fresh.render.audioUrl;
-          audio.currentTime = at;
-        }
-      } catch {
-        toast("The run-through stopped loading. Check your connection.");
-      }
-    };
-    audio.addEventListener("error", onError);
-    return () => audio.removeEventListener("error", onError);
-  }, [engine, load, toast]);
-
-  const currentSegment = segments[state.index];
+  const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
   const currentSeq = currentLine?.seq ?? -Infinity;
 
@@ -201,7 +176,7 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
   }, [state.ended, practice.enabled, practice.results.size]);
 
   if (rt.loading) return <Loading />;
-  if (rt.error || !data || !render) {
+  if (rt.error || !data) {
     return (
       <div className="notice notice-error" role="alert">
         {errorMessage(rt.error)}{" "}
@@ -212,27 +187,26 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
     );
   }
 
-  const hasAudio = !!activeRenderAt;
-  const busyRendering = render.status === "queued" || render.status === "rendering" || render.stale;
+  const hasAudio = queue.length > 0;
   const sections = [...data.sections].sort((a, b) => a.seq - b.seq);
 
   const onLineTap = (line: Line) => {
     if (!engine || !hasAudio) return;
-    const segment = segmentByLine.get(line.id) ?? segments.find((s) => (lineById.get(s.lineId)?.seq ?? 0) > line.seq);
-    if (!segment) return;
+    const index = segmentByLine.get(line.id) ?? queue.findIndex((q) => (lineById.get(q.lineId)?.seq ?? 0) > line.seq);
+    if (index < 0) return;
     if (picking) {
-      engine.setAbPoint(segment.index);
+      engine.setAbPoint(index);
       if (engine.getState().ab.b !== null) setPicking(false);
       return;
     }
     setFollowing(true);
-    engine.seekToSegment(segment.index);
+    engine.seekToSegment(index);
   };
 
   const ab = state.ab;
   const abSet = ab.a !== null && ab.b !== null;
-  const inAb = (segment: Segment | undefined) =>
-    !!segment && ab.a !== null && segment.index >= Math.min(ab.a, ab.b ?? ab.a) && segment.index <= Math.max(ab.a, ab.b ?? ab.a);
+  const inAb = (index: number | undefined) =>
+    index !== undefined && ab.a !== null && index >= Math.min(ab.a, ab.b ?? ab.a) && index <= Math.max(ab.a, ab.b ?? ab.a);
 
   return (
     <div className={`player ${mode === "mine" ? "is-my-part" : ""}`}>
@@ -311,44 +285,10 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
         </div>
       )}
 
-      {(busyRendering || render.status === "failed" || !hasAudio) && (
-        <div className={`notice ${render.status === "failed" ? "notice-error" : "notice-accent"} render-banner`} role="status">
-          {busyRendering || render.status === "none" ? <div className="spinner" aria-hidden="true" /> : null}
-          <div className="grow">
-            {render.status === "failed"
-              ? "The last render failed."
-              : busyRendering
-                ? hasAudio
-                  ? "Rendering latest takes… You're hearing the previous version."
-                  : "Rendering latest takes…"
-                : "No run-through yet. It's put together as soon as there's something to play."}
-          </div>
-          {onRender && (render.status === "failed" || render.status === "none" || render.stale) && (
-            <button
-              type="button"
-              className="btn btn-sm btn-secondary"
-              disabled={rendering}
-              onClick={async () => {
-                setRendering(true);
-                try {
-                  await onRender();
-                  await rt.reload();
-                } catch (err) {
-                  toast(errorMessage(err));
-                } finally {
-                  setRendering(false);
-                }
-              }}
-            >
-              Render now
-            </button>
-          )}
+      {!hasAudio && (
+        <div className="notice notice-accent render-banner" role="status">
+          <div className="grow">There are no lines to play yet.</div>
         </div>
-      )}
-      {pendingRender && activeRenderAt && state.playing && (
-        <button type="button" className="chip chip-accent update-pill" onClick={applyRender}>
-          New takes are in · Switch to the new version
-        </button>
       )}
       {picking && (
         <p className="notice notice-accent" role="status">
@@ -365,10 +305,10 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
                 .filter((l) => l.sectionId === section.id)
                 .map((line) => {
                   const segment = segmentByLine.get(line.id);
-                  const isCurrent = segment !== undefined && segment.index === state.index;
+                  const isCurrent = segment !== undefined && segment === state.index;
                   const isMine = mine.has(line.id);
                   const inGap = isCurrent && state.gap !== null;
-                  const source = audioSourceOf(segment);
+                  const source = sourceOf(line.id);
                   const tag = audioSourceTag(source);
                   const who = line.characterId ? characterName.get(line.characterId) : undefined;
                   const result = practice.results.get(line.id);
@@ -484,6 +424,10 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
         </button>
       </div>
 
+      <p className="small muted player-waiting" role="status" aria-live="polite">
+        {state.waiting && state.playing ? "Getting the next line…" : ""}
+      </p>
+
       <p className="sr-only" aria-live="polite">
         {state.gap ? "Your line. Say it now." : ""}
       </p>
@@ -496,9 +440,9 @@ export function RunThroughPlayer({ load, onRender, onPracticeDone, initialMode =
           onJump={(lineId) => {
             setSummaryOpen(false);
             const segment = segmentByLine.get(lineId);
-            if (segment && engine) {
+            if (segment !== undefined && engine) {
               setFollowing(true);
-              engine.seekToSegment(segment.index, false);
+              engine.seekToSegment(segment, false);
             }
           }}
           onSave={async (results) => {
@@ -592,6 +536,6 @@ function PracticeSummary({
   );
 }
 
-const IDLE: PlayerState = { index: -1, playing: false, gap: null, ab: { a: null, b: null }, ended: false };
+const IDLE: PlayerState = { index: -1, playing: false, gap: null, ab: { a: null, b: null }, ended: false, waiting: false };
 const initialState = () => IDLE;
 const noopSubscribe = () => () => {};

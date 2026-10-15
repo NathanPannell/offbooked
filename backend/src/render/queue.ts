@@ -4,8 +4,9 @@ import path from "node:path";
 import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
 import { notifyCastComplete } from "../email/notify.ts";
-import { concatToM4a, makeSilence, normalizeTake } from "./ffmpeg.ts";
-import type { TtsRequest } from "../tts/service.ts";
+import { concatToM4a, makeSilence } from "./ffmpeg.ts";
+import { normalizedTake, type TakeAudioRow } from "./takeaudio.ts";
+import { TTS_PRIORITY, type TtsRequest } from "../tts/service.ts";
 import { contentHash, planRender, RENDER_SETTINGS, type PlanLine, type TimingEntry } from "./plan.ts";
 
 const MAX_DEBOUNCE_MS = 120_000;
@@ -178,7 +179,7 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
 async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!ctx.tts || !requests.length) return result;
-  const clips = [...(await ctx.tts.ensure(requests)).values()];
+  const clips = [...(await ctx.tts.ensure(requests, { priority: TTS_PRIORITY.render })).values()];
   await eachLimit(clips, 8, async (clip) => {
     try {
       await writeFile(path.join(workDir, `tts-${clip.hash}.flac`), await ctx.storage.get(clip.storageKey));
@@ -199,26 +200,15 @@ async function eachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<
 }
 
 // Downloads each take's normalized audio, normalizing (and caching in storage) any take seen for
-// the first time. Returns measured lengths in samples.
+// the first time. Line-by-line playback shares the cache (see takeaudio.ts). Returns measured
+// lengths in samples.
 async function prepareTakes(ctx: Ctx, productionId: string, takeIds: string[], workDir: string): Promise<Map<string, number>> {
-  const { sql, storage } = ctx;
   const result = new Map<string, number>();
   if (!takeIds.length) return result;
-  const takes = await sql<{ id: string; storageKey: string; normalizedKey: string | null; normalizedSamples: number | null }[]>`
-    select id, storage_key, normalized_key, normalized_samples from takes where id = any(${takeIds}::uuid[])`;
+  const takes = await ctx.sql<TakeAudioRow[]>`
+    select id, storage_key, normalized_key, normalized_samples, stream_key from takes where id = any(${takeIds}::uuid[])`;
   for (const take of takes) {
-    const file = path.join(workDir, `take-${take.id}.flac`);
-    if (take.normalizedKey && take.normalizedSamples && (await storage.exists(take.normalizedKey))) {
-      await writeFile(file, await storage.get(take.normalizedKey));
-      result.set(take.id, take.normalizedSamples);
-      continue;
-    }
-    const source = path.join(workDir, `source-${take.id}${path.extname(take.storageKey)}`);
-    await writeFile(source, await storage.get(take.storageKey));
-    const samples = await normalizeTake(source, file);
-    const key = `productions/${productionId}/normalized/${take.id}.flac`;
-    await storage.put(key, await readFile(file), "audio/flac");
-    await sql`update takes set normalized_key = ${key}, normalized_samples = ${samples} where id = ${take.id}`;
+    const { samples } = await normalizedTake(ctx, productionId, take, { flacTo: path.join(workDir, `take-${take.id}.flac`) });
     result.set(take.id, samples);
   }
   return result;

@@ -1,6 +1,8 @@
 /*
-  Offbooked design tokens. Light only: a clean white page, chunky type, one loud warm accent and a
-  sunny highlight, with "sticker" edges (2px ink borders and hard offset shadows) on the things you press.
+  Offbooked design tokens. Light only. Calm and editorial, like a well-made theatre programme:
+  a white page, Newsreader (a reading serif with display optical sizes) for headings and script
+  text, Hanken Grotesk for the interface, soft neutrals, quiet hairline borders and soft shadows,
+  and one deep theatre red used sparingly.
 */
 
 :root {
@@ -8,51 +10,52 @@
 
   /* Paper */
   --bg: #ffffff;
-  --paper: #f7f7f5; /* quiet sections, cues, the source pane: used sparingly */
-  --paper-deep: #eeede9; /* pressed and selected states */
+  --paper: #f8f7f4; /* quiet sections, cues, the source pane: used sparingly */
+  --paper-deep: #efede8; /* pressed and selected states */
   --card: #ffffff;
   --page: #ffffff; /* the script page itself */
 
   /* Ink. Every text colour passes AA on --bg, --paper and --card. */
-  --ink: #1d1a16;
-  --ink-soft: #3e3933;
-  --muted: #66625b; /* 5.9:1 on white */
-  --faint: #8e8a83; /* icons and large text only */
-  --dim: #cbc8c2; /* past lines in the player, never body text */
+  --ink: #1d1c1a;
+  --ink-soft: #46423c;
+  --muted: #69645c; /* 5.8:1 on white */
+  --faint: #8f897f; /* icons and large text only */
+  --dim: #cdc8c0; /* past lines in the player, never body text */
 
   /* Rules */
-  --line: #ebeae6;
-  --line-strong: #d6d4ce;
-  --edge: #1d1a16; /* sticker borders */
+  --line: #ecebe6;
+  --line-strong: #dcd8d0;
+  --edge: #d3cec5; /* the border on cards and controls */
+  --edge-strong: #a9a399; /* hover and selected outlines */
 
-  /* One loud warm accent, and a sunny highlight. Accent is a fill: text on it is ink. */
-  --accent: #f0542d;
-  --accent-hover: #e2431c;
-  --accent-ink: #1d1a16;
-  --accent-text: #b8361a; /* accent as text or icon on white: 6:1 */
-  --accent-soft: #ffe7dc;
-  --accent-line: #f6b9a3;
-  --sun: #f7c325;
-  --sun-soft: #fff1c2;
-  --marker: #ffe58a; /* the highlighter swipe */
+  /* One warm accent: a deep theatre red. As a fill, text on it is white. */
+  --accent: #a8382a;
+  --accent-hover: #8f2f23;
+  --accent-ink: #ffffff;
+  --accent-text: #a1352a; /* accent as text or icon on white: 6.4:1 */
+  --accent-soft: #f8edea;
+  --accent-line: #e8c7bf;
+  --sun: #c99a3a; /* a warm ochre, for marks and highlights */
+  --sun-soft: #fbf5e6;
+  --marker: #f3e2b6; /* the highlighter swipe */
 
   /* Flags and states */
-  --flag: #8a5400;
-  --flag-soft: #fff1c2;
-  --flag-line: #ecc75a;
-  --good: #23704a;
-  --good-soft: #e1f3e6;
-  --check: #8a5400;
-  --check-soft: #fff1c2;
-  --bad: #b42318;
-  --bad-soft: #fde8e4;
-  --rec: #e0301e;
+  --flag: #82540c;
+  --flag-soft: #fcf6e8;
+  --flag-line: #e9d7a8;
+  --good: #2d6a48;
+  --good-soft: #eaf3ed;
+  --check: #82540c;
+  --check-soft: #fcf6e8;
+  --bad: #b02a1f;
+  --bad-soft: #fcedeb;
+  --rec: #c7321f;
 
   /* Type */
-  --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; /* the script */
-  --font-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; /* the original's text only */
 
   --text-xs: 12px;
   --text-sm: 14px;
@@ -61,7 +64,7 @@
   --text-lg: 21px;
   --text-xl: 28px;
   --text-2xl: clamp(30px, 5.5vw, 42px);
-  --text-3xl: clamp(42px, 9vw, 76px);
+  --text-3xl: clamp(40px, 8vw, 68px);
 
   /* Spacing: 4px steps */
   --s-1: 4px;
@@ -75,24 +78,21 @@
   --s-12: 48px;
   --s-16: 64px;
 
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 18px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
   --radius-pill: 999px;
 
-  --border: 2px solid var(--edge);
-  --sticker: 4px 4px 0 var(--edge);
-  --sticker-sm: 3px 3px 0 var(--edge);
-  --sticker-lg: 6px 6px 0 var(--edge);
-  --shadow-sm: 0 1px 2px rgba(29, 26, 22, 0.06);
-  --shadow: 0 2px 4px rgba(29, 26, 22, 0.05), 0 10px 24px rgba(29, 26, 22, 0.07);
-  --shadow-lg: 0 4px 8px rgba(29, 26, 22, 0.06), 0 24px 56px rgba(29, 26, 22, 0.16);
+  --border: 1px solid var(--edge);
+  --shadow-sm: 0 1px 2px rgba(29, 28, 26, 0.06);
+  --shadow: 0 1px 2px rgba(29, 28, 26, 0.05), 0 6px 18px rgba(29, 28, 26, 0.06);
+  --shadow-lg: 0 2px 6px rgba(29, 28, 26, 0.06), 0 18px 44px rgba(29, 28, 26, 0.12);
 
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink);
 
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --fast: 140ms;
-  --medium: 240ms;
+  --ease: cubic-bezier(0.25, 0.6, 0.3, 1);
+  --fast: 150ms;
+  --medium: 260ms;
 
   --tap: 44px;
   --header-h: 60px;

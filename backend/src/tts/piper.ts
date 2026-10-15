@@ -13,6 +13,8 @@ export interface Synthesizer {
   // Engine label for /health and cache keys (e.g. "piper 1.2.0"), or null when it can't run here.
   probe(): Promise<string | null>;
   synthesize(text: string, voice: Voice, outWav: string): Promise<void>;
+  // Optional: load a model ahead of the first request for it.
+  prewarm?(model: string): void;
   close(): Promise<void>;
 }
 
@@ -149,6 +151,19 @@ export class PiperSynthesizer implements Synthesizer {
       }
       await new Promise<void>((resolve) => this.waiters.push(resolve));
     }
+  }
+
+  // Starts an idle process for a model when the pool has room and none has it loaded, so the next
+  // line in that voice skips the model load. Never replaces a running process.
+  prewarm(model: string): void {
+    const loaded = () => this.procs.length >= this.maxProcs || this.procs.some((p) => p.alive && p.model === model);
+    if (loaded()) return;
+    void this.probe().then((engine) => {
+      if (!engine || loaded()) return;
+      const p = new PiperProcess(this.bin, this.modelPath(model), model, (dead) => this.remove(dead));
+      this.procs.push(p);
+      this.release(p);
+    });
   }
 
   private release(p: PiperProcess) {
