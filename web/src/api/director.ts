@@ -2,7 +2,7 @@ import { API_URL, request, type Auth } from "./client";
 import type { TakeUploadResult } from "./actor";
 import type { SplitSecond } from "../routes/director/lineJoin";
 import type {
-  CastMember,
+  CallSheetCharacter,
   Character,
   Line,
   LineAudio,
@@ -132,26 +132,16 @@ export const script = {
     request<{ characters: Character[] }>(`/characters/${characterId}/merge`, { auth: director, json: { intoId } }),
 };
 
-export interface CastInput {
-  name: string;
-  email?: string | null;
-  phone?: string | null;
-  characterIds: string[];
-}
-
+/** The director's cast page: a read-only call sheet, and recording a part themselves. */
 export const cast = {
-  list: (productionId: string) =>
-    request<{ cast: CastMember[]; uncastCharacterIds: string[] }>(`/productions/${productionId}/cast`, {
+  callSheet: (productionId: string) =>
+    request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
+  /** Takes a free part (or one already theirs) for the director's own cast member; open `/i/<inviteToken>` to record. */
+  recordAs: (productionId: string, characterId: string) =>
+    request<{ inviteToken: string; inviteUrl: string }>(`/productions/${productionId}/record-as`, {
       auth: director,
+      json: { characterId },
     }),
-  create: (productionId: string, input: CastInput) =>
-    request<{ member: CastMember }>(`/productions/${productionId}/cast`, { auth: director, json: input }),
-  update: (actorId: string, input: Partial<CastInput>) =>
-    request<{ member: CastMember }>(`/cast/${actorId}`, { method: "PATCH", auth: director, json: input }),
-  resetLink: (actorId: string) =>
-    request<{ member: CastMember }>(`/cast/${actorId}/reset-link`, { method: "POST", auth: director }),
-  nudged: (actorId: string) =>
-    request<{ member: CastMember }>(`/cast/${actorId}/nudged`, { method: "POST", auth: director }),
 };
 
 /** The one link the whole cast can use to pick their characters. */

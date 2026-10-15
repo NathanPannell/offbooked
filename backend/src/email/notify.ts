@@ -52,6 +52,9 @@ async function productionInfo(ctx: Ctx, productionId: string): Promise<Productio
 export async function notifyActorDone(ctx: Ctx, productionId: string, actor: { id: string; name: string; firstName: string | null; linesTotal: number }): Promise<void> {
   const p = await productionInfo(ctx, productionId);
   if (!p) return;
+  // No "you finished your lines" email when the director recorded the part themselves.
+  const [own] = await ctx.sql`select 1 from actors where id = ${actor.id} and director_user_id is not null`;
+  if (own) return;
   const name = actor.firstName || actor.name;
   await sendOnce(ctx, { kind: "actor_done", productionId, actorId: actor.id, to: p.ownerEmail }, (to) =>
     actorDoneEmail(to, { actorName: name, lines: actor.linesTotal, title: p.title, url: `${ctx.config.appUrl}/app/p/${productionId}` }),

@@ -292,3 +292,14 @@ A speech that carries on after a stage direction, page break or heading without 
 
 - `DELETE /api/lines/:id` → `{ line, afterLineId, removedSection }`: deletes a line with no recordings (409 `has_recordings` otherwise) and renumbers the lines after it. `line` is the deleted line as it was, `afterLineId` the line it sat after (null when it was first), and `removedSection` its scene (`Section`) when the line was the scene's only line and the scene went with it, else null. Together they are what undo needs.
 - `POST /api/productions/:id/lines` with `{ afterLineId: string | null, sectionId?, newSection?: { title, act?, scene? }, kind, characterId?, text, flagged?, flagCode?, flagReason?, sourceLine?, sourcePage? }` → `{ line }`: inserts a line after `afterLineId` (null: at the start). It goes in `sectionId`, which must be the scene of the line before or after the place (400 otherwise); or in a new scene `newSection`, which can only start between two scenes; or, with neither, the scene of the line before (else the one after). A dialogue line without `characterId` gets a guessed speaker, as with `PATCH`. The web app uses it to undo a delete: `sectionId` is the deleted line's scene, or `newSection` from `removedSection`.
+
+### Cast page: call sheet and recording a part yourself (2026-10-15)
+
+The director's cast page shows the cast link, a read-only call sheet and a way to record a part yourself. It no longer assigns parts, makes per-actor links or collects emails and phones; the `/api/productions/:id/cast` and `/api/cast/:actorId/*` routes stay for now but the web app doesn't use them.
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, takenBy: string \| null, mine: boolean }[] }`: every character with dialogue, biggest parts first. `takenBy` is the first name of whoever took the part; `mine` is true for a part the director took with `record-as`. `linesRecorded` counts the cast's own takes only (not stand-ins or TTS). |
+| POST | `/api/productions/:id/record-as` | director (own production) | `{ characterId }` → `{ inviteToken, inviteUrl }`. The director gets one cast member per production (`actors.director_user_id`), created on first use with their first name and already opened, so `/i/<inviteToken>` goes straight to recording. The character is added to that cast member unless it is already theirs. 409 `character_taken` if someone else has the part; 404 for a character outside the production; 400 for a missing or malformed id. |
+
+- The director's cast member records ordinary actor takes (`recorded_by = 'actor'`), so they count as progress and the part can't be claimed through the cast link. No "finished all lines" email is sent for it.
