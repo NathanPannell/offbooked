@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { silentLog } from "../log.ts";
-import { PiperSynthesizer } from "./piper.ts";
-import { assignVoices, clipHash, guessGender, speakable, VOICES } from "./voices.ts";
+import { PiperSynthesizer, pooledProcs } from "./piper.ts";
+import { assignVoices, clipHash, guessGender, NARRATOR, NARRATOR_VOICE_ID, speakable, speakableDirection, VOICE_MODELS, VOICES } from "./voices.ts";
 
 const chars = (names: string[]) => names.map((name) => ({ id: randomUUID(), name }));
 
@@ -38,8 +38,71 @@ test("titles in a name pick a fitting voice, and voices are reused only when the
 
   const crowd = chars(Array.from({ length: VOICES.length + 5 }, (_, i) => `CITIZEN ${i}`));
   const many = assignVoices(crowd);
-  assert.equal(new Set(crowd.slice(0, VOICES.length).map((c) => many.get(c.id)!.id)).size, VOICES.length);
+  const characterVoices = VOICES.length - 1; // all but the narrator
+  assert.equal(new Set(crowd.slice(0, characterVoices).map((c) => many.get(c.id)!.id)).size, characterVoices);
   assert.ok(crowd.every((c) => many.get(c.id)));
+});
+
+test("the narrator's voice is reserved: no character ever gets it", () => {
+  assert.equal(NARRATOR.id, NARRATOR_VOICE_ID);
+  const crowd = chars(Array.from({ length: 200 }, (_, i) => (i % 3 === 0 ? `LADY ${i}` : i % 3 === 1 ? `LORD ${i}` : `CITIZEN ${i}`)));
+  const voices = assignVoices(crowd);
+  assert.ok([...voices.values()].every((v) => v.id !== NARRATOR_VOICE_ID));
+  // Reserving it moves only a character that would have had it (and possibly those after it):
+  // everyone before the first such character keeps the voice they had before.
+  const cast = chars(["HAMLET", "HORATIO", "QUEEN", "KING", "OPHELIA", "POLONIUS", "LAERTES", "GHOST"]);
+  const unreserved = assignVoices(cast, VOICES.map((v) => (v.id === NARRATOR_VOICE_ID ? { ...v, id: "unreserved" } : v)));
+  const reserved = assignVoices(cast);
+  for (const c of cast) {
+    if (unreserved.get(c.id)!.id === "unreserved") break;
+    assert.equal(reserved.get(c.id)!.id, unreserved.get(c.id)!.id);
+  }
+});
+
+test("stage directions are read without their brackets; asides inside dialogue are dropped", () => {
+  assert.equal(speakableDirection("[Flourish. Enter Claudius, King of Denmark,\n  Gertrude the Queen.]"), "Flourish. Enter Claudius, King of Denmark, Gertrude the Queen.");
+  assert.equal(speakableDirection("_Exit._"), "Exit.");
+  assert.equal(speakableDirection("[ ]"), "");
+  assert.equal(speakable("Now go. [To the Servant.] Was it not"), "Now go. Was it not");
+  assert.equal(speakable("Stay, I say. [Enter the Ghost\nand more"), "Stay, I say. and more");
+});
+
+test("Piper keeps one process per model, so alternating voices never reload a model", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "offbooked-piper-"));
+  try {
+    // A stand-in for the piper binary: logs each start, answers --version and --json-input.
+    const fake = path.join(dir, "fake-piper.mjs");
+    const starts = path.join(dir, "starts.log");
+    await writeFile(
+      fake,
+      `import { appendFileSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
+const args = process.argv.slice(2);
+if (args.includes("--version")) { console.log("1.2.0"); process.exit(0); }
+appendFileSync(${JSON.stringify(starts)}, args[args.indexOf("-m") + 1] + "\\n");
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const { output_file } = JSON.parse(line);
+  writeFileSync(output_file, "RIFF");
+  console.log(output_file);
+});
+`,
+    );
+    for (const m of VOICE_MODELS) {
+      await writeFile(path.join(dir, `${m}.onnx`), "");
+      await writeFile(path.join(dir, `${m}.onnx.json`), "{}");
+    }
+    const piper = new PiperSynthesizer({ bin: process.execPath, binArgs: [fake], voicesDir: dir, maxProcs: pooledProcs(2), log: silentLog });
+    assert.equal(await piper.probe(), "piper 1.2.0");
+    const byModel = VOICE_MODELS.map((m) => VOICES.find((v) => v.model === m)!);
+    // A scene where three speakers on three models take turns, twice over.
+    for (let i = 0; i < 9; i++) await piper.synthesize(`line ${i}`, byModel[i % 3]!, path.join(dir, `out-${i}.wav`));
+    await piper.close();
+    const started = (await readFile(starts, "utf8")).trim().split("\n");
+    assert.equal(started.length, 3, `one start per model, got ${started.length}`);
+    assert.equal(piper.started, 3);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("spoken text drops bracketed directions and markup and joins verse lines", () => {

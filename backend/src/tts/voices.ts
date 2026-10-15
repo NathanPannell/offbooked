@@ -67,9 +67,15 @@ function hash32(value: string): number {
   return createHash("sha256").update(value).digest().readUInt32BE(0);
 }
 
+// The narrator reads stage directions in the run-through. No character ever gets this voice, so
+// a direction never sounds like someone in the scene. A VCTK speaker, so it shares a loaded model.
+export const NARRATOR_VOICE_ID = "vctk-p225";
+export const NARRATOR: Voice = VOICES.find((v) => v.id === NARRATOR_VOICE_ID)!;
+
 // Characters must come in creation order (created_at, id), so a character added later never
 // changes the voice of one that already exists. Each character starts at a slot picked by a hash
-// of its id and moves to the next free voice of a fitting gender.
+// of its id and moves to the next free voice of a fitting gender. The narrator's voice stays in
+// the list (so the hash slots, and with them existing voices, don't move) but is never picked.
 export function assignVoices(characters: { id: string; name: string }[], voices: Voice[] = VOICES): Map<string, Voice> {
   const used = new Set<string>();
   const result = new Map<string, Voice>();
@@ -77,14 +83,9 @@ export function assignVoices(characters: { id: string; name: string }[], voices:
     const gender = guessGender(c.name);
     const pool = gender ? voices.filter((v) => v.gender === gender) : voices;
     const start = hash32(c.id) % pool.length;
-    let pick = pool[start]!;
-    for (let k = 0; k < pool.length; k++) {
-      const v = pool[(start + k) % pool.length]!;
-      if (!used.has(v.id)) {
-        pick = v;
-        break;
-      }
-    }
+    const ring = Array.from({ length: pool.length }, (_, k) => pool[(start + k) % pool.length]!).filter((v) => v.id !== NARRATOR_VOICE_ID);
+    // Every voice taken: reuse, starting from the hash slot.
+    const pick = ring.find((v) => !used.has(v.id)) ?? ring[0] ?? voices.find((v) => v.id !== NARRATOR_VOICE_ID)!;
     used.add(pick.id);
     result.set(c.id, pick);
   }
@@ -96,7 +97,19 @@ export function assignVoices(characters: { id: string; name: string }[], voices:
 export function speakable(text: string): string {
   const cleaned = text
     .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\[[^\n]*/g, " ") // an unclosed bracket runs to the end of its line
     .replace(/\{[^}]*\}/g, " ")
+    .replace(/[_*]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /[\p{L}\p{N}]/u.test(cleaned) ? cleaned : "";
+}
+
+// What the narrator says for a stage direction: the direction itself, without its brackets or
+// markup. Bracketed asides inside dialogue are not read at all (speakable drops them).
+export function speakableDirection(text: string): string {
+  const cleaned = text
+    .replace(/[[\]{}()]/g, " ")
     .replace(/[_*]+/g, "")
     .replace(/\s+/g, " ")
     .trim();

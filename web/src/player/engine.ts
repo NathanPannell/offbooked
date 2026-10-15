@@ -1,12 +1,15 @@
 import type { ClipLoader } from "./clips";
 import {
-  abBounds,
   gapBetweenMs,
+  isMine,
+  isSkipped,
   nextIndex,
+  NO_PART,
+  playableFrom,
   prefetchWindow,
   previousIndex,
   stepFor,
-  type Ab,
+  type Part,
   type QueueLine,
 } from "./queue";
 import { silenceUrl } from "./silence";
@@ -20,11 +23,11 @@ export interface Gap {
 }
 
 export interface PlayerState {
-  /** The current line, as an index into the dialogue lines in order. */
+  /** The current line, as an index into the played lines in order. */
   index: number;
   playing: boolean;
+  /** The pause while the listener says their own line ("Pause, then read"). */
   gap: Gap | null;
-  ab: Ab;
   ended: boolean;
   /** The current line's clip is still on its way. */
   waiting: boolean;
@@ -48,24 +51,28 @@ const WAIT_LOOP_MS = 250;
 
 type Phase =
   | { kind: "line"; index: number }
-  | { kind: "wait"; index: number } // the clip is loading; a short silence loops meanwhile
-  | { kind: "speak"; index: number; durationMs: number } // my-part: the actor's own line
+  | { kind: "wait"; index: number; afterSpeak: boolean } // the clip is loading; a short silence loops meanwhile
+  | { kind: "speak"; index: number; durationMs: number } // the listener says their line; it plays after
   | { kind: "pause"; index: number; next: number }; // the pause between two lines
+
+/** Recorded takes time the listener's pause; TTS and silent lines are timed from their words. */
+const recorded = (source: string | undefined) => source === "actor" || source === "standin";
 
 /**
  * Plays the run-through line by line through one <audio> element: each line's clip, then a short
- * silence, then the next. Pauses, my-part speaking gaps and waits for a clip are silent WAVs on the
- * same element, so playback moves on from `ended` events alone and one tap unlocks it for good.
+ * silence, then the next. Pauses, the listener's speaking pauses and waits for a clip are silent
+ * WAVs on the same element, so playback moves on from `ended` events alone and one tap unlocks it
+ * for good. Other people's lines play at the chosen speed (pitch kept); the listener's own at 1×.
  */
 export class PlayerEngine {
   private lines: QueueLine[] = [];
-  private mine: Set<string> | null = null;
-  private multiplier = 1.2;
+  private part: Part = NO_PART;
+  private speed = 1;
   private phase: Phase | null = null;
   private token = 0;
   private retried = new Set<string>();
   private switchedAt = 0;
-  private state: PlayerState = { index: -1, playing: false, gap: null, ab: { a: null, b: null }, ended: false, waiting: false };
+  private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false };
   private listeners = new Set<() => void>();
   gapListener: GapListener | null = null;
 
@@ -77,6 +84,7 @@ export class PlayerEngine {
     audio.addEventListener("play", this.onPlay);
     audio.addEventListener("pause", this.onPause);
     audio.addEventListener("error", this.onError);
+    audio.preservesPitch = true;
   }
 
   getState = (): PlayerState => this.state;
@@ -95,21 +103,31 @@ export class PlayerEngine {
     const current = this.lines[this.state.index]?.lineId;
     this.lines = lines;
     const index = current ? lines.findIndex((l) => l.lineId === current) : -1;
-    this.set({ index, ab: { a: null, b: null } });
+    this.set({ index });
     // Get the opening lines ready before anyone presses play.
     if (lines.length) this.prefetchFrom(Math.max(0, index));
   }
 
-  /** null for full cast; otherwise the line IDs the listener speaks. */
-  setMine(mine: Set<string> | null) {
-    this.mine = mine;
+  /** The listener's lines (null for none) and what happens on them. */
+  setPart(part: Part) {
+    const before = this.part;
+    this.part = part;
     const phase = this.phase;
-    // Switching to full cast mid-gap: play that line instead.
-    if (!mine && phase?.kind === "speak") this.startLine(phase.index, this.state.playing);
+    if (!phase) return;
+    const line = this.lines[phase.index];
+    const wasSpeaking = phase.kind === "speak" || (phase.kind === "wait" && phase.afterSpeak);
+    // Out of "pause" mid-pause, or the current line is now left out: move on from here.
+    if (wasSpeaking && (part.mode !== "pause" || !isMine(part, line))) this.startLine(phase.index, this.state.playing);
+    else if (phase.kind !== "pause" && isSkipped(part, line) && !isSkipped(before, line)) this.startLine(phase.index, this.state.playing);
+    else if (phase.kind === "line") this.applyRate(isMine(part, line));
+    if (this.lines.length) this.prefetchFrom(Math.max(0, this.state.index));
   }
 
-  setGapMultiplier(multiplier: number) {
-    this.multiplier = multiplier;
+  /** Playback speed for other people's lines (1 to 3). */
+  setSpeed(speed: number) {
+    this.speed = Math.min(3, Math.max(1, speed));
+    const phase = this.phase;
+    if (phase?.kind === "line") this.applyRate(isMine(this.part, this.lines[phase.index]));
   }
 
   get hasLines(): boolean {
@@ -120,8 +138,7 @@ export class PlayerEngine {
   play() {
     if (!this.hasLines) return;
     if (!this.phase || this.state.ended) {
-      const range = abBounds(this.state.ab);
-      const from = this.state.ended || this.state.index < 0 ? (range?.first ?? 0) : this.state.index;
+      const from = this.state.ended || this.state.index < 0 ? 0 : this.state.index;
       this.startLine(from, true);
       return;
     }
@@ -137,7 +154,6 @@ export class PlayerEngine {
     this.audio.pause();
   }
 
-
   toggle() {
     if (this.state.playing) this.pause();
     else this.play();
@@ -149,45 +165,43 @@ export class PlayerEngine {
   }
 
   next() {
-    const index = Math.max(this.state.index, -1) + 1;
-    if (index >= this.lines.length) return;
+    const index = nextIndex(this.lines, Math.max(this.state.index, -1), this.part);
+    if (index === null) return;
     this.seekToSegment(index, this.state.playing);
   }
 
   previous() {
     const phase = this.phase;
     const elapsed = phase?.kind === "line" ? this.audio.currentTime * 1000 : phase?.kind === "pause" ? Infinity : 0;
-    this.seekToSegment(previousIndex(this.state.index, elapsed), this.state.playing);
+    let index = previousIndex(this.state.index, elapsed);
+    // Step back over lines that are left out.
+    while (index > 0 && isSkipped(this.part, this.lines[index])) index--;
+    this.seekToSegment(index, this.state.playing);
   }
 
-  /** Sets A, then B. A third call starts over from a new A. */
-  setAbPoint(index: number) {
-    const { a, b } = this.state.ab;
-    if (a === null || b !== null) {
-      this.set({ ab: { a: index, b: null } });
-      return;
-    }
-    this.set({ ab: { a, b: index } });
-    this.seekToSegment(Math.min(a, index));
-  }
-
-  clearAb() {
-    this.set({ ab: { a: null, b: null } });
-  }
-
-  private playUrl(url: string, loop = false) {
+  private playUrl(url: string, opts: { loop?: boolean; rate?: number } = {}) {
     const token = this.token;
-    this.audio.loop = loop;
+    this.audio.loop = Boolean(opts.loop);
     if (this.audio.src !== url) {
       this.switchedAt = performance.now();
       this.audio.src = url;
     } else {
       this.audio.currentTime = 0;
     }
+    // Loading a new src resets playbackRate to defaultPlaybackRate, so set both.
+    const rate = opts.rate ?? 1;
+    this.audio.defaultPlaybackRate = rate;
+    this.audio.playbackRate = rate;
     void this.audio.play().catch((err: unknown) => {
       // A newer src aborts the previous play(); only a refusal (no user gesture yet) stops playback.
       if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false });
     });
+  }
+
+  private applyRate(mine: boolean) {
+    const rate = mine ? 1 : this.speed;
+    this.audio.defaultPlaybackRate = rate;
+    this.audio.playbackRate = rate;
   }
 
   private cancelGap() {
@@ -203,14 +217,21 @@ export class PlayerEngine {
   }
 
   /**
-   * Starts a line: its clip, a wait for it, or a speaking gap. Synchronous up to audio.play(), so a
-   * tap starts audio inside its gesture. Without autoplay it only moves there; play() starts it.
+   * Starts a line: its clip, a wait for it, or the listener's speaking pause. Synchronous up to
+   * audio.play(), so a tap starts audio inside its gesture. Without autoplay it only moves there;
+   * play() starts it. A line that is left out moves on to the next one that plays.
    */
-  private startLine(index: number, autoplay: boolean) {
+  private startLine(requested: number, autoplay: boolean) {
     this.cancelGap();
     const token = ++this.token;
-    const line = this.lines[index];
-    if (!line) return;
+    const index = playableFrom(this.lines, requested, this.part);
+    if (index === null) {
+      this.phase = null;
+      this.audio.pause();
+      this.set({ index: this.lines.length - 1, playing: false, ended: true, gap: null, waiting: false });
+      return;
+    }
+    const line = this.lines[index]!;
     this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false });
     this.prefetchFrom(index);
     if (!autoplay) {
@@ -218,7 +239,8 @@ export class PlayerEngine {
       this.audio.pause();
       return;
     }
-    const step = stepFor(this.lines, index, this.mine, this.multiplier);
+    const clip = this.clips.ready(line.lineId);
+    const step = stepFor(this.lines, index, this.part, clip && recorded(clip.source) ? clip.durationMs : null);
     if (step.kind === "speak") {
       this.phase = step;
       this.set({ gap: { index, durationMs: step.durationMs, endsAt: performance.now() + step.durationMs, remainingMs: step.durationMs } });
@@ -226,25 +248,34 @@ export class PlayerEngine {
       this.playUrl(silenceUrl(step.durationMs));
       return;
     }
+    this.playClip(index, token, false);
+  }
+
+  /** The line's own audio: at once when it's here, else a short silence loops until it is. */
+  private playClip(index: number, token: number, afterSpeak: boolean) {
+    const line = this.lines[index]!;
+    const mine = isMine(this.part, line);
     const clip = this.clips.ready(line.lineId);
     if (clip) {
       this.phase = { kind: "line", index };
-      this.playUrl(clip.url ?? silenceUrl(clip.durationMs));
+      this.set({ waiting: false });
+      const rate = mine ? 1 : this.speed;
+      this.playUrl(clip.url ?? silenceUrl(clip.durationMs), { rate });
       return;
     }
-    this.phase = { kind: "wait", index };
+    this.phase = { kind: "wait", index, afterSpeak };
     this.set({ waiting: true });
-    this.playUrl(silenceUrl(WAIT_LOOP_MS), true);
+    this.playUrl(silenceUrl(WAIT_LOOP_MS), { loop: true });
     void this.clips.load(line.lineId).then(() => {
       if (token !== this.token || this.phase?.kind !== "wait") return;
-      this.startLine(index, this.state.playing);
+      if (afterSpeak) this.playClip(index, token, true);
+      else this.startLine(index, this.state.playing);
     });
   }
 
   private prefetchFrom(index: number) {
-    const ab = this.state.ab;
-    this.clips.prefetch(prefetchWindow(this.lines, index, PREFETCH_LINES, this.mine, ab));
-    this.clips.warm(prefetchWindow(this.lines, index, WARM_LINES, this.mine, ab));
+    this.clips.prefetch(prefetchWindow(this.lines, index, PREFETCH_LINES, this.part));
+    this.clips.warm(prefetchWindow(this.lines, index, WARM_LINES, this.part));
   }
 
   private onEnded = () => {
@@ -256,10 +287,13 @@ export class PlayerEngine {
     }
     if (phase.kind === "wait") return;
     if (phase.kind === "speak") {
+      // The listener has had their turn; now their line plays.
       this.set({ gap: null });
       this.gapListener?.end(this.gapLine(phase.index), true);
+      this.playClip(phase.index, this.token, true);
+      return;
     }
-    const next = nextIndex(this.lines, phase.index, this.state.ab);
+    const next = nextIndex(this.lines, phase.index, this.part);
     if (next === null) {
       this.phase = null;
       this.set({ playing: false, ended: true });
@@ -302,7 +336,7 @@ export class PlayerEngine {
       return;
     }
     this.retried.add(lineId);
-    this.startLine(phase.index, this.state.playing);
+    this.playClip(phase.index, ++this.token, false);
   };
 
   destroy() {

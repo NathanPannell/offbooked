@@ -3399,24 +3399,30 @@
   gap: 10px var(--s-4);
 }
 
-.my-part-settings {
+/* Role and speed: small pill selects, like the scene picker. */
+.pill-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.pill-select .input {
+  min-height: 36px;
+  width: auto;
+  max-width: 220px;
+  padding: 4px 34px 4px 12px;
+  border-width: 1.5px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.my-lines-setting {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--s-2) var(--s-5);
-}
-
-.gap-setting {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 200px;
-}
-
-.gap-setting input {
-  accent-color: var(--ink);
+  gap: var(--s-2) var(--s-4);
   width: 100%;
-  min-height: 32px;
 }
 
 .score-toggle {
@@ -3532,10 +3538,28 @@
   font-weight: 500;
 }
 
-.lyric.kind-stage_direction,
 .lyric.kind-heading {
   padding: 4px 12px;
   color: var(--faint);
+}
+
+/* Stage directions play too, in the narrator's voice. */
+.lyric.kind-stage_direction {
+  color: var(--faint);
+}
+
+.lyric.kind-stage_direction .lyric-button {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.lyric.kind-stage_direction.is-current {
+  color: var(--ink-soft);
+}
+
+.lyric.kind-stage_direction.is-current .lyric-text {
+  font-size: 16px;
+  font-weight: 400;
 }
 
 .lyric.kind-stage_direction .lyric-text {
@@ -3556,22 +3580,15 @@
   border-radius: 4px 14px 14px 4px;
 }
 
+.is-my-part .lyric.is-skipped .lyric-text {
+  opacity: 0.55;
+}
+
 .is-my-part .lyric.is-mine.is-current .lyric-button {
   background: var(--accent-soft);
   box-shadow:
     inset 3px 0 0 var(--accent),
     0 0 0 1px var(--accent-line);
-}
-
-.lyric.in-ab::before {
-  content: "";
-  position: absolute;
-  left: -8px;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
 }
 
 .gap-meter {
@@ -3682,16 +3699,6 @@
   cursor: not-allowed;
 }
 
-.ab-button {
-  position: relative;
-  flex-direction: column;
-  gap: 0;
-}
-
-.ab-label {
-  font: 600 10px/1 var(--font-sans);
-}
-
 .practice-summary .summary-line {
   font-size: 15px;
 }
@@ -3761,6 +3768,10 @@
 
   .section-nav > svg {
     display: none;
+  }
+
+  .pill-select .input {
+    max-width: 170px;
   }
 
   .section-nav .input {
