@@ -1,7 +1,7 @@
-import { Crosshair, Gauge, Headphones, Mic, Pause, Play, SkipBack, SkipForward, UserRound } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { Crosshair, Mic, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
-import type { AudioSource, Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
+import type { Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
 import { CharacterName } from "../components/CharacterName";
 import { Dialog } from "../components/Dialog";
 import { Loading } from "../components/Loading";
@@ -16,16 +16,19 @@ import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
 import { defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
-import { audioSourceTag, isSpeed, SPEEDS } from "./timing";
+import { SPEEDS } from "./timing";
 import { usePractice } from "./usePractice";
 
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-const MODE_LABELS: [MyLineMode, string][] = [
-  ["read", "Read"],
-  ["skip", "Silent"],
-  ["pause", "Pause, then read"],
+/** What happens on the listener's own lines: the closed label, a phone-width label, and the fuller option text. */
+const MODES: { mode: MyLineMode; label: string; short: string; option: string }[] = [
+  { mode: "read", label: "Read", short: "Read", option: "Read: play my lines too" },
+  { mode: "skip", label: "Silent", short: "Silent", option: "Silent: a gap to say them" },
+  { mode: "pause", label: "Pause, then read", short: "Pause", option: "Pause, then read" },
 ];
+
+const formatSpeed = (speed: number) => `${speed}×`;
 
 interface Props {
   load: () => Promise<RunThrough>;
@@ -88,9 +91,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     [lines],
   );
   const segmentByLine = useMemo(() => new Map(queue.map((q, index) => [q.lineId, index])), [queue]);
-  // Each line's audio source: what the run-through said, updated as clips arrive (a take may land meanwhile).
-  const [sourceUpdates, setSources] = useState<Record<string, AudioSource>>({});
-  const sourceOf = (lineId: string): AudioSource => sourceUpdates[lineId] ?? data?.sources?.[lineId] ?? "none";
 
   const practice = usePractice((lineId) => lineById.get(lineId)?.text ?? "");
 
@@ -105,7 +105,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
       // A direction nobody can voice is passed over; dialogue keeps the render's silence.
       return line?.kind === "stage_direction" ? 0 : placeholderMs(line?.text ?? "");
     });
-    clips.onSource = (lineId, source) => setSources((s) => (s[lineId] === source ? s : { ...s, [lineId]: source }));
     const e = new PlayerEngine(el, clips);
     setEngine(e);
     return () => {
@@ -211,6 +210,11 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   const hasAudio = queue.length > 0;
   const sections = [...data.sections].sort((a, b) => a.seq - b.seq);
   const ownNames = myCharacterIds.map((id) => characterName.get(id)).filter(Boolean).join(" & ");
+  const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
+  const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
+  const canScore = pausing && onPracticeDone !== undefined;
+  const nextSpeed = SPEEDS[(SPEEDS.indexOf(settings.speed) + 1) % SPEEDS.length];
+  const speedLabel = `${hasRole ? "Speed of other people's lines" : "Speed"}: ${formatSpeed(settings.speed)}`;
 
   const onLineTap = (line: Line) => {
     if (!engine || !hasAudio) return;
@@ -224,40 +228,48 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     <div className={`player ${hasRole ? "is-my-part" : ""}`}>
       <audio ref={audioRef} preload="auto" playsInline />
 
-      <div className="player-toolbar">
-        <label className="pill-select">
-          <UserRound size={17} aria-hidden="true" />
-          <span className="sr-only">My role</span>
-          <select className="input" value={settings.role} onChange={(e) => update({ role: e.target.value })}>
-            {isActor && <option value={MY_PART}>{ownNames ? `Me (${ownNames})` : "My part"}</option>}
-            <option value="">No role, just listen</option>
-            {characters
-              .filter((c) => !(isActor && myCharacterIds.length === 1 && c.id === myCharacterIds[0]))
-              .map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label className="pill-select">
-          <Gauge size={17} aria-hidden="true" />
-          <span className="sr-only">Speed of other people's lines</span>
-          <select
-            className="input"
-            value={String(settings.speed)}
-            onChange={(e) => {
-              const speed = Number(e.target.value);
-              if (isSpeed(speed)) update({ speed });
-            }}
-          >
-            {SPEEDS.map((s) => (
-              <option key={s} value={String(s)}>
-                {hasRole ? `Others ${s}×` : `${s}×`}
+      {/* One row pinned to the top: who you are, what happens on your lines, and the scene. */}
+      <div className="runthrough-bar">
+        <BarSelect
+          className="role-select"
+          label="Your part"
+          value={settings.role}
+          onChange={(role) => update({ role })}
+          display={hasRole ? `You: ${roleName}` : "Just listening"}
+        >
+          {isActor && <option value={MY_PART}>{ownNames ? `Me (${ownNames})` : "My part"}</option>}
+          <option value="">Just listening</option>
+          {characters
+            .filter((c) => !(isActor && myCharacterIds.length === 1 && c.id === myCharacterIds[0]))
+            .map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
-          </select>
-        </label>
+        </BarSelect>
+        {hasRole && (
+          <BarSelect
+            className="mode-select"
+            label="Your lines"
+            value={settings.mode}
+            onChange={(mode) => {
+              const next = MODES.find((m) => m.mode === mode);
+              if (next) update({ mode: next.mode });
+            }}
+            display={
+              <>
+                <span className="rt-long">{currentMode.label}</span>
+                <span className="rt-short">{currentMode.short}</span>
+              </>
+            }
+          >
+            {MODES.map((m) => (
+              <option key={m.mode} value={m.mode}>
+                {m.option}
+              </option>
+            ))}
+          </BarSelect>
+        )}
         <SectionNav
           sections={sections}
           onJump={(sectionId) => {
@@ -266,36 +278,8 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
             else document.getElementById(`rt-section-${sectionId}`)?.scrollIntoView({ block: "start" });
           }}
         />
-        {hasRole && (
-          <div className="my-lines-setting" role="group" aria-label="My lines">
-            <span className="eyebrow">My lines</span>
-            <div className="segmented">
-              {MODE_LABELS.map(([mode, label]) => (
-                <button key={mode} type="button" aria-pressed={settings.mode === mode} onClick={() => update({ mode })}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {pausing && onPracticeDone && (
-              <label className="checkbox score-toggle">
-                <input
-                  type="checkbox"
-                  checked={practice.enabled}
-                  onChange={(e) => (e.target.checked ? void practice.enable() : practice.disable())}
-                />
-                <Mic size={16} aria-hidden="true" /> Score me
-              </label>
-            )}
-          </div>
-        )}
       </div>
 
-      {pausing && onPracticeDone && !practice.enabled && !practice.micError && (
-        <p className="small muted practice-tip">
-          <Headphones size={15} aria-hidden="true" /> Turn on “Score me” to check your lines as you say them. Headphones
-          help: the mic hears only you.
-        </p>
-      )}
       {practice.micError && <MicHelp kind={practice.micError.kind} onRetry={() => void practice.enable()} />}
       {practice.enabled && (
         <div className="notice notice-accent practice-bar" role="status" aria-live="polite">
@@ -334,8 +318,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                   const isMine = mine.has(line.id);
                   const skipped = isMine && settings.mode === "skip";
                   const inGap = isCurrent && state.gap !== null;
-                  const source = sourceOf(line.id);
-                  const tag = line.kind === "dialogue" ? audioSourceTag(source) : null;
                   const who = line.characterId ? characterName.get(line.characterId) : undefined;
                   const result = practice.results.get(line.id);
                   const classes = [
@@ -369,12 +351,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                         {line.kind === "dialogue" && (
                           <span className="lyric-who">
                             {who && <CharacterName name={who} />}
-                            {isMine && <span className="your-line">{skipped ? "your line, silent" : "your line"}</span>}
-                            {tag && (
-                              <span className={`tag tag-${source}`} title={SOURCE_TITLE[source]}>
-                                {tag}
-                              </span>
-                            )}
+                            {isMine && <span className="sr-only">{skipped ? "(your line, silent)" : "(your line)"}</span>}
                             {result && (
                               <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>
                             )}
@@ -413,6 +390,15 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
       )}
 
       <div className="player-controls" role="group" aria-label="Playback">
+        <button
+          type="button"
+          className="speed-btn"
+          onClick={() => update({ speed: nextSpeed })}
+          aria-label={speedLabel}
+          title={speedLabel}
+        >
+          {formatSpeed(settings.speed)}
+        </button>
         <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">
           <SkipBack size={24} />
         </button>
@@ -431,6 +417,20 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
         <button type="button" className="icon-btn" onClick={() => engine?.next()} disabled={!hasAudio} aria-label="Next line">
           <SkipForward size={24} />
         </button>
+        {canScore ? (
+          <button
+            type="button"
+            className="icon-btn score-btn"
+            aria-pressed={practice.enabled}
+            aria-label="Score me: check my lines as I say them"
+            title={practice.enabled ? "Scoring your lines" : "Score me"}
+            onClick={() => (practice.enabled ? practice.disable() : void practice.enable())}
+          >
+            <Mic size={20} />
+          </button>
+        ) : (
+          <span className="controls-spacer" aria-hidden="true" />
+        )}
       </div>
 
       <p className="small muted player-waiting" role="status" aria-live="polite">
@@ -470,11 +470,36 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   );
 }
 
-const SOURCE_TITLE: Record<string, string> = {
-  standin: "Read in by a stand-in until the actor records it",
-  tts: "A computer voice until someone records it",
-  none: "Not recorded yet",
-};
+/**
+ * A compact select for the top bar. The closed state shows `display` (e.g. "You: FIRST WITCH"),
+ * which can be shorter than the option text; the native picker still opens on tap.
+ */
+function BarSelect({
+  label,
+  value,
+  onChange,
+  display,
+  className = "",
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  display: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className={`bar-select ${className}`}>
+      <span className="bar-select-value" aria-hidden="true">
+        {display}
+      </span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
+        {children}
+      </select>
+    </label>
+  );
+}
 
 function verdictClass(v: ReturnType<typeof verdict>): string {
   return v === "good" ? "good" : v === "check" ? "check" : "bad";

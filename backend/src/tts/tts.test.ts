@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { silentLog } from "../log.ts";
 import { PiperSynthesizer, pooledProcs } from "./piper.ts";
-import { assignVoices, clipHash, guessGender, NARRATOR, NARRATOR_VOICE_ID, speakable, speakableDirection, TTS_SETTINGS, VOICE_MODELS, VOICES } from "./voices.ts";
+import { assignVoices, clipHash, guessGender, NARRATOR, NARRATOR_VOICE_ID, speakable, speakableDirection, spokenParts, TTS_SETTINGS, VOICE_MODELS, VOICES } from "./voices.ts";
 import { joinWavs } from "./wav.ts";
 import { toneWav } from "../test/tts.ts";
 
@@ -140,6 +140,30 @@ test("Piper reports itself unavailable when the binary or voices are missing", a
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("a line splits into the character's words and the narrator's directions, in order", () => {
+  assert.deepEqual(spokenParts("Now go. [To the Servant.] Was it not"), [
+    { narrator: false, text: "Now go." },
+    { narrator: true, text: "To the Servant." },
+    { narrator: false, text: "Was it not" },
+  ]);
+  assert.deepEqual(spokenParts("[Aside.] A little more than kin,\n  and less than kind."), [
+    { narrator: true, text: "Aside." },
+    { narrator: false, text: "A little more than kin,\nand less than kind." },
+  ]);
+  // A direction closed on a later printed line, and one never closed (it ends with its line).
+  assert.deepEqual(spokenParts("Go. [He blots and folds\nthe letter.] Splendid."), [
+    { narrator: false, text: "Go." },
+    { narrator: true, text: "He blots and folds\nthe letter." },
+    { narrator: false, text: "Splendid." },
+  ]);
+  assert.deepEqual(spokenParts("Stay. [Enter the Ghost\nand more"), [
+    { narrator: false, text: "Stay." },
+    { narrator: true, text: "Enter the Ghost" },
+    { narrator: false, text: "and more" },
+  ]);
+  assert.deepEqual(spokenParts("— [ ] —"), []);
 });
 
 test("printed lines are joined with a pause between them", async () => {

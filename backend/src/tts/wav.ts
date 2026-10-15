@@ -25,18 +25,32 @@ function readPcm(buf: Buffer, name: string): Pcm {
   return { fmt, data };
 }
 
-export async function joinWavs(files: string[], gapMs: number, output: string): Promise<void> {
+/**
+ * `gapMs` is one pause between every pair of files, or one per file: the silence before it (the
+ * first is ignored). Returns where each file's audio sits in the output, in ms.
+ */
+export async function joinWavs(files: string[], gapMs: number | number[], output: string): Promise<{ startMs: number; endMs: number }[]> {
   const parts = await Promise.all(files.map(async (f) => readPcm(await readFile(f), f)));
   const first = parts[0];
   if (!first) throw new Error("nothing to join");
   if (parts.some((p) => !p.fmt.equals(first.fmt))) throw new Error("WAV files differ in format");
   const rate = first.fmt.readUInt32LE(4);
   const blockAlign = first.fmt.readUInt16LE(12); // bytes per sample frame, all channels
-  const gap = Buffer.alloc(Math.round((gapMs / 1000) * rate) * blockAlign);
+  const frames = (ms: number) => Math.round((ms / 1000) * rate);
+  const toMs = (frameCount: number) => Math.round((frameCount * 1000) / rate);
   const chunks: Buffer[] = [];
+  const spans: { startMs: number; endMs: number }[] = [];
+  let at = 0;
   parts.forEach((p, i) => {
-    if (i > 0) chunks.push(gap);
+    if (i > 0) {
+      const gap = frames(Array.isArray(gapMs) ? (gapMs[i] ?? 0) : gapMs);
+      chunks.push(Buffer.alloc(gap * blockAlign));
+      at += gap;
+    }
+    const length = Math.floor(p.data.length / blockAlign);
+    spans.push({ startMs: toMs(at), endMs: toMs(at + length) });
     chunks.push(p.data);
+    at += length;
   });
   const data = Buffer.concat(chunks);
   const header = Buffer.alloc(12 + 8 + first.fmt.length + 8);
@@ -49,4 +63,5 @@ export async function joinWavs(files: string[], gapMs: number, output: string): 
   header.write("data", 20 + first.fmt.length, "ascii");
   header.writeUInt32LE(data.length, 24 + first.fmt.length);
   await writeFile(output, Buffer.concat([header, data]));
+  return spans;
 }
