@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  abBounds,
   gapBetweenMs,
   LINE_GAP_MS,
   nextIndex,
+  NO_PART,
   placeholderMs,
+  playableFrom,
   prefetchWindow,
   previousIndex,
   SECTION_GAP_MS,
   stepFor,
+  type Part,
   type QueueLine,
 } from "./queue";
 import { silenceWav } from "./silence";
@@ -19,18 +21,20 @@ const lines: QueueLine[] = ["a", "b", "c", "d", "e", "f"].map((id, i) => ({
   sectionId: i < 3 ? "s1" : "s2",
   text: id === "b" ? "one two three four five six seven eight nine ten" : "Yes.",
 }));
-const noAb = { a: null, b: null };
+const part = (mode: Part["mode"], ids = ["b", "e"]): Part => ({ mine: new Set(ids), mode });
 
 describe("next line and gaps", () => {
-  it("walks the play in order and stops at the end", () => {
-    expect(nextIndex(lines, 0, noAb)).toBe(1);
-    expect(nextIndex(lines, 4, noAb)).toBe(5);
-    expect(nextIndex(lines, 5, noAb)).toBeNull();
+  it("walks the play in order, across scenes, and stops at the end", () => {
+    expect(nextIndex(lines, 0)).toBe(1);
+    expect(nextIndex(lines, 2)).toBe(3);
+    expect(nextIndex(lines, 4)).toBe(5);
+    expect(nextIndex(lines, 5)).toBeNull();
   });
 
   it("pauses briefly within a scene and longer at a scene change", () => {
     expect(gapBetweenMs(lines, 0, 1)).toBe(LINE_GAP_MS);
     expect(gapBetweenMs(lines, 2, 3)).toBe(SECTION_GAP_MS);
+    expect(gapBetweenMs(lines, 0, 2)).toBe(LINE_GAP_MS);
   });
 
   it("previous restarts a line that has played a while, else goes back one", () => {
@@ -47,49 +51,47 @@ describe("next line and gaps", () => {
   });
 });
 
-describe("A–B repeat", () => {
-  it("needs both ends, in either tap order", () => {
-    expect(abBounds({ a: 3, b: null })).toBeNull();
-    expect(abBounds({ a: 4, b: 1 })).toEqual({ first: 1, last: 4 });
+describe("my lines", () => {
+  it("read: my lines play like anyone's, marked as mine", () => {
+    expect(stepFor(lines, 0, part("read"))).toEqual({ kind: "line", index: 0, mine: false });
+    expect(stepFor(lines, 1, part("read"))).toEqual({ kind: "line", index: 1, mine: true });
+    expect(nextIndex(lines, 0, part("read"))).toBe(1);
   });
 
-  it("loops from B back to A, with a scene-change pause", () => {
-    const ab = { a: 3, b: 1 };
-    expect(nextIndex(lines, 1, ab)).toBe(2);
-    expect(nextIndex(lines, 3, ab)).toBe(1);
-    expect(gapBetweenMs(lines, 3, 1)).toBe(SECTION_GAP_MS);
+  it("skip: my lines are left out, with no gap of their own", () => {
+    expect(nextIndex(lines, 0, part("skip"))).toBe(2);
+    expect(nextIndex(lines, 3, part("skip"))).toBe(5);
+    expect(playableFrom(lines, 1, part("skip"))).toBe(2);
+    expect(playableFrom(lines, 5, part("skip", ["f"]))).toBeNull();
+    expect(gapBetweenMs(lines, 0, 2)).toBe(LINE_GAP_MS);
   });
 
-  it("a one-line range repeats that line", () => {
-    expect(nextIndex(lines, 2, { a: 2, b: 2 })).toBe(2);
+  it("pause: a pause timed from my spoken words, or from my take when there is one", () => {
+    // Ten words at 2.5 words a second.
+    expect(stepFor(lines, 1, part("pause"))).toEqual({ kind: "speak", index: 1, durationMs: 4000 });
+    // A 3 s take: plus 15% (450 ms) or 500 ms, whichever is more.
+    expect(stepFor(lines, 1, part("pause"), 3000)).toEqual({ kind: "speak", index: 1, durationMs: 3500 });
+    expect(stepFor(lines, 0, part("pause"))).toEqual({ kind: "line", index: 0, mine: false });
   });
-});
 
-describe("my part", () => {
-  const mine = new Set(["b", "e"]);
-
-  it("holds a speaking gap on the actor's own lines, scaled by their setting", () => {
-    expect(stepFor(lines, 0, mine, 1)).toEqual({ kind: "line", index: 0 });
-    expect(stepFor(lines, 1, mine, 1)).toEqual({ kind: "speak", index: 1, durationMs: 4800 });
-    expect(stepFor(lines, 1, mine, 1.5)).toEqual({ kind: "speak", index: 1, durationMs: 7200 });
-    expect(stepFor(lines, 1, null, 1)).toEqual({ kind: "line", index: 1 });
+  it("no role: nothing is mine", () => {
+    expect(stepFor(lines, 1, NO_PART)).toEqual({ kind: "line", index: 1, mine: false });
+    expect(stepFor(lines, 1, { mine: null, mode: "pause" })).toEqual({ kind: "line", index: 1, mine: false });
   });
 });
 
 describe("prefetch window", () => {
-  it("starts at the current line and looks ahead in order", () => {
-    expect(prefetchWindow(lines, 0, 3, null, noAb)).toEqual(["a", "b", "c"]);
-    expect(prefetchWindow(lines, 4, 5, null, noAb)).toEqual(["e", "f"]);
-    expect(prefetchWindow(lines, -1, 1, null, noAb)).toEqual(["a"]);
+  it("starts at the current line and looks ahead in order, across scenes", () => {
+    expect(prefetchWindow(lines, 0, 3)).toEqual(["a", "b", "c"]);
+    expect(prefetchWindow(lines, 2, 3)).toEqual(["c", "d", "e"]);
+    expect(prefetchWindow(lines, 4, 5)).toEqual(["e", "f"]);
+    expect(prefetchWindow(lines, -1, 1)).toEqual(["a"]);
   });
 
-  it("skips the actor's own lines in my-part mode", () => {
-    expect(prefetchWindow(lines, 0, 4, new Set(["b", "e"]), noAb)).toEqual(["a", "c", "d", "f"]);
-  });
-
-  it("follows an A–B loop and lists each line once", () => {
-    expect(prefetchWindow(lines, 2, 10, null, { a: 1, b: 3 })).toEqual(["c", "d", "b"]);
-    expect(prefetchWindow(lines, 1, 10, new Set(["c"]), { a: 1, b: 3 })).toEqual(["b", "d"]);
+  it("leaves out my lines only when they are skipped", () => {
+    expect(prefetchWindow(lines, 0, 4, part("skip"))).toEqual(["a", "c", "d", "f"]);
+    expect(prefetchWindow(lines, 0, 4, part("pause"))).toEqual(["a", "b", "c", "d"]);
+    expect(prefetchWindow(lines, 0, 4, part("read"))).toEqual(["a", "b", "c", "d"]);
   });
 });
 

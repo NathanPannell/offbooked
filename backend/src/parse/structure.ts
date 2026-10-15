@@ -1,4 +1,5 @@
 import { tidyText } from "./assemble.ts";
+import { flag, type Flag } from "./flags.ts";
 import { canonicalName } from "./heuristic.ts";
 import type { ParsedLine, StructuredScript } from "./types.ts";
 
@@ -27,7 +28,7 @@ function isWordPrefix(short: string, long: string): boolean {
 export interface CharacterResolution {
   characters: { name: string; aliases: string[] }[];
   nameFor: (line: ParsedLine) => string | null;
-  flagFor: (line: ParsedLine, index: number) => string | null;
+  flagFor: (line: ParsedLine, index: number) => Flag | null;
 }
 
 // Merges obvious abbreviations into the full name and records every cue spelling as an alias.
@@ -52,7 +53,7 @@ export function resolveCharacters(lines: ParsedLine[]): CharacterResolution {
   };
 
   const aliases = new Map<string, Set<string>>();
-  const doubtful = new Map<string, string>(); // "cue->name" key to reason, flagged on first use
+  const doubtful = new Map<string, Flag>(); // "cue->name" key to flag, flagged on first use
   const addAlias = (name: string, alias: string) => {
     if (alias === name) return;
     if (!aliases.has(name)) aliases.set(name, new Set());
@@ -61,7 +62,7 @@ export function resolveCharacters(lines: ParsedLine[]): CharacterResolution {
   for (const [abbrev, full] of mergeInto) {
     const target = finalName(full);
     addAlias(target, abbrev);
-    if (words(abbrev).join("").length < 3) doubtful.set(`${abbrev}->${target}`, `Merged ${abbrev} into ${target}; check this is the same character`);
+    if (words(abbrev).join("").length < 3) doubtful.set(`${abbrev}->${target}`, flag("speaker", `Merged ${abbrev} into ${target}`));
   }
   for (const l of lines) {
     if (l.kind !== "dialogue" || !l.speaker) continue;
@@ -72,7 +73,7 @@ export function resolveCharacters(lines: ParsedLine[]): CharacterResolution {
     if (cue === name) continue;
     addAlias(name, cue);
     if (!isAbbreviation(cue, name) && !mergeInto.has(cue)) {
-      doubtful.set(`${cue}->${name}`, `Lines cued ${cue} were assigned to ${name}; check this is right`);
+      doubtful.set(`${cue}->${name}`, flag("speaker", `Cued ${cue}, assigned to ${name}`));
     }
   }
 
@@ -84,7 +85,7 @@ export function resolveCharacters(lines: ParsedLine[]): CharacterResolution {
       if (l.kind !== "dialogue" || !l.speaker) return null;
       const raw = canonicalName(l.speaker);
       const amb = ambiguous.get(raw);
-      if (amb) return `${raw} could be ${amb.join(" or ")}; pick the right character`;
+      if (amb) return flag("speaker", `${raw} could be ${amb.join(" or ")}`);
       const cue = l.speakerAsWritten ? canonicalName(l.speakerAsWritten) : raw;
       for (const key of [`${cue}->${finalName(raw)}`, `${raw}->${finalName(raw)}`]) {
         if (doubtful.has(key) && !flagged.has(key)) {
@@ -104,6 +105,11 @@ export function sectionTitle(act: string | null, scene: string | null): string {
   if (scene) return isNum(scene) ? `Scene ${scene}` : scene;
   return "Script";
 }
+
+const NO_SPEAKER = flag("direction", "No speaker found, so this was treated as a stage direction");
+
+// A flag as the lines table stores it: flag_code, and flag_reason as its optional detail.
+const stored = (f: Flag | null) => ({ flagCode: f?.code ?? null, flagReason: f?.detail ?? null });
 
 // Turns a flat parse into sections, characters and ordered lines. Dialogue without a speaker
 // cannot be recorded, so it becomes a flagged stage direction instead.
@@ -135,11 +141,11 @@ export function buildStructure(parsed: ParsedLine[]): StructuredScript {
     }
     const character = chars.nameFor(p);
     if (p.kind === "dialogue" && !character) {
-      lines.push({ section: sections.length - 1, kind: "stage_direction", character: null, text, flagReason: p.flagReason ?? "No speaker found for this line", sourceLine: p.sourceLine ?? null, page: null });
+      lines.push({ section: sections.length - 1, kind: "stage_direction", character: null, text, ...stored(p.flag ?? NO_SPEAKER), sourceLine: p.sourceLine ?? null, page: null });
       return;
     }
     if (p.kind === "dialogue") hasDialogue = true;
-    lines.push({ section: sections.length - 1, kind: p.kind, character, text, flagReason: p.flagReason ?? chars.flagFor(p, index), sourceLine: p.sourceLine ?? null, page: null });
+    lines.push({ section: sections.length - 1, kind: p.kind, character, text, ...stored(p.flag ?? chars.flagFor(p, index)), sourceLine: p.sourceLine ?? null, page: null });
   });
 
   const used = new Set(lines.map((l) => l.character).filter(Boolean));

@@ -88,7 +88,7 @@ const SUFFIXES: [string, string][] = [
   ["'d", " would"],
 ];
 
-const FILLERS = new Set(["um", "uh", "er", "erm", "ah", "hmm", "mm", "mhm"]);
+export const FILLERS = new Set(["um", "uh", "er", "erm", "ah", "hmm", "mm", "mhm"]);
 
 function expandToken(raw: string): string[] {
   if (WHOLE_WORDS[raw]) return WHOLE_WORDS[raw].split(" ");
@@ -112,7 +112,7 @@ function expandToken(raw: string): string[] {
 }
 
 /** The words of a line as written, after splitting on spaces and dashes. */
-function displayWords(text: string): string[] {
+export function displayWords(text: string): string[] {
   return text
     .normalize("NFKC")
     .replace(/[‐-―−…/-]/g, " ")
@@ -120,7 +120,7 @@ function displayWords(text: string): string[] {
     .filter(Boolean);
 }
 
-function normalizeDisplayWord(word: string): string[] {
+export function normalizeDisplayWord(word: string): string[] {
   const cleaned = word
     .toLowerCase()
     .replace(/[‘’ʼ′`]/g, "'")

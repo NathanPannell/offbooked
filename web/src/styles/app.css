@@ -1624,16 +1624,258 @@
     inset 0 0 0 1px var(--edge-strong);
 }
 
+/* Room above and below the open line for the join controls on the breaks around it. */
 .script-row.is-open {
-  border-radius: 10px 10px 0 0;
+  margin: 18px 0;
+  background: #fff;
+  box-shadow:
+    inset 0 0 0 1px var(--edge-strong),
+    var(--shadow);
 }
 
-.flag-reason {
+.script-row.is-flagged.is-open {
+  background: #fff;
+  box-shadow:
+    inset 3px 0 0 var(--sun),
+    inset 0 0 0 1px var(--edge-strong),
+    var(--shadow);
+}
+
+/* What to check on a flagged line: a chip, and the parser's note when it left one. */
+.flag-note {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+
+.flag-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-top: 2px;
+  min-height: 22px;
+  padding: 0 9px;
+  border: 1px solid var(--flag-line);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  font: 600 12px/1.2 var(--font-sans);
+  color: var(--flag);
+}
+
+.flag-detail {
   font: 500 12.5px/1.4 var(--font-sans);
+  color: var(--muted);
+}
+
+/* [Bracketed] directions inside a spoken line. */
+.inline-direction {
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* ---- The open line, edited in place ---- */
+
+.script-line.is-editing {
+  cursor: default;
+}
+
+.script-line.is-editing:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Where the speaker's name sits: the line's type, who says it, and its tools. */
+.line-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin: -2px 0 4px;
+  font-family: var(--font-sans);
+  font-style: normal;
+  text-align: left;
+}
+
+.line-select {
+  appearance: none;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 0 26px 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2369645c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center;
+  font: 500 12.5px/1 var(--font-sans);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color var(--fast) var(--ease);
+}
+
+.line-select:hover:not(:disabled) {
+  border-color: var(--edge-strong);
+}
+
+.line-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The speaker's name, now a dropdown: same colour and tracking as the name. */
+.speaker-select {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: hsl(var(--hue, 20) 42% 31%);
+}
+
+.speaker-select.is-missing {
+  border-style: dashed;
+  color: var(--bad);
+}
+
+.speaker-select option,
+.speaker-select optgroup {
+  color: var(--ink);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.new-character {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.new-character-input {
+  width: 150px;
+  padding-right: 9px;
+  background-image: none;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: text;
+}
+
+.line-tools {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* Phones: type and tools on one row, the speaker on its own row below. */
+@media (max-width: 640px) {
+  .line-controls .speaker-select,
+  .line-controls .new-character {
+    order: 2;
+    flex: 1 1 100%;
+  }
+
+  .new-character-input {
+    flex: 1;
+    width: auto;
+  }
+}
+
+.line-tool {
+  width: 34px;
+  height: 34px;
+  color: var(--muted);
+}
+
+.line-tool[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.line-delete:hover:not(:disabled) {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.script-text.is-editable {
+  cursor: text;
+  border-radius: 3px;
+}
+
+.script-text.is-editable:hover {
+  background: var(--paper);
+  box-shadow: 0 0 0 3px var(--paper);
+}
+
+/* The text field looks like the line itself, with a faint ring while typing. */
+.inline-text {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: #fff;
+  color: inherit;
+  text-align: inherit;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+  box-shadow:
+    0 0 0 4px #fff,
+    0 0 0 5px var(--accent-line);
+}
+
+.inline-text:focus {
+  box-shadow:
+    0 0 0 4px #fff,
+    0 0 0 5px var(--accent);
+}
+
+/* The counts of each reason in the review bar; one picks what J and K walk. */
+.flag-filters {
+  order: 3;
+  flex-basis: 100%;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.flag-filter {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  font: 600 12.5px/1 var(--font-sans);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+
+.flag-filter .nums {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.flag-filter:hover {
+  border-color: var(--edge-strong);
+}
+
+.flag-filter[aria-pressed="true"] {
+  border-color: var(--flag-line);
+  background: var(--flag-soft);
+  color: var(--flag);
+  box-shadow: inset 0 0 0 1px var(--flag-line);
+}
+
+.flag-filter[aria-pressed="true"] .nums {
   color: var(--flag);
 }
 
@@ -1770,164 +2012,6 @@
   opacity: 0.5;
 }
 
-/* Inline editor */
-
-.line-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-3);
-  margin: 0 0 var(--s-3);
-  padding: var(--s-4);
-  border: 1px solid var(--edge-strong);
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 var(--radius) var(--radius);
-  background: #fff;
-  box-shadow: var(--shadow);
-  font-family: var(--font-sans);
-  animation: editor-in var(--medium) var(--ease);
-}
-
-@keyframes editor-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-}
-
-.editor-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2);
-}
-
-.editor-row .segmented {
-  flex-wrap: nowrap;
-  min-width: 0;
-}
-
-.editor-row .segmented button {
-  white-space: nowrap;
-}
-
-.editor-close {
-  width: 36px;
-  height: 36px;
-}
-
-.speaker-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.speaker-chips {
-  gap: 6px;
-}
-
-.speaker-current {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--edge-strong);
-  border-radius: var(--radius-pill);
-  background: var(--paper);
-}
-
-.speaker-current.is-missing {
-  border-style: dashed;
-  background: #fff;
-  color: var(--bad);
-  font-weight: 600;
-  font-size: var(--text-sm);
-}
-
-.speaker-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
-  background: #fff;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.speaker-chip:hover:not(:disabled) {
-  border-color: var(--edge-strong);
-}
-
-.speaker-other {
-  color: var(--muted);
-}
-
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
-
-.picker-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 220px;
-  overflow-y: auto;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-}
-
-.picker-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: var(--tap);
-  padding: 0 14px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.picker-list li:last-child .picker-item {
-  border-bottom: 0;
-}
-
-.picker-item:hover,
-.picker-item.is-selected {
-  background: var(--paper);
-}
-
-.editor-text {
-  font-family: var(--font-serif);
-  font-size: 17px;
-  white-space: pre-wrap;
-  tab-size: 4;
-}
-
-.editor-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.editor-actions .btn-ghost {
-  padding: 0 10px;
-}
-
-.editor-actions .btn-ghost[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-text);
-}
-
 /* Split: the line's words, each one a place the new line can start. */
 .split-mode {
   display: flex;
@@ -1972,14 +2056,6 @@
 .split-word:focus-visible {
   background: var(--accent-soft);
   box-shadow: inset 2px 0 0 var(--accent);
-}
-
-.section-break {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2);
-  padding-top: var(--s-3);
-  border-top: 1px dashed var(--line-strong);
 }
 
 .review-footer {
@@ -2280,43 +2356,60 @@
 .cast {
   display: flex;
   flex-direction: column;
-  gap: var(--s-6);
+  gap: var(--s-8);
+  padding-bottom: var(--s-8);
 }
 
+/* The cast link is the hero of the page. */
 .cast-link {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
-  padding: var(--s-6);
+  padding: var(--s-8) var(--s-6);
 }
 
 .cast-link-copy {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  max-width: 560px;
 }
 
 .cast-link-copy h2 {
-  font-size: clamp(26px, 5vw, 34px);
+  font-size: clamp(30px, 6vw, 42px);
+  line-height: 1.08;
 }
 
 .link-ticket {
-  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 6px 6px 16px;
   border: 1px dashed var(--edge-strong);
   border-radius: var(--radius);
   background: var(--paper);
 }
 
 .link-ticket-url {
-  font-size: 14px;
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
   letter-spacing: 0;
   text-transform: none;
   color: var(--ink);
   word-break: break-all;
 }
 
-.cast-link-actions {
-  gap: var(--s-3);
+.link-ticket-copy {
+  flex: none;
+}
+
+.cast-link-share {
+  align-self: flex-start;
+}
+
+.cast-link-reset {
+  align-self: flex-start;
 }
 
 .reset-confirm {
@@ -2328,8 +2421,20 @@
   background: var(--bad-soft);
 }
 
+@media (max-width: 640px) {
+  .cast-link {
+    padding: var(--s-6) var(--s-4);
+  }
+
+  .cast-link-share {
+    align-self: stretch;
+  }
+}
+
+/* Call sheet: one quiet row per part, read-only. */
+
 .call-sheet,
-.open-roles {
+.record-yourself {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -2344,186 +2449,115 @@
 }
 
 .call-sheet-head h2,
-.open-roles h2 {
+.record-yourself h2 {
   font-size: clamp(22px, 4vw, 28px);
 }
 
-.call-sheet-empty {
-  padding: var(--s-5);
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius-lg);
-  text-align: center;
-}
-
-.actor-list {
+.sheet-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: #fff;
-  box-shadow: var(--shadow-sm);
+  border-top: 1px solid var(--line-strong);
 }
 
-.actor-row {
+.sheet-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--s-3);
-  padding: var(--s-4);
+  min-height: 60px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
 }
 
-.actor-row + .actor-row {
-  border-top: 1px solid var(--line);
-}
-
-.actor-main {
+.sheet-part {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-.actor-name {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.actor-progress {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  max-width: 340px;
-}
-
-.actor-progress .progress {
-  flex: 1;
-}
-
-.actor-progress .mono {
-  color: var(--ink-soft);
-}
-
-.actor-actions {
-  display: flex;
-  align-items: center;
   gap: 2px;
 }
 
-/* A quiet badge for an actor who's recorded everything. */
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 22px;
-  padding: 0 9px;
-  border: 1px solid #cfe3d6;
-  border-radius: var(--radius-pill);
-  background: var(--good-soft);
-  color: var(--good);
-  font: 600 11px/1 var(--font-sans);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  animation: badge-in var(--medium) var(--ease) both;
+.sheet-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
 }
 
-@keyframes badge-in {
-  from {
-    opacity: 0;
-  }
+.sheet-who {
+  color: var(--ink-soft);
 }
 
-.status-done {
-  background: linear-gradient(90deg, rgba(234, 243, 237, 0.7), transparent 55%);
+.sheet-who.muted {
+  color: var(--muted);
 }
 
-.menu {
-  position: relative;
-}
-
-.menu summary {
-  list-style: none;
-}
-
-.menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.menu-items {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  z-index: 15;
-  min-width: 230px;
-  padding: 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  background: #fff;
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-}
-
-.menu-items button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: var(--tap);
-  padding: 0 12px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  text-align: left;
-  font-weight: 600;
-  font-size: 15px;
-  cursor: pointer;
-}
-
-.menu-items button:hover {
-  background: var(--paper);
-}
-
-.role-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
-}
-
-@media (min-width: 720px) {
-  .role-list {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.role-row {
+.sheet-progress {
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  min-height: 52px;
-  padding: 4px 4px 4px 14px;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
 }
 
-.cast-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s-2) var(--s-6);
-  padding-bottom: var(--s-8);
+.sheet-progress .mono {
+  min-width: 52px;
+  text-align: right;
+  color: var(--ink-soft);
 }
 
-.cast-footer .quiet-link {
+.sheet-bar {
+  width: 88px;
+}
+
+.sheet-done {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  color: var(--good);
+  font-weight: 600;
+}
+
+.sheet-record {
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .sheet-bar {
+    width: 48px;
+  }
+
+  .sheet-progress .mono {
+    min-width: 0;
+  }
+}
+
+/* Record a part yourself. */
+
+.record-yourself {
+  padding: var(--s-5);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: #fff;
+}
+
+.record-yourself-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--s-2);
+}
+
+.record-yourself-form .field {
+  min-width: 220px;
+}
+
+@media (max-width: 640px) {
+  .record-yourself-form .field,
+  .record-yourself-form .btn {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
 }
 
 .wrap-banner {
@@ -2580,16 +2614,6 @@
     opacity: 0;
     transform: translate(var(--drift), 70vh) rotate(var(--spin));
   }
-}
-
-/* Actor form (by hand) */
-
-.role-picker {
-  border: 0;
-  margin: 0;
-  padding: 0;
-  max-height: 260px;
-  overflow-y: auto;
 }
 
 /* ======================================================================
@@ -2961,7 +2985,7 @@
 .record-main {
   max-width: 720px;
   margin: 0 auto;
-  padding: var(--s-4) var(--s-4) calc(200px + var(--safe-bottom));
+  padding: var(--s-4) var(--s-4) calc(244px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -2984,7 +3008,7 @@
 }
 
 .line-list > li {
-  scroll-margin: 110px 0 210px;
+  scroll-margin: 110px 0 254px;
 }
 
 .line-card {
@@ -3094,6 +3118,56 @@
 .line-card.is-current .my-text,
 .line-card.is-recording .my-text {
   font-size: 23px;
+}
+
+/* Live highlighting while a take records: said words in ink with a soft red underline, the next
+   word hinted, the rest quieter but readable. Colour changes only, no movement. */
+.my-text.is-live .lw {
+  color: var(--muted);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: transparent;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+  transition:
+    color var(--fast) var(--ease),
+    text-decoration-color var(--fast) var(--ease);
+}
+
+.my-text.is-live .lw-lit {
+  color: var(--ink);
+  text-decoration-color: var(--accent-line);
+}
+
+.my-text.is-live .lw-next {
+  color: var(--ink);
+  text-decoration-color: var(--line-strong);
+}
+
+.lw-dir {
+  color: var(--muted);
+  font-size: 0.82em;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.live-hint {
+  margin-top: calc(var(--s-1) * -1);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.take-held {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 12px;
+  border: 1px solid var(--flag-line);
+  border-radius: var(--radius);
+  background: var(--check-soft);
+  color: var(--check);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .line-actions {
@@ -3230,6 +3304,31 @@
   font-size: 14px;
   white-space: nowrap;
   color: var(--ink);
+}
+
+.dock-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: var(--s-5);
+  margin-top: calc(var(--s-1) * -1);
+  margin-bottom: -10px;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+}
+
+.dock-option {
+  gap: var(--s-2);
+}
+
+.dock-option input {
+  width: 18px;
+  height: 18px;
+}
+
+.dock-option.is-off {
+  color: var(--faint);
+  cursor: default;
 }
 
 .waveform {
@@ -3399,24 +3498,30 @@
   gap: 10px var(--s-4);
 }
 
-.my-part-settings {
+/* Role and speed: small pill selects, like the scene picker. */
+.pill-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.pill-select .input {
+  min-height: 36px;
+  width: auto;
+  max-width: 220px;
+  padding: 4px 34px 4px 12px;
+  border-width: 1.5px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.my-lines-setting {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--s-2) var(--s-5);
-}
-
-.gap-setting {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 200px;
-}
-
-.gap-setting input {
-  accent-color: var(--ink);
+  gap: var(--s-2) var(--s-4);
   width: 100%;
-  min-height: 32px;
 }
 
 .score-toggle {
@@ -3532,10 +3637,28 @@
   font-weight: 500;
 }
 
-.lyric.kind-stage_direction,
 .lyric.kind-heading {
   padding: 4px 12px;
   color: var(--faint);
+}
+
+/* Stage directions play too, in the narrator's voice. */
+.lyric.kind-stage_direction {
+  color: var(--faint);
+}
+
+.lyric.kind-stage_direction .lyric-button {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.lyric.kind-stage_direction.is-current {
+  color: var(--ink-soft);
+}
+
+.lyric.kind-stage_direction.is-current .lyric-text {
+  font-size: 16px;
+  font-weight: 400;
 }
 
 .lyric.kind-stage_direction .lyric-text {
@@ -3556,22 +3679,15 @@
   border-radius: 4px 14px 14px 4px;
 }
 
+.is-my-part .lyric.is-skipped .lyric-text {
+  opacity: 0.55;
+}
+
 .is-my-part .lyric.is-mine.is-current .lyric-button {
   background: var(--accent-soft);
   box-shadow:
     inset 3px 0 0 var(--accent),
     0 0 0 1px var(--accent-line);
-}
-
-.lyric.in-ab::before {
-  content: "";
-  position: absolute;
-  left: -8px;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
 }
 
 .gap-meter {
@@ -3682,16 +3798,6 @@
   cursor: not-allowed;
 }
 
-.ab-button {
-  position: relative;
-  flex-direction: column;
-  gap: 0;
-}
-
-.ab-label {
-  font: 600 10px/1 var(--font-sans);
-}
-
 .practice-summary .summary-line {
   font-size: 15px;
 }
@@ -3718,6 +3824,10 @@
    ====================================================================== */
 
 @media (prefers-reduced-motion: reduce) {
+  .my-text.is-live .lw {
+    transition: none;
+  }
+
   .rec-dot,
   .record-button.is-recording {
     animation: none;
@@ -3763,6 +3873,10 @@
     display: none;
   }
 
+  .pill-select .input {
+    max-width: 170px;
+  }
+
   .section-nav .input {
     max-width: 150px;
   }
@@ -3775,17 +3889,6 @@
 @media (max-width: 640px) {
   .hide-sm {
     display: none;
-  }
-}
-
-@media (max-width: 640px) {
-  .nudge-btn {
-    width: 40px;
-    padding: 0;
-  }
-
-  .actor-row {
-    padding: var(--s-3);
   }
 }
 

@@ -2,8 +2,9 @@ import { API_URL, request, type Auth } from "./client";
 import type { TakeUploadResult } from "./actor";
 import type { SplitSecond } from "../routes/director/lineJoin";
 import type {
-  CastMember,
+  CallSheetCharacter,
   Character,
+  FlagCode,
   Line,
   LineAudio,
   LineAudioApi,
@@ -18,6 +19,28 @@ import type {
   SectionLine,
   User,
 } from "./types";
+
+export interface DeletedLine {
+  line: Line;
+  /** The line it sat after (null: it was the first line). */
+  afterLineId: string | null;
+  /** Its scene, when the line was the scene's only line and the scene went with it. */
+  removedSection: Section | null;
+}
+
+export interface InsertLine {
+  afterLineId: string | null;
+  sectionId?: string;
+  newSection?: { title: string; act?: string | null; scene?: string | null };
+  kind: LineKind;
+  characterId?: string | null;
+  text: string;
+  flagged?: boolean;
+  flagCode?: FlagCode | null;
+  flagReason?: string | null;
+  sourceLine?: number | null;
+  sourcePage?: number | null;
+}
 
 const director: Auth = { kind: "director" };
 const none: Auth = { kind: "none" };
@@ -75,7 +98,11 @@ export const script = {
       auth: director,
       json: { text },
     }),
-  updateLine: (lineId: string, input: { characterId?: string | null; kind?: LineKind; text?: string }) =>
+  /** An edit clears the line's flag; undo sends `flagged` (with its code and reason) to put it back. */
+  updateLine: (
+    lineId: string,
+    input: { characterId?: string | null; kind?: LineKind; text?: string; flagged?: boolean; flagCode?: FlagCode | null; flagReason?: string | null },
+  ) =>
     request<{ line: Line }>(`/lines/${lineId}`, { method: "PATCH", auth: director, json: input }),
   /** `second` restores a line that a join removed (undo); without it the new line copies this one. */
   splitLine: (lineId: string, at: number, second?: SplitSecond) =>
@@ -85,6 +112,11 @@ export const script = {
   /** Joins the line into the one before it, which keeps its id, kind and speaker. */
   mergePrevious: (lineId: string) =>
     request<{ line: Line }>(`/lines/${lineId}/merge-previous`, { method: "POST", auth: director }),
+  /** Deletes a line without recordings; the answer is what `insertLine` needs to undo it. */
+  deleteLine: (lineId: string) =>
+    request<DeletedLine>(`/lines/${lineId}`, { method: "DELETE", auth: director }),
+  insertLine: (productionId: string, input: InsertLine) =>
+    request<{ line: Line }>(`/productions/${productionId}/lines`, { auth: director, json: input }),
   sectionBreak: (lineId: string, input: { title: string; act?: string; scene?: string }) =>
     request<{ sections: Section[] }>(`/lines/${lineId}/section-break`, { auth: director, json: input }),
   resolveLine: (lineId: string) =>
@@ -106,26 +138,16 @@ export const script = {
     request<{ characters: Character[] }>(`/characters/${characterId}/merge`, { auth: director, json: { intoId } }),
 };
 
-export interface CastInput {
-  name: string;
-  email?: string | null;
-  phone?: string | null;
-  characterIds: string[];
-}
-
+/** The director's cast page: a read-only call sheet, and recording a part themselves. */
 export const cast = {
-  list: (productionId: string) =>
-    request<{ cast: CastMember[]; uncastCharacterIds: string[] }>(`/productions/${productionId}/cast`, {
+  callSheet: (productionId: string) =>
+    request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
+  /** Takes a free part (or one already theirs) for the director's own cast member; open `/i/<inviteToken>` to record. */
+  recordAs: (productionId: string, characterId: string) =>
+    request<{ inviteToken: string; inviteUrl: string }>(`/productions/${productionId}/record-as`, {
       auth: director,
+      json: { characterId },
     }),
-  create: (productionId: string, input: CastInput) =>
-    request<{ member: CastMember }>(`/productions/${productionId}/cast`, { auth: director, json: input }),
-  update: (actorId: string, input: Partial<CastInput>) =>
-    request<{ member: CastMember }>(`/cast/${actorId}`, { method: "PATCH", auth: director, json: input }),
-  resetLink: (actorId: string) =>
-    request<{ member: CastMember }>(`/cast/${actorId}/reset-link`, { method: "POST", auth: director }),
-  nudged: (actorId: string) =>
-    request<{ member: CastMember }>(`/cast/${actorId}/nudged`, { method: "POST", auth: director }),
 };
 
 /** The one link the whole cast can use to pick their characters. */

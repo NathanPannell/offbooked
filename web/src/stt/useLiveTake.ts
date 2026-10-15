@@ -1,0 +1,202 @@
+import { useEffect, useRef, useState } from "react";
+import { CAPTURE_RATE, type LiveCapture } from "../audio/liveCapture";
+import {
+  applyPass,
+  decideAdvance,
+  matchedCount,
+  nextPassInterval,
+  passWindowSeconds,
+  rmsDb,
+  segmentLine,
+  startProgress,
+  startVad,
+  vadStep,
+  type AdvanceDecision,
+} from "./live";
+import { prepareForAsr } from "./prepare";
+import type { SttSession } from "./session";
+
+const FRAME_SAMPLES = CAPTURE_RATE / 50; // 20 ms
+const MIN_AUDIO_SAMPLES = CAPTURE_RATE / 2;
+const MIN_NEW_SAMPLES = CAPTURE_RATE / 5;
+const LEVEL_POLL_MS = 50;
+
+export interface LiveTakeView {
+  lineId: string;
+  /** `live`: words light up as they're heard. `energy`: no transcript, only the mic level. */
+  mode: "live" | "energy";
+  /** Tokens [0, cursor) of the line count as spoken. */
+  cursor: number;
+}
+
+export interface LiveTakeStats {
+  passes: number;
+  medianMs: number | null;
+  maxMs: number | null;
+}
+
+interface Options {
+  recording: { lineId: string; startedAt: number } | null;
+  capture: LiveCapture | null;
+  analyser: AnalyserNode | null;
+  stt: SttSession;
+  /** The text of the line being recorded. */
+  text: string;
+  /** When false, words still light up but the take never stops by itself. */
+  autoAdvance: boolean;
+  onDecision: (decision: Exclude<AdvanceDecision, "wait">, lineId: string, mode: LiveTakeView["mode"]) => void;
+}
+
+/**
+ * Follows the take that is recording: re-transcribes the growing audio every few hundred ms in the
+ * speech worker, aligns it with the line to light up spoken words, and watches the mic level to
+ * stop the take when the actor has finished. Without the model it only watches the level.
+ */
+export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvance, onDecision }: Options): LiveTakeView | null {
+  const [view, setView] = useState<LiveTakeView | null>(null);
+  const autoRef = useRef(autoAdvance);
+  autoRef.current = autoAdvance;
+  const decideRef = useRef(onDecision);
+  decideRef.current = onDecision;
+  const textRef = useRef(text);
+  textRef.current = text;
+
+  const lineId = recording?.lineId ?? null;
+  const startedAt = recording?.startedAt ?? null;
+
+  useEffect(() => {
+    if (!lineId) {
+      setView(null);
+      return;
+    }
+    const { tokens } = segmentLine(textRef.current);
+    let progress = startProgress(tokens.length);
+    let vad = startVad();
+    let covered = 0; // samples the newest finished pass covered
+    let decided = false;
+    let stopped = false;
+    let mode: LiveTakeView["mode"] = capture && stt.getState().status === "ready" ? "live" : "energy";
+    const latencies: number[] = [];
+    const controller = new AbortController();
+    const cleanups: (() => void)[] = [];
+
+    const publish = () => setView((v) => (v && v.lineId === lineId && v.cursor === progress.cursor && v.mode === mode ? v : { lineId, mode, cursor: progress.cursor }));
+    publish();
+
+    const evaluate = () => {
+      if (decided || stopped || !autoRef.current) return;
+      const decision = decideAdvance({
+        mode,
+        totalTokens: tokens.length,
+        cursor: progress.cursor,
+        matched: matchedCount(progress),
+        speechMs: vad.speechMs,
+        silenceMs: vad.silenceMs,
+        caughtUp: covered >= (vad.lastSpeechAtMs / 1000) * CAPTURE_RATE,
+      });
+      if (decision === "wait") return;
+      decided = true;
+      decideRef.current(decision, lineId, mode);
+    };
+
+    // Mic level: from the captured samples, or by polling the level meter where AudioWorklet is missing.
+    if (capture) {
+      capture.begin();
+      cleanups.push(() => capture.end());
+      cleanups.push(
+        capture.onChunk((chunk) => {
+          for (let start = 0; start < chunk.length; start += FRAME_SAMPLES) {
+            const end = Math.min(chunk.length, start + FRAME_SAMPLES);
+            vad = vadStep(vad, rmsDb(chunk, start, end), ((end - start) / CAPTURE_RATE) * 1000);
+          }
+          evaluate();
+        }),
+      );
+    } else if (analyser) {
+      const buffer = new Float32Array(analyser.fftSize);
+      let last = performance.now();
+      const id = setInterval(() => {
+        const now = performance.now();
+        analyser.getFloatTimeDomainData(buffer);
+        vad = vadStep(vad, rmsDb(buffer), now - last);
+        last = now;
+        evaluate();
+      }, LEVEL_POLL_MS);
+      cleanups.push(() => clearInterval(id));
+    }
+
+    // Transcription passes, one at a time, paced by how long the last one took.
+    let wake: (() => void) | null = null;
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const id = setTimeout(resolve, ms);
+        wake = () => {
+          clearTimeout(id);
+          resolve();
+        };
+      });
+    cleanups.push(() => wake?.());
+
+    const loop = async () => {
+      let latency = 400;
+      while (!stopped && capture) {
+        const began = performance.now();
+        const ready = stt.getState().status === "ready";
+        if (ready && mode === "energy") {
+          mode = "live"; // The model finished loading during this take.
+          publish();
+        }
+        const total = capture.length;
+        if (ready && vad.speechMs > 0 && total >= MIN_AUDIO_SAMPLES && total - covered >= MIN_NEW_SAMPLES) {
+          const { full, window } = passWindowSeconds(latency);
+          const windowed = total > full * CAPTURE_RATE;
+          const prepared = prepareForAsr(capture.slice(windowed ? total - window * CAPTURE_RATE : 0, total));
+          if (!prepared.noSpeech) {
+            const passStart = performance.now();
+            const heard = await stt.transcribeLive(prepared.audio, controller.signal);
+            if (stopped) return;
+            if (heard !== null) {
+              latency = performance.now() - passStart;
+              latencies.push(latency);
+              progress = applyPass(progress, tokens, heard, windowed);
+            }
+          }
+          covered = total;
+          publish();
+          evaluate();
+        }
+        await sleep(Math.max(0, nextPassInterval(latency) - (performance.now() - began)));
+      }
+    };
+    void loop();
+
+    return () => {
+      stopped = true;
+      controller.abort();
+      cleanups.forEach((c) => c());
+      if (latencies.length > 0) {
+        const stats = summarize(latencies);
+        lastStats = stats;
+        console.debug(`[live stt] ${stats.passes} passes, median ${stats.medianMs} ms, max ${stats.maxMs} ms`);
+      }
+    };
+  }, [lineId, startedAt, capture, analyser, stt]);
+
+  return view && view.lineId === lineId ? view : null;
+}
+
+let lastStats: LiveTakeStats | null = null;
+
+/** Latency of the last take's live passes, for checking on a device. */
+export function lastLiveTakeStats(): LiveTakeStats | null {
+  return lastStats;
+}
+
+export function summarize(latencies: number[]): LiveTakeStats {
+  const sorted = [...latencies].sort((a, b) => a - b);
+  return {
+    passes: sorted.length,
+    medianMs: sorted.length ? Math.round(sorted[Math.floor(sorted.length / 2)]) : null,
+    maxMs: sorted.length ? Math.round(sorted[sorted.length - 1]) : null,
+  };
+}

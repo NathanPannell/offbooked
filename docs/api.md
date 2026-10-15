@@ -24,8 +24,11 @@ interface Line {
   id: string; seq: number; sectionId: string; kind: LineKind;
   characterId: string | null;            // required for dialogue, null otherwise
   text: string;
-  flagged: boolean; flagReason: string | null;   // parser uncertainty, shown in the review UI
+  flagged: boolean;                      // the parser wants the director to check this line
+  flagCode: FlagCode | null;             // set when flagged; the review UI shows FLAG_LABELS[flagCode]
+  flagReason: string | null;             // optional short detail, e.g. "Cued KING, assigned to CLAUDIUS"
 }
+type FlagCode = "speaker" | "missed_cue" | "direction" | "text" | "heading" | "backup";
 interface Take {
   id: string; lineId: string; audioUrl: string; durationMs: number; createdAt: string;
   stt: { transcript: string; accuracy: number; ops: WordOp[] } | null;   // accuracy 0..1, from on-device STT
@@ -79,14 +82,14 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 | POST | `/api/productions/:id/script` | `multipart/form-data` with a `file` field (PDF, Word `.docx` or plain text, ≤ 20 MB; the type is detected from the bytes) **or** JSON `{ text }` | `202 { scriptStatus: "parsing" }`. Parsing runs in the background. Replacing a script with recordings is refused (409). |
 | GET | `/api/productions/:id/script` | | `{ status, error, sections: Section[], characters: Character[], lines: Line[], flaggedCount }` |
 | PATCH | `/api/lines/:id` | `{ characterId?, kind?, text? }` | `{ line }` |
-| POST | `/api/lines/:id/split` | `{ at }` (character offset) | `{ lines: [Line, Line] }` |
+| POST | `/api/lines/:id/split` | `{ at, second? }` (character offset; `second: { kind, characterId, flagged, flagCode, flagReason, sourceLine, sourcePage }` restores a joined line exactly when undoing a join) | `{ lines: [Line, Line] }` |
 | POST | `/api/lines/:id/merge-next` | | `{ line }` |
 | POST | `/api/lines/:id/section-break` | `{ title, act?, scene? }` | `{ sections }`. Starts a new section at this line. |
 | PATCH | `/api/sections/:id` | `{ title }` | `{ section }` |
 | POST | `/api/productions/:id/characters` | `{ name }` | `{ character }` |
 | PATCH | `/api/characters/:id` | `{ name }` | `{ character }` |
 | POST | `/api/characters/:id/merge` | `{ intoId }` | `{ characters }`. Moves lines and aliases to `intoId`, removes this one. |
-| POST | `/api/lines/:id/resolve` | | `{ line }`. Clears `flagged`. |
+| POST | `/api/lines/:id/resolve` | | `{ line }`. Clears `flagged`, `flagCode` and `flagReason`, as do `PATCH`, joins and merges. |
 
 ## Cast (director)
 
@@ -263,9 +266,47 @@ interface RunThrough {
 
 - Source rules match the render: the current take's normalized audio (normalized on first use and cached with the render's normalized FLAC, as `takes.stream_key`), else the TTS clip (same voice and cache key as the render; every clip now gets its `.m4a` alongside the FLAC), else silence of `clamp(words × 380 ms, 1200, 8000)`.
 - TTS synthesis runs by priority: play (a GET) before prefetch (`?prefetch=1`, warm, the actor lines page's cue wait) before cue warm-ups before the render. Background work (cues, renders) uses at most `TTS_CONCURRENCY - 1` slots, so a listener's line waits for at most one clip in progress. Concurrent requests for one clip share one synthesis, at the most urgent priority asked.
-- The client plays gaps itself: 350 ms between lines in a section, 1200 ms at a section change or an A–B jump back.
+- The client plays gaps itself: 350 ms between lines in a section, 1200 ms at a section change.
+
+### Run-through v2 (2026-10-15)
+
+- Stage directions play too, read by the narrator: one reserved TTS voice (`NARRATOR_VOICE_ID`, VCTK p225) that no character is ever given. The line-audio GET and warm accept `stage_direction` line ids as well as dialogue (headings are still 404 / left out), and `RunThrough.sources` lists directions. A direction is spoken without its brackets; one with nothing to say comes back `{ audioUrl: null, durationMs: 0, source: "none" }`. Takes never apply to directions.
+- `[Bracketed]` directions inside a dialogue line are not read at all: the character's TTS voice leaves them out (as before; an unclosed `[` now runs to the end of its line), and a recorded take is played as recorded.
+- A GET with `?prefetch=1` now waits at most 8 s (a play GET still waits 20 s); the player asks for a prefetched line again from the next line instead of retrying.
+- Takes are cut to their speech when normalized (`render/trim.ts`): leading and trailing silence and room noise go, with 120 ms kept before the first sound and 200 ms after the last; nothing inside the speech is cut. `LineAudio.durationMs` is the trimmed length. Takes normalized before this are trimmed again on first use (the normalized key now ends in `.t2.flac`/`.t2.m4a`), and `RENDER_SETTINGS.version` is 3, so renders made before are stale.
 
 ### Joining lines (2026-10-15)
 
 - `POST /api/lines/:id/merge-previous` → `{ line }`: joins this line into the one above it. `merge-next` joins the next line into this one. Either way the upper line keeps its id, kind and speaker, the texts are joined with a newline, and the lower line must have no recordings (409 `has_recordings`).
-- The parser keeps each speech as one dialogue line: a stage direction printed inside a speech becomes its own stage-direction line before the speech (or after it, when it follows the last words).
+- The parser keeps each speech as one dialogue line. A stage direction printed inside a speech, or on its cue line ("MACBETH, to the Servant"), stays in the line's text in square brackets, whatever the script used (parentheses, italics, underscores or nothing): `[to the Servant] Now go to the door… [Servant exits.] Was it not yesterday…`. Directions on their own line between speeches stay separate stage-direction lines. TTS skips bracketed text.
+
+### Flag codes (2026-10-15)
+
+Every flagged line has one standard `flagCode`; `flagReason` is an optional short detail and may be `null`. The labels live in `FLAG_LABELS` in `backend/src/parse/flags.ts`:
+
+| `flagCode` | Label | Used for |
+| --- | --- | --- |
+| `speaker` | Confirm the speaker | Speaker inferred from the content rather than a cue, joint or garbled cues, a character who speaks only once, lines cued X assigned to Y, an unclear speaker after an exit |
+| `missed_cue` | Check for a missed speaker | A very long speech that may hold two speakers, a speech split at a cue the parser missed |
+| `direction` | Review stage direction | No speaker found so the text became a direction, a direction that may be dialogue or the other way round |
+| `text` | Check the text against the original | Text that differs from or wasn't found in the source, skipped or unlabelled lines, stray numbers inside speech |
+| `heading` | Check the scene heading | An act or scene number that was inferred |
+| `backup` | Check this passage | Read by the backup (heuristic) parser |
+
+A speech that carries on after a stage direction, page break or heading without a new cue keeps the previous speaker and is not flagged. Migration `006_flag_codes.sql` gave older flags a code by matching their text.
+
+### Deleting and inserting lines (2026-10-15)
+
+- `DELETE /api/lines/:id` → `{ line, afterLineId, removedSection }`: deletes a line with no recordings (409 `has_recordings` otherwise) and renumbers the lines after it. `line` is the deleted line as it was, `afterLineId` the line it sat after (null when it was first), and `removedSection` its scene (`Section`) when the line was the scene's only line and the scene went with it, else null. Together they are what undo needs.
+- `POST /api/productions/:id/lines` with `{ afterLineId: string | null, sectionId?, newSection?: { title, act?, scene? }, kind, characterId?, text, flagged?, flagCode?, flagReason?, sourceLine?, sourcePage? }` → `{ line }`: inserts a line after `afterLineId` (null: at the start). It goes in `sectionId`, which must be the scene of the line before or after the place (400 otherwise); or in a new scene `newSection`, which can only start between two scenes; or, with neither, the scene of the line before (else the one after). A dialogue line without `characterId` gets a guessed speaker, as with `PATCH`. The web app uses it to undo a delete: `sectionId` is the deleted line's scene, or `newSection` from `removedSection`.
+
+### Cast page: call sheet and recording a part yourself (2026-10-15)
+
+The director's cast page shows the cast link, a read-only call sheet and a way to record a part yourself. It no longer assigns parts, makes per-actor links or collects emails and phones; the `/api/productions/:id/cast` and `/api/cast/:actorId/*` routes stay for now but the web app doesn't use them.
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, takenBy: string \| null, mine: boolean }[] }`: every character with dialogue, biggest parts first. `takenBy` is the first name of whoever took the part; `mine` is true for a part the director took with `record-as`. `linesRecorded` counts the cast's own takes only (not stand-ins or TTS). |
+| POST | `/api/productions/:id/record-as` | director (own production) | `{ characterId }` → `{ inviteToken, inviteUrl }`. The director gets one cast member per production (`actors.director_user_id`), created on first use with their first name and already opened, so `/i/<inviteToken>` goes straight to recording. The character is added to that cast member unless it is already theirs. 409 `character_taken` if someone else has the part; 404 for a character outside the production; 400 for a missing or malformed id. |
+
+- The director's cast member records ordinary actor takes (`recorded_by = 'actor'`), so they count as progress and the part can't be claimed through the cast link. No "finished all lines" email is sent for it.

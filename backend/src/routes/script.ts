@@ -3,15 +3,16 @@ import { ownedProduction, requireDirector, type Director } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
+import { classifyFlagReason, FLAG_CODES, isFlagCode, type FlagCode } from "../parse/flags.ts";
 import { body, idOf, idParam, optionalString, requiredString } from "../input.ts";
-import { charactersOf, characterView, lineView, sectionsOf, sectionView, type CharacterRow, type LineRow } from "../views.ts";
+import { charactersOf, characterView, lineView, sectionsOf, sectionView, type CharacterRow, type LineRow, type SectionRow } from "../views.ts";
 
 const MAX_LINE_CHARS = 10_000;
 const KINDS = ["dialogue", "stage_direction", "heading"] as const;
 
 async function ownedLine(sql: Sql, user: Director, lineId: string): Promise<LineRow & { productionId: string }> {
   const [line] = await sql<(LineRow & { productionId: string })[]>`
-    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.production_id
+    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_code, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.production_id
     from lines l join productions p on p.id = l.production_id
     where l.id = ${lineId} and p.owner_id = ${user.id}`;
   if (!line) throw notFound("Line not found.");
@@ -28,7 +29,7 @@ async function ownedCharacter(sql: Sql, user: Director, characterId: string): Pr
 }
 
 const selectLine = (sql: Sql, id: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_reason, current_take_id, source_line, source_page from lines where id = ${id}`.then((r) => lineView(r[0]!));
+  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page from lines where id = ${id}`.then((r) => lineView(r[0]!));
 
 // Drops sections left empty by an edit and renumbers the rest in script order.
 async function tidySections(sql: Tx, productionId: string): Promise<void> {
@@ -36,6 +37,18 @@ async function tidySections(sql: Tx, productionId: string): Promise<void> {
   await sql`update sections s set seq = r.rn from (
               select id, row_number() over (order by seq) as rn from sections where production_id = ${productionId}) r
             where s.id = r.id and s.seq <> r.rn`;
+}
+
+// A flag sent back by undo (split's `second`, an insert, or a PATCH that restores an edit). A client
+// that sends no code gets the reason's nearest one, else the usual one for the kind.
+function flagFrom(b: Record<string, unknown>, kind: LineRow["kind"]): { flagged: boolean; flagCode: FlagCode | null; flagReason: string | null } {
+  const flagged = b.flagged === true;
+  if (!flagged) return { flagged, flagCode: null, flagReason: null };
+  if (b.flagCode !== undefined && b.flagCode !== null && !isFlagCode(b.flagCode)) throw badRequest(`flagCode must be one of ${FLAG_CODES.join(", ")}.`);
+  const flagReason = optionalString(b, "flagReason", 500) ?? null;
+  const kindCode: FlagCode = kind === "dialogue" ? "speaker" : kind === "heading" ? "heading" : "direction";
+  const flagCode = isFlagCode(b.flagCode) ? b.flagCode : (flagReason && classifyFlagReason(flagReason)) || kindCode;
+  return { flagged, flagCode, flagReason };
 }
 
 const isUniqueViolation = (err: unknown) => (err as { code?: string }).code === "23505";
@@ -68,8 +81,10 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       characterId = guess.characterId;
       text = guess.text;
     }
-    await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = false, flag_reason = null, updated_at = now()
-              where id = ${line.id}`;
+    // An edit settles the line; an undo of an edit sends `flagged` (and its code) back.
+    const flag = b.flagged === undefined ? { flagged: false, flagCode: null, flagReason: null } : flagFrom(b, kind);
+    await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = ${flag.flagged}, flag_code = ${flag.flagCode},
+              flag_reason = ${flag.flagReason}, updated_at = now() where id = ${line.id}`;
     return { line: await selectLine(sql, line.id) };
   });
 
@@ -92,16 +107,15 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!c) throw badRequest("That character isn't in this production.");
     }
     if (kind === "dialogue" && !characterId) throw badRequest("Pick a character for a dialogue line.");
-    const flagged = was.flagged === true;
-    const flagReason = flagged ? optionalString(was, "flagReason", 500) ?? null : null;
+    const { flagged, flagCode, flagReason } = flagFrom(was, kind);
     const sourceLine = Number.isInteger(was.sourceLine) ? (was.sourceLine as number) : line.sourceLine;
     const sourcePage = Number.isInteger(was.sourcePage) ? (was.sourcePage as number) : line.sourcePage;
     const newId = await sql.begin(async (tx) => {
       await tx`update lines set seq = seq + 1 where production_id = ${line.productionId} and seq > ${line.seq}`;
       await tx`update lines set text = ${first}, updated_at = now() where id = ${line.id}`;
       const [row] = await tx<{ id: string }[]>`
-        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_reason, source_line, source_page)
-        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${kind}, ${characterId}, ${second}, ${flagged}, ${flagReason}, ${sourceLine}, ${sourcePage}) returning id`;
+        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_code, flag_reason, source_line, source_page)
+        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${kind}, ${characterId}, ${second}, ${flagged}, ${flagCode}, ${flagReason}, ${sourceLine}, ${sourcePage}) returning id`;
       return row!.id;
     });
     return { lines: [await selectLine(sql, line.id), await selectLine(sql, newId)] };
@@ -117,7 +131,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!upper || !lower) throw badRequest("There is no line on that side to join with.");
       const [recorded] = await tx`select 1 from takes where line_id = ${lower.id} limit 1`;
       if (recorded) throw conflict("has_recordings", "The lower line has recordings, so it can't be joined into the one above.");
-      await tx`update lines set text = ${`${upper.text}\n${lower.text}`}, flagged = false, flag_reason = null, updated_at = now() where id = ${upper.id}`;
+      await tx`update lines set text = ${`${upper.text}\n${lower.text}`}, flagged = false, flag_code = null, flag_reason = null, updated_at = now() where id = ${upper.id}`;
       await tx`delete from lines where id = ${lower.id}`;
       await tx`update lines set seq = seq - 1 where production_id = ${productionId} and seq > ${lower.seq}`;
       await tidySections(tx, productionId);
@@ -159,6 +173,104 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     return { sections: (await sectionsOf(sql, line.productionId)).map(sectionView) };
   });
 
+  // Deletes a line that has no recordings. The answer carries what undo needs: the line as it was,
+  // the line it sat after, and its scene when that scene went away with it.
+  app.delete("/api/lines/:id", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const line = await ownedLine(sql, user, idOf(req.params));
+    return sql.begin(async (tx) => {
+      const [locked] = await tx`select 1 from lines where id = ${line.id} for update`;
+      if (!locked) throw notFound("Line not found.");
+      const [recorded] = await tx`select 1 from takes where line_id = ${line.id} limit 1`;
+      if (recorded) throw conflict("has_recordings", "This line has recordings, so it can't be deleted.");
+      const [before] = await tx<{ id: string }[]>`select id from lines where production_id = ${line.productionId} and seq < ${line.seq} order by seq desc limit 1`;
+      const [section] = await tx<SectionRow[]>`select id, seq, act, scene, title from sections where id = ${line.sectionId}`;
+      await tx`delete from lines where id = ${line.id}`;
+      await tx`update lines set seq = seq - 1 where production_id = ${line.productionId} and seq > ${line.seq}`;
+      const [still] = await tx`select 1 from lines where section_id = ${line.sectionId} limit 1`;
+      await tidySections(tx, line.productionId);
+      return {
+        line: lineView(line),
+        afterLineId: before?.id ?? null,
+        removedSection: still ? null : sectionView(section!),
+      };
+    });
+  });
+
+  // Puts a line back after `afterLineId` (null: at the very start), in `sectionId`, or in a new
+  // scene (`newSection`) when the deleted line's scene went away with it. Undo for DELETE.
+  app.post("/api/productions/:id/lines", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const b = body(req.body);
+    const kind = b.kind as LineRow["kind"];
+    if (!KINDS.includes(kind)) throw badRequest("kind must be dialogue, stage_direction or heading.");
+    const text = requiredString(b, "text", MAX_LINE_CHARS);
+    let characterId = kind === "dialogue" && b.characterId != null ? idParam(b.characterId) : null;
+    if (characterId) {
+      const [c] = await sql`select 1 from characters where id = ${characterId} and production_id = ${p.id}`;
+      if (!c) throw badRequest("That character isn't in this production.");
+    }
+    if (kind === "dialogue" && !characterId) {
+      const guess = await guessSpeaker(sql, p.id, Number.MAX_SAFE_INTEGER, text);
+      if (!guess) throw badRequest("Pick a character for a dialogue line.");
+      characterId = guess.characterId;
+    }
+    const { flagged, flagCode, flagReason } = flagFrom(b, kind);
+    const sourceLine = Number.isInteger(b.sourceLine) ? (b.sourceLine as number) : null;
+    const sourcePage = Number.isInteger(b.sourcePage) ? (b.sourcePage as number) : null;
+    const afterId = b.afterLineId == null ? null : idParam(b.afterLineId);
+    const sectionId = b.sectionId == null ? null : idParam(b.sectionId);
+    const fresh = b.newSection == null ? null : body(b.newSection);
+
+    const newId = await sql.begin(async (tx) => {
+      // Lock the production's lines so two inserts can't take the same place.
+      await tx`select id from lines where production_id = ${p.id} for update`;
+      let afterSeq = 0;
+      let afterSection: { id: string; seq: number } | null = null;
+      if (afterId) {
+        const [after] = await tx<{ seq: number; sectionId: string; sectionSeq: number }[]>`
+          select l.seq, l.section_id, s.seq as section_seq from lines l join sections s on s.id = l.section_id
+          where l.id = ${afterId} and l.production_id = ${p.id}`;
+        if (!after) throw badRequest("The line to insert after isn't in this production.");
+        afterSeq = after.seq;
+        afterSection = { id: after.sectionId, seq: after.sectionSeq };
+      }
+      const [next] = await tx<{ sectionId: string }[]>`select section_id from lines where production_id = ${p.id} and seq = ${afterSeq + 1}`;
+
+      let targetSection: string;
+      if (fresh) {
+        // A new scene can only start at a scene boundary.
+        if (next && afterSection && next.sectionId === afterSection.id) throw badRequest("A new scene can only go between two scenes.");
+        const title = requiredString(fresh, "title", 120);
+        const act = optionalString(fresh, "act", 40) ?? null;
+        const scene = optionalString(fresh, "scene", 80) ?? null;
+        const seq = afterSection ? afterSection.seq + 1 : 1;
+        await tx`update sections set seq = seq + 1 where production_id = ${p.id} and seq >= ${seq}`;
+        const [created] = await tx<{ id: string }[]>`
+          insert into sections (production_id, seq, act, scene, title) values (${p.id}, ${seq}, ${act}, ${scene}, ${title}) returning id`;
+        targetSection = created!.id;
+      } else if (sectionId) {
+        // Keep scenes in order: the line must sit next to a line of its scene.
+        if (sectionId !== afterSection?.id && sectionId !== next?.sectionId) throw badRequest("That scene isn't next to this place in the script.");
+        targetSection = sectionId;
+      } else {
+        const fallback = afterSection?.id ?? next?.sectionId;
+        if (!fallback) throw badRequest("Pick a scene for the line.");
+        targetSection = fallback;
+      }
+
+      await tx`update lines set seq = seq + 1 where production_id = ${p.id} and seq > ${afterSeq}`;
+      const [row] = await tx<{ id: string }[]>`
+        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_code, flag_reason, source_line, source_page)
+        values (${p.id}, ${targetSection}, ${afterSeq + 1}, ${kind}, ${characterId}, ${text}, ${flagged}, ${flagCode}, ${flagReason}, ${sourceLine}, ${sourcePage})
+        returning id`;
+      await tidySections(tx, p.id);
+      return row!.id;
+    });
+    return { line: await selectLine(sql, newId) };
+  });
+
   app.patch("/api/sections/:id", async (req) => {
     const user = await requireDirector(ctx, req);
     const title = requiredString(body(req.body), "title", 120);
@@ -173,7 +285,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post("/api/lines/:id/resolve", async (req) => {
     const user = await requireDirector(ctx, req);
     const line = await ownedLine(sql, user, idOf(req.params));
-    await sql`update lines set flagged = false, flag_reason = null where id = ${line.id}`;
+    await sql`update lines set flagged = false, flag_code = null, flag_reason = null where id = ${line.id}`;
     return { line: await selectLine(sql, line.id) };
   });
 

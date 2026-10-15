@@ -1,3 +1,4 @@
+import { flag, type Flag } from "./flags.ts";
 import type { ParsedLine } from "./types.ts";
 
 // Deterministic fallback parser for plain-text plays and screenplays. It flags liberally:
@@ -66,7 +67,7 @@ function isHeadingTail(tail: string): boolean {
 }
 
 export function canonicalName(raw: string): string {
-  return raw.replace(/[.:]+$/, "").replace(/\s+/g, " ").trim().toUpperCase();
+  return raw.trim().replace(/[.:,;]+$/, "").replace(/\s+/g, " ").trim().toUpperCase();
 }
 
 function isCapsName(name: string): boolean {
@@ -129,11 +130,11 @@ interface Block {
   kind: "dialogue" | "stage_direction";
   who: Speaker | null;
   parts: string[];
-  flag: string | null;
+  flag: Flag | null;
   bracketOpen: boolean;
 }
 
-const UNATTRIBUTED = "No speaker found, so this was treated as a stage direction";
+const UNATTRIBUTED = flag("direction", "No speaker found, so this was treated as a stage direction");
 
 export function heuristicParse(source: string): ParsedLine[] {
   const rawLines = source.replace(/\r\n?/g, "\n").split("\n").map((l) => l.trim());
@@ -142,8 +143,8 @@ export function heuristicParse(source: string): ParsedLine[] {
   let current: Block | null = null;
   let pending: Speaker | null = null;
 
-  const emit = (kind: ParsedLine["kind"], who: Speaker | null, text: string, flagReason: string | null) =>
-    out.push({ kind, speaker: who?.speaker ?? null, speakerAsWritten: who?.asWritten ?? null, text, act: null, scene: null, flagReason });
+  const emit = (kind: ParsedLine["kind"], who: Speaker | null, text: string, lineFlag: Flag | null) =>
+    out.push({ kind, speaker: who?.speaker ?? null, speakerAsWritten: who?.asWritten ?? null, text, act: null, scene: null, flag: lineFlag });
 
   const flush = () => {
     const block = current;
@@ -157,8 +158,8 @@ export function heuristicParse(source: string): ParsedLine[] {
     }
   };
 
-  const start = (kind: Block["kind"], who: Speaker | null, text: string, flag: string | null = null) => {
-    current = { kind, who, parts: [text], flag, bracketOpen: false };
+  const start = (kind: Block["kind"], who: Speaker | null, text: string, blockFlag: Flag | null = null) => {
+    current = { kind, who, parts: [text], flag: blockFlag, bracketOpen: false };
   };
 
   for (const raw of rawLines) {
@@ -179,7 +180,7 @@ export function heuristicParse(source: string): ParsedLine[] {
     if (heading) {
       flush();
       pending = null;
-      out.push({ kind: "heading", speaker: null, speakerAsWritten: null, text: raw, act: heading.act, scene: heading.scene, flagReason: null });
+      out.push({ kind: "heading", speaker: null, speakerAsWritten: null, text: raw, act: heading.act, scene: heading.scene, flag: null });
       continue;
     }
     if (/^[(\[]/.test(raw)) {
@@ -234,9 +235,9 @@ function flagUnusual(lines: ParsedLine[]): ParsedLine[] {
   for (const l of lines) if (l.speaker) counts.set(l.speaker, (counts.get(l.speaker) ?? 0) + 1);
   const dialogueCount = lines.filter((l) => l.kind === "dialogue").length;
   return lines.map((l) => {
-    if (l.kind !== "dialogue" || l.flagReason) return l;
-    if (counts.get(l.speaker!) === 1 && dialogueCount > 6) return { ...l, flagReason: `${l.speaker} speaks only once here; check the speaker` };
-    if (l.text.length > 1500) return { ...l, flagReason: "Very long speech; it may hold more than one speaker" };
+    if (l.kind !== "dialogue" || l.flag) return l;
+    if (counts.get(l.speaker!) === 1 && dialogueCount > 6) return { ...l, flag: flag("speaker", `${l.speaker} speaks only once here`) };
+    if (l.text.length > 1500) return { ...l, flag: flag("missed_cue", "Very long speech") };
     return l;
   });
 }

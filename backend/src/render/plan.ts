@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const RENDER_SETTINGS = {
-  version: 2,
+  version: 3, // 3: takes cut to their speech (trim.ts)
   sampleRate: 48_000,
   gapMs: 350,
   sectionGapMs: 1200,

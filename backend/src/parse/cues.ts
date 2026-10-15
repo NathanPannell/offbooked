@@ -1,4 +1,5 @@
 import { abbreviates, bestCue } from "./assemble.ts";
+import { flag } from "./flags.ts";
 import type { Segment } from "./label.ts";
 
 // The model reads each chunk on its own and sometimes merges several speeches into one block or
@@ -6,8 +7,8 @@ import type { Segment } from "./label.ts";
 // printed ("POLONIUS", "Ham."). These checks use that list to re-split speeches at cue lines the
 // model missed, and to correct a block whose first line carries a different character's cue.
 
-const REPAIR_NOTE = "Split at a speaker cue the parser missed; check the speaker";
-const SPEAKER_NOTE = "The cue on this line named a different speaker; check the speaker";
+const REPAIR_NOTE = flag("missed_cue", "Split at a cue the parser missed");
+const SPEAKER_NOTE = flag("speaker", "The cue on this line names another character");
 
 export interface CueBook {
   cues: string[]; // as printed, longest first
@@ -89,9 +90,9 @@ export function repairCues(segments: Segment[], lines: string[], book: CueBook):
     if (firstCue) {
       const speaker = book.speakerOf.get(firstCue)!;
       // A "continuation" that opens with a cue line is a new speech.
-      if (seg.type === "continue") current = { ...current, type: "speech", speaker, cue: firstCue, note: current.note ?? REPAIR_NOTE };
+      if (seg.type === "continue") current = { ...current, type: "speech", speaker, cue: firstCue, flag: current.flag ?? REPAIR_NOTE };
       // Only a cue that cannot be this speaker overrides the model ("Hedda:" fits HEDDA TESMAN).
-      else if (speaker !== seg.speaker && !(seg.speaker && abbreviates(firstCue, seg.speaker))) current = { ...current, speaker, cue: firstCue, note: current.note ?? SPEAKER_NOTE };
+      else if (speaker !== seg.speaker && !(seg.speaker && abbreviates(firstCue, seg.speaker))) current = { ...current, speaker, cue: firstCue, flag: current.flag ?? SPEAKER_NOTE };
     }
     for (let n = seg.from + 1; n <= seg.to; n++) {
       const cue = lineCue(lines[n - 1]!, book, lines[n - 2]!);
@@ -106,7 +107,7 @@ export function repairCues(segments: Segment[], lines: string[], book: CueBook):
         act: null,
         scene: null,
         inlineDirections: seg.inlineDirections,
-        note: REPAIR_NOTE,
+        flag: REPAIR_NOTE,
       };
     }
     out.push(current);
@@ -127,7 +128,7 @@ function claimOrphanCues(segments: Segment[], lines: string[], book: CueBook): S
     const speechFollows = next !== undefined && (next.type === "continue" || next.type === "speech");
     if (cue && !cueOnly && seg.type === "direction") {
       // A whole speech, cue and all, that the model called a direction.
-      out.push({ ...seg, type: "speech", speaker: book.speakerOf.get(cue)!, cue, note: seg.note ?? REPAIR_NOTE });
+      out.push({ ...seg, type: "speech", speaker: book.speakerOf.get(cue)!, cue, flag: seg.flag ?? REPAIR_NOTE });
       continue;
     }
     if (!cue || !cueOnly || (seg.type === "skip" && !speechFollows)) {
@@ -136,18 +137,18 @@ function claimOrphanCues(segments: Segment[], lines: string[], book: CueBook): S
     }
     const speaker = book.speakerOf.get(cue)!;
     if (seg.from === seg.to && speechFollows && next!.from === seg.to + 1 && next!.type === "continue") {
-      out.push({ ...next!, from: seg.from, type: "speech", speaker, cue, note: next!.note ?? REPAIR_NOTE });
+      out.push({ ...next!, from: seg.from, type: "speech", speaker, cue, flag: next!.flag ?? REPAIR_NOTE });
       i++;
       continue;
     }
     // The cue line on its own; the speech after it (past any "(Aside)") is claimed in assembly.
-    out.push({ ...seg, to: seg.from, type: "speech", speaker, cue, inlineDirections: [], note: REPAIR_NOTE });
+    out.push({ ...seg, to: seg.from, type: "speech", speaker, cue, inlineDirections: [], flag: REPAIR_NOTE });
     if (seg.to > seg.from) out.push({ ...seg, from: seg.from + 1, type: "direction" });
   }
   return out;
 }
 
-const RECLAIM_NOTE = "The parser marked this as not part of the play; check it";
+const RECLAIM_NOTE = flag("text", "The parser marked this as not part of the play");
 
 // Once the play has started, a block labelled "not part of the play" that holds lines opening
 // with this script's cues is dialogue the model dropped: split it into speeches at those cues.
@@ -172,10 +173,10 @@ export function reclaimSkips(segments: Segment[], lines: string[], book: CueBook
       continue;
     }
     const blank = { speaker: null, cue: null, act: null, scene: null, inlineDirections: [] as string[] };
-    if (cueLines[0]!.n > seg.from) out.push({ ...blank, from: seg.from, to: cueLines[0]!.n - 1, type: "direction", note: RECLAIM_NOTE });
+    if (cueLines[0]!.n > seg.from) out.push({ ...blank, from: seg.from, to: cueLines[0]!.n - 1, type: "direction", flag: RECLAIM_NOTE });
     cueLines.forEach(({ n, cue }, i) => {
       const end = i + 1 < cueLines.length ? cueLines[i + 1]!.n - 1 : seg.to;
-      out.push({ ...blank, from: n, to: end, type: "speech", speaker: book.speakerOf.get(cue)!, cue, note: RECLAIM_NOTE });
+      out.push({ ...blank, from: n, to: end, type: "speech", speaker: book.speakerOf.get(cue)!, cue, flag: RECLAIM_NOTE });
     });
   }
   return out;

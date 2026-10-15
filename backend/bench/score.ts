@@ -38,6 +38,10 @@ const tokenize = (text: string) =>
     .map((w) => w.replace(/^'+|'+$/g, ""))
     .filter(Boolean);
 
+// Directions printed inside a speech stay in its text in [square brackets]; the goldens leave
+// them out of the speech, so they are not scored as spoken words.
+export const spokenWords = (text: string) => text.replace(/\[[^\]]*\]/g, " ");
+
 const nameKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ").trim();
 
 export function scoreParse(golden: Golden, pred: StructuredScript): Score & { errors: string[] } {
@@ -45,7 +49,7 @@ export function scoreParse(golden: Golden, pred: StructuredScript): Score & { er
   golden.speeches.forEach((s, i) => tokenize(s.text).forEach((word) => gold.push({ word, speaker: s.speaker, speech: i })));
   const predDialogue = pred.lines.filter((l) => l.kind === "dialogue");
   const predWords: { word: string; speaker: string; line: number }[] = [];
-  predDialogue.forEach((l, i) => tokenize(l.text).forEach((word) => predWords.push({ word, speaker: l.character ?? "(none)", line: i })));
+  predDialogue.forEach((l, i) => tokenize(spokenWords(l.text)).forEach((word) => predWords.push({ word, speaker: l.character ?? "(none)", line: i })));
 
   // Word-level alignment of the two dialogue streams.
   const goldToPred = new Int32Array(gold.length).fill(-1);

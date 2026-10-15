@@ -18,7 +18,7 @@ const dialogue = (speaker: string, text: string, asWritten: string | null = null
   text,
   act: null,
   scene: null,
-  flagReason: null,
+  flag: null,
 });
 
 test("heuristic parser reads a Shakespeare scene", () => {
@@ -115,9 +115,9 @@ test("character names merge abbreviations and flag doubtful or ambiguous ones", 
   assert.deepEqual(r.characters.find((c) => c.name === "HAMLET")!.aliases, ["HAM"]);
   assert.deepEqual(r.characters.find((c) => c.name === "CLAUDIUS")!.aliases, ["KING"]);
   assert.equal(r.flagFor(lines[1]!, 1), null);
-  assert.match(r.flagFor(lines[2]!, 2)!, /cued KING were assigned to CLAUDIUS/);
+  assert.deepEqual(r.flagFor(lines[2]!, 2), { code: "speaker", detail: "Cued KING, assigned to CLAUDIUS" });
   assert.equal(r.flagFor(lines[3]!, 3), null, "a doubtful mapping is flagged once");
-  assert.match(r.flagFor(lines[4]!, 4)!, /could be LADY MACBETH or LADY MACDUFF/);
+  assert.deepEqual(r.flagFor(lines[4]!, 4), { code: "speaker", detail: "LADY could be LADY MACBETH or LADY MACDUFF" });
 });
 
 test("line numbers are stripped only when they run through the document", () => {
@@ -134,7 +134,7 @@ test("label rows parse into segments and coverage is checked", () => {
   const segs = parseRows("1-3 X\n4 H act=1 scene=2\n5 S HAMLET | Ham. >> Aside. ?? maybe Horatio\n6-7 C\nnoise line\n8 D");
   assert.equal(segs.length, 5);
   assert.deepEqual([segs[1]!.act, segs[1]!.scene], ["1", "2"]);
-  assert.deepEqual([segs[2]!.speaker, segs[2]!.cue, segs[2]!.inlineDirections, segs[2]!.note], ["HAMLET", "Ham.", ["Aside."], "maybe Horatio"]);
+  assert.deepEqual([segs[2]!.speaker, segs[2]!.cue, segs[2]!.inlineDirections, segs[2]!.flag], ["HAMLET", "Ham.", ["Aside."], { code: "speaker", detail: null }]);
   const lines = ["a", "b", "c", "d", "e", "f", "g", "h"];
   assert.equal(coverageProblem(segs, lines, 1, 8), null);
   assert.match(coverageProblem(segs.filter((s) => s.from !== 4), lines, 1, 8)!, /line 4/);
@@ -181,8 +181,8 @@ test("valid label prefixes are kept, small gaps patched, continuations joined, c
   assert.equal(stopped.next, 5, "a gap of four lines ends the valid run");
 
   const joined = joinContinuations([
-    [{ kind: "dialogue", speaker: "A", speakerAsWritten: "A", text: "one", act: null, scene: null, flagReason: null }],
-    [{ kind: "dialogue", speaker: null, speakerAsWritten: null, text: "two", act: null, scene: null, flagReason: null, continuation: true }],
+    [{ kind: "dialogue", speaker: "A", speakerAsWritten: "A", text: "one", act: null, scene: null, flag: null }],
+    [{ kind: "dialogue", speaker: null, speakerAsWritten: null, text: "two", act: null, scene: null, flag: null, continuation: true }],
   ]);
   assert.deepEqual(joined.map((l) => l.text), ["one\ntwo"]);
 
@@ -241,7 +241,8 @@ test("pipeline labels with the model, retries once, then falls back to the heuri
   const fallback = await parseScriptText(SEED_SCENE, { labeler: failing, log: silentLog });
   assert.equal(calls, 4, "retries stay on the same model");
   assert.equal(fallback.usage.parser, "heuristic");
-  assert.ok(fallback.structure.lines.every((l) => l.flagReason), "fallback lines are all flagged");
+  assert.ok(fallback.structure.lines.every((l) => l.flagCode), "fallback lines are all flagged");
+  assert.ok(fallback.structure.lines.some((l) => l.flagCode === "backup" && l.flagReason === null), "with the backup code and no detail");
 
   calls = 0;
   const lossy: Labeler = async ({ from }) => {
@@ -269,8 +270,7 @@ test("a cue left without words takes the speech the model labelled as a directio
   const lines = ["NORA.", "_In a low voice._—Where is she?", "[Nora sits.]"];
   const out = assembleSegments(parseRows("1 S NORA | NORA.\n2 D\n3 D"), lines);
   assert.deepEqual(out.map((l) => [l.kind, l.speaker, l.text]), [
-    ["stage_direction", null, "In a low voice."],
-    ["dialogue", "NORA", "Where is she?"],
+    ["dialogue", "NORA", "[In a low voice.] Where is she?"],
     ["stage_direction", null, "[Nora sits.]"],
   ]);
 });
@@ -292,7 +292,7 @@ test("cue lines the model merged are split out again, and a cue line's direction
   assert.equal(cueLineDirection("HAMLET, aside", ["HAMLET"]), "aside");
   assert.equal(cueLineDirection("HAMLET Not so", ["HAMLET"]), null);
   const out = assembleSegments(repaired, lines);
-  assert.deepEqual(out.filter((l) => l.speaker === "HAMLET" || l.kind === "stage_direction").map((l) => l.text), ["aside", "A little more than kin and less than kind.", "Not so, my lord."]);
+  assert.deepEqual(out.filter((l) => l.speaker === "HAMLET" || l.kind === "stage_direction").map((l) => l.text), ["[aside] A little more than kin and less than kind.", "Not so, my lord."]);
 });
 
 test("a cue line labelled as a direction claims the continuation after it", async () => {
@@ -384,7 +384,7 @@ test("a cue swallowed into a direction with its (Aside) still owns the speech th
   const joined = joinContinuations([assembleSegments(repairCues(segs, lines, book), lines)]);
   assert.deepEqual(joined.filter((l) => l.kind === "dialogue").map((l) => [l.speaker, l.text]), [
     ["LOMOV", "I shall drink some water."],
-    ["CHUBUKOV", "He's come to borrow money!"],
+    ["CHUBUKOV", "[Aside] He's come to borrow money!"],
     ["CHUBUKOV", "What is it, my beauty?"],
   ]);
 });
@@ -426,8 +426,7 @@ test("a speech with its cue and a delivery note, labelled as a direction, is tur
   assert.equal(lineCue(lines[2]!, book, ""), null, "a direction that names the character is not a cue");
   const out = assembleSegments(repairCues(parseRows("1-2 D\n3 D"), lines, book), lines, { parenDirections: true });
   assert.deepEqual(out.map((l) => [l.kind, l.speaker, l.text]), [
-    ["stage_direction", null, "(aside to JACK)"],
-    ["dialogue", "LORD FANCOURT BABBERLEY", "You know, you're placing me in a terribly\nfalse position."],
+    ["dialogue", "LORD FANCOURT BABBERLEY", "[aside to JACK] You know, you're placing me in a terribly\nfalse position."],
     ["stage_direction", null, "LORD FANCOURT takes flowers out of his dress."],
   ]);
 });
@@ -435,9 +434,8 @@ test("a speech with its cue and a delivery note, labelled as a direction, is tur
 test("a speech that carries on after a direction closing on the next line keeps its speaker", () => {
   const lines = ['CHARLEY (writing). "Yours sincerely, Charles Wykeham. (Blots and folds', "letter.) Splendid, Jack, you're a genius!"];
   const out = assembleSegments(parseRows("1 S CHARLEY | CHARLEY\n2 D"), lines, { parenDirections: true });
-  assert.deepEqual(out.filter((l) => l.kind === "dialogue").map((l) => [l.speaker, l.text]), [
-    ["CHARLEY", '"Yours sincerely, Charles Wykeham.'],
-    ["CHARLEY", "Splendid, Jack, you're a genius!"],
+  assert.deepEqual(out.map((l) => [l.kind, l.speaker, l.text, l.flag]), [
+    ["dialogue", "CHARLEY", `[writing] "Yours sincerely, Charles Wykeham. [Blots and folds\nletter.] Splendid, Jack, you're a genius!`, null],
   ]);
 });
 
@@ -461,12 +459,60 @@ test("progress is reported as chunks finish, ending with every line labelled", a
   for (let i = 1; i < seen.length; i++) assert.ok(seen[i]!.chunksDone >= seen[i - 1]!.chunksDone);
 });
 
-test("a direction printed inside a speech is lifted out and the speech stays one line", () => {
+test("a direction printed inside a speech stays in its one line, in square brackets", () => {
   const lines = ["HAMLET To be, or not to be [He draws his dagger] that is the question. [Exit.]"];
   const out = assembleSegments(parseRows("1 S HAMLET | HAMLET >> [He draws his dagger] >> [Exit.]"), lines);
-  assert.deepEqual(out.map((l) => [l.kind, l.text]), [
-    ["stage_direction", "[He draws his dagger]"],
-    ["dialogue", "To be, or not to be that is the question."],
-    ["stage_direction", "[Exit.]"],
+  assert.deepEqual(out.map((l) => [l.kind, l.text]), [["dialogue", "To be, or not to be [He draws his dagger] that is the question. [Exit.]"]]);
+
+  // Italics, parentheses and bare directions the model marked all become [brackets]; line breaks
+  // and indentation stay as printed; a direction on the cue line opens the text.
+  const macbeth = ["MACBETH, to the Servant", "Now go to the door, and stay there till we call.", "    He exits. Was it not yesterday", "  we spoke together? _Knocking within._ (aside) Who's there?"];
+  const rows = parseRows("1-4 S MACBETH | MACBETH >> He exits. >> (aside)");
+  assert.deepEqual(assembleSegments(rows, macbeth).map((l) => [l.kind, l.text]), [
+    ["dialogue", "[to the Servant] Now go to the door, and stay there till we call.\n    [He exits.] Was it not yesterday\n  we spoke together? [Knocking within.] [aside] Who's there?"],
   ]);
+
+  const polonius = assembleSegments(parseRows("1 S POLONIUS | POLONIUS >> aside"), ["POLONIUS, aside How say you by that?"]);
+  assert.deepEqual(polonius.map((l) => l.text), ["[aside] How say you by that?"]);
+
+  // A direction on its own line between two speeches stays a separate line.
+  const two = ["ANNA Out.", "Enter Ben.", "BEN Here."];
+  assert.deepEqual(assembleSegments(parseRows("1 S ANNA | ANNA\n2 D\n3 S BEN | BEN"), two).map((l) => [l.kind, l.text]), [
+    ["dialogue", "Out."],
+    ["stage_direction", "Enter Ben."],
+    ["dialogue", "Here."],
+  ]);
+
+  // "(Aside)" printed alone between a cue and its words opens the speech.
+  const aside = ["CHUBUKOV", "(Aside)", "He's come to borrow money!"];
+  assert.deepEqual(assembleSegments(parseRows("1 S CHUBUKOV | CHUBUKOV\n2 D\n3 C"), aside).map((l) => [l.kind, l.speaker, l.text]), [
+    ["dialogue", "CHUBUKOV", "[Aside] He's come to borrow money!"],
+  ]);
+});
+
+test("flags use the standard codes, and a speech carrying on after a direction is not flagged", async () => {
+  const { classifyFlagReason, FLAG_LABELS, parseFlagNote } = await import("./flags.ts");
+  assert.deepEqual(Object.keys(FLAG_LABELS), ["speaker", "missed_cue", "direction", "text", "heading", "backup"]);
+  const rows = parseRows(
+    "1 S A | A ?? speaker\n2 S B | B ?? missed cue\n3 D ?? direction\n4 H act=2 ?? heading\n5 X ?? text\n6 S A ?? speech resumes after the direction, no cue\n7 S A ?? continues after page break\n8 D ?? backup\n9 S B ?? no cue printed; speaker unclear",
+  );
+  assert.deepEqual(rows.map((r) => r.flag?.code ?? null), ["speaker", "missed_cue", "direction", "heading", "text", null, null, "direction", "speaker"]);
+  assert.deepEqual(parseFlagNote("speaker: could be Horatio", "speaker"), { code: "speaker", detail: "could be Horatio" });
+  const reasons: [string, string | null][] = [
+    ["This part was read by the backup parser; check speakers and stage directions here", "backup"],
+    ["No speaker found, so this was treated as a stage direction", "direction"],
+    ["Split at a speaker cue the parser missed; check the speaker", "missed_cue"],
+    ["Text differs slightly from the script source", "text"],
+    ["HORATIO speaks only once here; check the speaker", "speaker"],
+    ["Lines cued DOCTOR, were assigned to DOCTOR; check this is right", "speaker"],
+    ["act number not printed in this excerpt", "heading"],
+    ["Very long speech; it may hold more than one speaker", "missed_cue"],
+    ["This line wasn't labelled by the parser; check it belongs here", "text"],
+    ["speech resumes after the entrance direction with no cue", null],
+  ];
+  for (const [reason, code] of reasons) assert.equal(classifyFlagReason(reason), code, reason);
+
+  const lines = ["ANNA Out.", "[She sits.]", "And stay out.", "BEN Fine."];
+  const s = buildStructure(joinContinuations([assembleSegments(parseRows("1 S ANNA | ANNA\n2 D\n3 S ANNA\n4 S BEN | BEN"), lines)]));
+  assert.ok(s.lines.every((l) => l.flagCode === null && l.flagReason === null), "a speech carrying on after a direction is not flagged");
 });

@@ -12,7 +12,9 @@ import { ProgressBar } from "../../components/ProgressBar";
 import { RecordDock } from "../../components/RecordDock";
 import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
+import { readStorage, writeStorage } from "../../lib/storage";
 import { useResource } from "../../lib/useResource";
+import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
 import { latestForLine } from "../../upload/queue";
 import { useUploads } from "../../upload/useUploads";
@@ -20,6 +22,23 @@ import { LineCard, type LocalTake } from "./LineCard";
 import { Wrapped } from "./Wrapped";
 
 const ADVANCE_DELAY_MS = 700;
+const AUTO_ADVANCE_KEY = "offbooked.autoAdvance";
+const KEEP_RECORDING_KEY = "offbooked.keepRecording";
+
+function useStoredFlag(key: string, fallback: boolean) {
+  const [value, setValue] = useState(() => {
+    const stored = readStorage(key);
+    return stored === null ? fallback : stored === "1";
+  });
+  const set = useCallback(
+    (next: boolean) => {
+      setValue(next);
+      writeStorage(key, next ? "1" : "0");
+    },
+    [key],
+  );
+  return [value, set] as const;
+}
 
 export interface Score {
   takeKey: string;
@@ -49,6 +68,12 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
   const serverTakeIds = useRef(new Map<string, string>());
   const postedStt = useRef(new Set<string>());
   const stopRef = useRef<() => void>(() => {});
+  /** The latest startRecording, for timers set up by an earlier render. */
+  const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
+  const [autoAdvance, setAutoAdvance] = useStoredFlag(AUTO_ADVANCE_KEY, true);
+  const [keepRecording, setKeepRecording] = useStoredFlag(KEEP_RECORDING_KEY, false);
+  /** A line whose take stopped by itself but didn't sound complete. */
+  const [held, setHeld] = useState<string | null>(null);
 
   const recorder = useTakeRecorder({
     onLimit: () => {
@@ -58,6 +83,19 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
   });
 
   const actorLines: ActorLine[] = useMemo(() => lines.data?.lines ?? [], [lines.data]);
+
+  const live = useLiveTake({
+    recording: recorder.recording,
+    capture: recorder.capture,
+    analyser: recorder.analyser,
+    stt,
+    text: actorLines.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
+    autoAdvance,
+    onDecision: (decision, _lineId, mode) => {
+      if (decision === "hold") void stopRecording({ advance: false });
+      else void stopRecording({ advance: true, recordNext: keepRecording && mode === "live" });
+    },
+  });
   const myItems = useMemo(() => items.filter((i) => i.token === token && (i.kind ?? "invite") === "invite"), [items, token]);
 
   const isRecorded = useCallback(
@@ -117,6 +155,14 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
     [uploader, token, setLinesData, stt, postStt],
   );
 
+  // Live word highlighting needs the model, so start its (low-priority) download once the page has
+  // settled rather than after the first upload: it is usually ready a line or two in. Takes never
+  // wait for it, and `start` still declines on data saver or an unsupported device.
+  useEffect(() => {
+    const id = window.setTimeout(() => void stt.start(), 1500);
+    return () => window.clearTimeout(id);
+  }, [stt]);
+
   useEffect(() => {
     if (sttState.status === "unavailable" && stt.claimUnavailableNotice()) setSttNotice(true);
   }, [sttState.status, stt]);
@@ -132,11 +178,18 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
   const startRecording = async (lineId: string) => {
     if (recorder.recording) return;
     playback.pause();
+    setHeld(null);
     setCurrentId(lineId);
     if (await recorder.start(lineId)) setAnnouncement("Recording. Say your line, then tap stop.");
   };
 
-  const stopRecording = async () => {
+  startRef.current = startRecording;
+
+  /**
+   * Stops and keeps the take. By default it then moves to the next line; a take that stopped by itself
+   * but sounded incomplete stays put (`advance: false`), and hands-free mode records the next line too.
+   */
+  const stopRecording = async ({ advance = true, recordNext = false }: { advance?: boolean; recordNext?: boolean } = {}) => {
     const lineId = recorder.recording?.lineId;
     const recorded = await recorder.stop();
     if (!recorded || !lineId) return;
@@ -166,7 +219,7 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
       next.delete(lineId);
       return next;
     });
-    setAnnouncement("Take saved.");
+    setAnnouncement(advance ? "Take saved." : "Take saved. It didn't sound like the whole line: record it again or go on.");
 
     const text = actorLines.find((l) => l.line.id === lineId)?.line.text ?? "";
     void stt.score(lineId, recorded.blob, text).then((result) => {
@@ -176,18 +229,27 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
       postStt(clientTakeId, result);
     });
 
+    if (!advance) {
+      setHeld(lineId);
+      return;
+    }
+    goToNext(lineId, recordNext);
+  };
+  stopRef.current = () => void stopRecording();
+
+  const goToNext = (lineId: string, recordNext = false) => {
     const next = nextUnrecorded(lineId, lineId);
     setTimeout(() => {
       if (next) {
         setCurrentId(next);
         scrollToLine(next);
+        if (recordNext) void startRef.current(next);
       } else {
         setView("wrapped");
         window.scrollTo({ top: 0 });
       }
     }, ADVANCE_DELAY_MS);
   };
-  stopRef.current = () => void stopRecording();
 
   if (lines.loading) return <Loading />;
   if (lines.error || !lines.data) {
@@ -302,6 +364,25 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
                       upload={latestForLine(myItems, token, l.line.id)}
                       score={scores.get(l.line.id) ?? null}
                       playing={playback.playing}
+                      liveCursor={live?.lineId === l.line.id && live.mode === "live" ? live.cursor : null}
+                      liveHint={live?.lineId === l.line.id ? liveHint(live.mode, autoAdvance, keepRecording) : undefined}
+                      notice={
+                        held === l.line.id && !recorder.recording ? (
+                          <div className="take-held" role="status">
+                            <p className="grow">That didn't sound like the whole line. Record it again, or keep it and go on.</p>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                setHeld(null);
+                                goToNext(l.line.id);
+                              }}
+                            >
+                              Next line
+                            </button>
+                          </div>
+                        ) : undefined
+                      }
                       onPlay={playback.play}
                       onSelect={() => !recorder.recording && setCurrentId(l.line.id)}
                       onRerecord={() => void startRecording(l.line.id)}
@@ -326,17 +407,40 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
-        hint={current && isRecorded(current.line.id) ? "Recorded. Tap to record it again." : "Tap, say your line, tap to stop."}
+        hint={
+          current && isRecorded(current.line.id)
+            ? "Recorded. Tap to record it again."
+            : autoAdvance
+              ? "Tap, then say your line."
+              : "Tap, say your line, tap to stop."
+        }
         disabled={!current}
         label={current ? `Record line ${actorLines.indexOf(current) + 1}` : "Record"}
         onToggle={() => (recorder.recording ? void stopRecording() : current && void startRecording(current.line.id))}
         onRetry={() => currentId && void startRecording(currentId)}
-      />
+      >
+        <div className="dock-options">
+          <label className="checkbox dock-option">
+            <input type="checkbox" checked={autoAdvance} onChange={(e) => setAutoAdvance(e.target.checked)} />
+            Auto-advance
+          </label>
+          <label className={`checkbox dock-option${autoAdvance ? "" : " is-off"}`}>
+            <input type="checkbox" checked={keepRecording} disabled={!autoAdvance} onChange={(e) => setKeepRecording(e.target.checked)} />
+            Keep recording
+          </label>
+        </div>
+      </RecordDock>
       <p className="sr-only" aria-live="assertive">
         {announcement}
       </p>
     </div>
   );
+}
+
+function liveHint(mode: "live" | "energy", autoAdvance: boolean, keepRecording: boolean): string | undefined {
+  if (!autoAdvance) return mode === "live" ? "Tap stop when you're done." : undefined;
+  if (mode === "energy") return "Stops by itself after a pause.";
+  return keepRecording ? "Moves on and keeps recording when you finish." : "Moves on when you finish the line.";
 }
 
 function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>["state"]; onEnable: () => void }) {
