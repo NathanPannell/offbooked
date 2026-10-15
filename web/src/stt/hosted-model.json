@@ -1,0 +1,15 @@
+{
+  "$comment": "Moonshine Tiny files served from our own origin. scripts/fetch-stt-model.mjs downloads them from the Hugging Face revision below into public/models/<dir>/, checks each SHA-256, and runs before dev and build. Change dir whenever a file changes, because browsers cache these URLs forever.",
+  "repo": "onnx-community/moonshine-tiny-ONNX",
+  "revision": "a6da1241cd305dcd64eab1edbd615f2bb9aabb95",
+  "dir": "moonshine-tiny-a6da124",
+  "files": [
+    { "path": "config.json", "size": 921, "sha256": "558e1e02069137c796ace1e50c48d8fe451f04a295929138e6bea885517f0edb" },
+    { "path": "generation_config.json", "size": 147, "sha256": "f9b3f711b57be7def2e50a8942f64f36ee0a55fad5b84ff93a687b6c5bcc1d44" },
+    { "path": "preprocessor_config.json", "size": 128, "sha256": "fa43a7017ef85cd1d0fba0d9aae77c8adb16990ae6f11115631f41ec5d8aa679" },
+    { "path": "tokenizer.json", "size": 3761754, "sha256": "7b913404bdd039af4756783218af4440bc07fb7d6d8258d677e34f95b3ec416f" },
+    { "path": "tokenizer_config.json", "size": 135735, "sha256": "edaee394565d428ea98a663ae7209cdcfeefc5585c42d7a570ff7c986df2cd15" },
+    { "path": "onnx/encoder_model_fp16.onnx", "size": 15520007, "sha256": "ccbec5181641f717611fc641ff7e261b4ee7b538e307c39e57e38f617a294d6e" },
+    { "path": "onnx/decoder_model_merged_quantized.onnx", "size": 20243286, "sha256": "eed87831c3a6103534aae7d47a5d485025c659a1323901513961c39fe8a1a367" }
+  ]
+}

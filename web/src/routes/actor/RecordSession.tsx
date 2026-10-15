@@ -155,12 +155,11 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
     [uploader, token, setLinesData, stt, postStt],
   );
 
-  // Live word highlighting needs the model, so start its (low-priority) download once the page has
-  // settled rather than after the first upload: it is usually ready a line or two in. Takes never
-  // wait for it, and `start` still declines on data saver or an unsupported device.
+  // Live word highlighting needs the model. InvitePage (and the cast link before it) has usually
+  // started loading it already; this covers a recorder opened any other way. Takes never wait for
+  // it, and `start` still declines on data saver or an unsupported device.
   useEffect(() => {
-    const id = window.setTimeout(() => void stt.start(), 1500);
-    return () => window.clearTimeout(id);
+    void stt.start();
   }, [stt]);
 
   useEffect(() => {
@@ -452,10 +451,14 @@ function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>[
     );
   }
   if (state.status !== "loading" && state.status !== "checking") return null;
+  // Real download progress; after the last byte the model still takes a moment to start.
+  const percent = state.progress !== null && state.progress < 1 ? Math.floor(state.progress * 100) : null;
   return (
     <span className="chip stt-chip" role="status">
       <span className="spinner spinner-xs" aria-hidden="true" />
-      Accuracy check warming up{state.progress ? ` ${Math.round(state.progress * 100)}%` : "…"}
+      <span className="stt-chip-long">Getting the accuracy check ready…</span>
+      <span className="stt-chip-short">Accuracy check</span>
+      {percent !== null && <span className="nums">{percent}%</span>}
     </span>
   );
 }

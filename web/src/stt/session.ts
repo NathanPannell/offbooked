@@ -19,8 +19,22 @@ export interface SttState {
 const UNAVAILABLE_NOTICE_KEY = "offbooked.sttUnavailableNoticed";
 
 /**
- * One speech-to-text session per recording or practice screen. The model loads only
- * when start() is called, scoring requests wait for it, and dispose() frees the worker.
+ * Asks the browser to keep the cached model under storage pressure. Chromium and Safari decide
+ * quietly; Firefox would show a permission prompt, so it is skipped there.
+ */
+function requestPersistentStorage() {
+  if (/Firefox\//.test(navigator.userAgent)) return;
+  const storage = navigator.storage;
+  if (!storage?.persist) return;
+  void storage
+    .persisted()
+    .then((persisted) => persisted || storage.persist())
+    .catch(() => {});
+}
+
+/**
+ * A speech-to-text session (one per tab, see useStt.ts). The model loads only when start()
+ * is called, scoring requests wait for it, and dispose() frees the worker.
  */
 export class SttSession {
   private state: SttState;
@@ -77,6 +91,7 @@ export class SttSession {
         if (!current()) return;
         this.set({ status: "ready", progress: 1 });
         this.settleReady(true);
+        requestPersistentStorage();
       },
       () => current() && this.fail(),
     );

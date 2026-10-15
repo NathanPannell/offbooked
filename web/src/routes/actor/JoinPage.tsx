@@ -10,6 +10,7 @@ import { InAppBanner } from "../../components/InAppBanner";
 import { Loading } from "../../components/Loading";
 import { joinNames, plural } from "../../lib/format";
 import { recallJoin, rememberJoin } from "../../lib/joinMemory";
+import { usePrewarmStt } from "../../stt/useStt";
 
 const RETRY_MS = 10_000;
 
@@ -30,6 +31,8 @@ function Join({ token }: { token: string }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  // Load the speech model while they pick a part and type a name, so it is ready by the first take.
+  usePrewarmStt(!!info?.characters.some((c) => !c.takenBy));
 
   useEffect(() => {
     let cancelled = false;
