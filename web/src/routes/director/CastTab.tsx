@@ -1,4 +1,4 @@
-import { BellRing, Copy, Headphones, Link2, Mic, MoreHorizontal, Pencil, RotateCcw, Share2, UserPlus } from "lucide-react";
+import { BellRing, Check, Copy, Headphones, Link2, Mic, MoreHorizontal, Pencil, RotateCcw, Share2, UserPlus } from "lucide-react";
 import { useMemo, useState, type MouseEvent } from "react";
 import { Link } from "react-router";
 import { errorMessage } from "../../api/client";
@@ -154,7 +154,7 @@ export function CastTab({
                 <div className="actor-main">
                   <p className="actor-name">
                     {m.firstName || m.name}
-                    {m.status === "done" && <span className="stamp">Wrapped!</span>}
+                    {m.status === "done" && <span className="stamp"><Check size={12} strokeWidth={2.5} aria-hidden="true" /> All recorded</span>}
                   </p>
                   <p className="actor-roles small">
                     {m.characterIds.map((id, i) => (
@@ -331,7 +331,7 @@ function CastLink({ production, castCount }: { production: Production; castCount
   };
 
   return (
-    <section className="cast-link sticker" aria-labelledby="cast-link-title">
+    <section className="cast-link raised" aria-labelledby="cast-link-title">
       <div className="cast-link-copy">
         <p className="eyebrow">{castCount === 0 ? "Step 2 · Invite your cast" : "Cast link"}</p>
         <h2 id="cast-link-title" className="display">
@@ -397,7 +397,7 @@ function WrapBanner({ productionId, onListen }: { productionId: string; onListen
     <section className="wrap-banner" role="status">
       {firstTime && <Confetti />}
       <span className="wrap-bow" aria-hidden="true">
-        🎭
+        <Check size={24} strokeWidth={2} />
       </span>
       <div className="grow">
         <h2 className="display">That's a wrap!</h2>

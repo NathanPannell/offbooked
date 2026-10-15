@@ -29,7 +29,7 @@ export function ParseProgressView({ progress, fileName }: { progress: ParseProgr
   const percent = fraction === null ? null : Math.round(fraction * 100);
 
   return (
-    <section className="parse sticker" aria-labelledby="parse-title">
+    <section className="parse raised" aria-labelledby="parse-title">
       <div className="parse-head">
         <p className="eyebrow">{fileName ? fileName : "Your script"}</p>
         <h2 id="parse-title" className="display">

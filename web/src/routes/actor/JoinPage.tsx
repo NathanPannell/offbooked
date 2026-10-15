@@ -218,7 +218,7 @@ function JoinMessage({ title, children }: { title: string; children: ReactNode }
   return (
     <main className="page page-narrow center-page join-message">
       <Brand to="/" />
-      <div className="sticker message-card stack">
+      <div className="raised message-card stack">
         <h1 className="display">{title}</h1>
         {children}
       </div>

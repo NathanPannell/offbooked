@@ -25,7 +25,7 @@ export default function NewProduction() {
 
   return (
     <main className="page page-narrow">
-      <form className="sticker form-card stack" onSubmit={submit}>
+      <form className="raised form-card stack" onSubmit={submit}>
         <div className="stack" style={{ gap: 6 }}>
           <p className="eyebrow">Step 1 · New production</p>
           <h1 className="display">What are you putting on?</h1>

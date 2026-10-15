@@ -99,6 +99,19 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     const joinedUp = (await send("POST", `/api/lines/${lower.id}/merge-previous`)).json().line;
     assert.equal(joinedUp.id, line.id);
     assert.equal(joinedUp.text, "Have you your father's leave, Laertes?\nWhat says Polonius?");
+    // Undoing a join puts the lower line back as it was: its kind, flag and place in the source.
+    const restored = (await send("POST", `/api/lines/${line.id}/split`, {
+      at: 38,
+      second: { kind: "stage_direction", characterId: line.characterId, flagged: true, flagReason: "Who speaks?", sourceLine: 41, sourcePage: 3 },
+    })).json().lines[1];
+    assert.equal(restored.kind, "stage_direction");
+    assert.equal(restored.characterId, null);
+    assert.equal(restored.flagged, true);
+    assert.equal(restored.flagReason, "Who speaks?");
+    assert.equal(restored.sourceLine, 41);
+    assert.equal(restored.page, 3);
+    assert.equal((await send("POST", `/api/lines/${line.id}/split`, { at: 10, second: { kind: "dialogue", characterId: null } })).statusCode, 400);
+    await send("POST", `/api/lines/${line.id}/merge-next`);
     await reload();
     const first = script.lines.find((l) => l.seq === 1)!;
     assert.equal((await send("POST", `/api/lines/${first.id}/merge-previous`)).statusCode, 400);

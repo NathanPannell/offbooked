@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronUp, FileText, Pencil, RefreshCw, Undo2, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronUp, FileText, Link2, Pencil, RefreshCw, Undo2, Users, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { errorMessage } from "../../api/client";
 import { script as scriptApi } from "../../api/director";
@@ -10,8 +10,10 @@ import { useToast } from "../../components/Toast";
 import { plural } from "../../lib/format";
 import { CharactersPanel } from "./CharactersPanel";
 import { flagPosition, nextFlagged } from "./flagNav";
+import { canJoinAtSeam, joinPreview, undoJoin } from "./lineJoin";
 import { LineEditor } from "./LineEditor";
 import { MergeSuggestions } from "./MergeSuggestions";
+import { scrollToLine } from "./reviewScroll";
 import { SourcePane } from "./SourcePane";
 
 export interface ReviewActions {
@@ -23,7 +25,6 @@ export interface ReviewActions {
 type Undo = { label: string; run: () => Promise<unknown> | void };
 
 const APPROVE_COMMIT_MS = 4500;
-const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 const isTyping = (el: EventTarget | null) =>
   el instanceof HTMLElement && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 
@@ -122,11 +123,11 @@ export function ScriptReview({
       if (!line) return;
       setSelectedId(line.id);
       if (open) setEditingId(line.id);
-      requestAnimationFrame(() => {
-        const el = document.getElementById(`line-${line.id}`);
-        el?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-        el?.querySelector<HTMLElement>(".script-line")?.focus({ preventScroll: true });
-      });
+      // After React commits (the editor moves to this line), measure and scroll: see reviewScroll.ts.
+      scrollToLine(line.id);
+      requestAnimationFrame(() =>
+        document.getElementById(`line-${line.id}`)?.querySelector<HTMLElement>(".script-line")?.focus({ preventScroll: true }),
+      );
     },
     [],
   );
@@ -206,11 +207,34 @@ export function ScriptReview({
     setEditingId(null);
   };
 
-  // On small screens the original opens as a sheet over the bottom half: keep the line above it.
+  // On small screens the original opens as a sheet over the bottom of the screen: keep the line
+  // in the band above it (and back in the middle when it closes).
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
   useEffect(() => {
-    if (!sourceOpen || !selectedId || window.matchMedia("(min-width: 1100px)").matches) return;
-    document.getElementById(`line-${selectedId}`)?.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-  }, [sourceOpen, selectedId]);
+    if (selectedRef.current && !window.matchMedia("(min-width: 1100px)").matches) scrollToLine(selectedRef.current);
+  }, [sourceOpen]);
+
+  // ---- join and split ----
+
+  const characterName = useCallback((id: string) => characters.get(id)?.name, [characters]);
+
+  /** Joins `lower` into `upper` (the upper line keeps its speaker). Undo splits it back. */
+  const join = async (upper: Line, lower: Line) => {
+    const preview = joinPreview(upper, lower, characterName);
+    const plan = undoJoin(upper, lower);
+    const ok = await actions.run(() => scriptApi.mergeNext(upper.id), {
+      label: preview.done,
+      run: () => scriptApi.splitLine(upper.id, plan.at, plan.second),
+    });
+    if (ok) {
+      setSelectedId(upper.id);
+      setEditingId((id) => (id === upper.id || id === lower.id ? upper.id : id));
+    }
+  };
+  const joinRef = useRef(join);
+  joinRef.current = join;
+  const stableJoin = useCallback((upper: Line, lower: Line) => void joinRef.current(upper, lower), []);
 
   // J/K anywhere (outside text fields) walk the flagged lines.
   useEffect(() => {
@@ -290,7 +314,8 @@ export function ScriptReview({
                 </>
               ) : (
                 <>
-                  <strong className="nums">{total}</strong> {total === 1 ? "line" : "lines"} to check
+                  <strong className="nums">{total}</strong>
+                  <span className="hide-sm"> {total === 1 ? "line" : "lines"}</span> to check
                 </>
               )}
             </span>
@@ -365,13 +390,24 @@ export function ScriptReview({
                 onOpen={onOpen}
                 onApprove={stableApprove}
                 onLineKey={stableLineKey}
+                onJoin={stableJoin}
+                characterName={characterName}
+                busy={busy}
                 actions={actions}
                 renderEditor={(line) => (
                   <LineEditor
                     key={line.id}
                     productionId={production.id}
                     line={line}
+                    prevLine={lines[lines.indexOf(line) - 1] ?? null}
                     nextLine={lines[lines.indexOf(line) + 1] ?? null}
+                    characterName={characterName}
+                    onJoin={(upper, lower) => join(upper, lower)}
+                    onSplit={(second) => {
+                      setSelectedId(second.id);
+                      setEditingId(second.id);
+                      scrollToLine(second.id);
+                    }}
                     characters={script.characters}
                     nearby={nearbySpeakers(line)}
                     actions={actions}
@@ -431,6 +467,9 @@ function ScriptSection({
   onOpen,
   onApprove,
   onLineKey,
+  onJoin,
+  characterName,
+  busy,
   actions,
   renderEditor,
 }: {
@@ -442,6 +481,9 @@ function ScriptSection({
   onOpen: (line: Line) => void;
   onApprove: (line: Line) => void;
   onLineKey: (e: KeyboardEvent, line: Line) => void;
+  onJoin: (upper: Line, lower: Line) => void;
+  characterName: (id: string) => string | undefined;
+  busy: boolean;
   actions: ReviewActions;
   renderEditor: (line: Line) => ReactNode;
 }) {
@@ -492,8 +534,18 @@ function ScriptSection({
         )}
       </header>
       <ol className="script-lines">
-        {lines.map((line) => (
+        {lines.map((line, i) => (
           <li key={line.id} id={`line-${line.id}`} className="script-line-item">
+            {canJoinAtSeam(lines[i - 1], line) && (
+              <JoinSeam
+                upper={lines[i - 1]!}
+                lower={line}
+                near={[lines[i - 1]!.id, line.id].some((id) => id === selectedId || id === editingId)}
+                characterName={characterName}
+                busy={busy}
+                onJoin={onJoin}
+              />
+            )}
             <ScriptLine
               line={line}
               characterName={line.characterId ? characters.get(line.characterId)?.name ?? null : null}
@@ -557,6 +609,46 @@ const ScriptLine = memo(function ScriptLine({
           <Check size={18} strokeWidth={3} />
         </button>
       )}
+    </div>
+  );
+});
+
+/**
+ * The break between two lines. Hover (or focus) shows a "Join" control right where the break is; on
+ * touch screens it shows beside the line you're on. The upper line keeps its speaker, and the
+ * control says so when the two differ.
+ */
+const JoinSeam = memo(function JoinSeam({
+  upper,
+  lower,
+  near,
+  characterName,
+  busy,
+  onJoin,
+}: {
+  upper: Line;
+  lower: Line;
+  near: boolean;
+  characterName: (id: string) => string | undefined;
+  busy: boolean;
+  onJoin: (upper: Line, lower: Line) => void;
+}) {
+  const preview = joinPreview(upper, lower, characterName);
+  return (
+    <div className={`seam ${near ? "is-near" : ""} ${preview.differs ? "differs" : ""}`}>
+      <button
+        type="button"
+        className="seam-btn"
+        disabled={busy}
+        // Only the breaks around the line you're on are tab stops; the editor has Join above and below too.
+        tabIndex={near ? 0 : -1}
+        onClick={() => onJoin(upper, lower)}
+        aria-label={preview.description}
+        title={preview.description}
+      >
+        <Link2 size={14} aria-hidden="true" />
+        {preview.label}
+      </button>
     </div>
   );
 });

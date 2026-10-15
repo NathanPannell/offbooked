@@ -81,12 +81,27 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     const first = line.text.slice(0, at as number).trim();
     const second = line.text.slice(at as number).trim();
     if (!first || !second) throw badRequest("Both parts of a split need some text.");
+    // Undoing a join passes back what the lower line was, so it returns exactly as it was.
+    const was = body(req.body).second === undefined ? {} : body(body(req.body).second);
+    const kind = was.kind === undefined ? line.kind : (was.kind as LineRow["kind"]);
+    if (!KINDS.includes(kind)) throw badRequest("kind must be dialogue, stage_direction or heading.");
+    let characterId = was.characterId === undefined ? line.characterId : was.characterId === null ? null : idParam(was.characterId);
+    if (kind !== "dialogue") characterId = null;
+    if (characterId && characterId !== line.characterId) {
+      const [c] = await sql`select 1 from characters where id = ${characterId} and production_id = ${line.productionId}`;
+      if (!c) throw badRequest("That character isn't in this production.");
+    }
+    if (kind === "dialogue" && !characterId) throw badRequest("Pick a character for a dialogue line.");
+    const flagged = was.flagged === true;
+    const flagReason = flagged ? optionalString(was, "flagReason", 500) ?? null : null;
+    const sourceLine = Number.isInteger(was.sourceLine) ? (was.sourceLine as number) : line.sourceLine;
+    const sourcePage = Number.isInteger(was.sourcePage) ? (was.sourcePage as number) : line.sourcePage;
     const newId = await sql.begin(async (tx) => {
       await tx`update lines set seq = seq + 1 where production_id = ${line.productionId} and seq > ${line.seq}`;
       await tx`update lines set text = ${first}, updated_at = now() where id = ${line.id}`;
       const [row] = await tx<{ id: string }[]>`
-        insert into lines (production_id, section_id, seq, kind, character_id, text, source_line, source_page)
-        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${line.kind}, ${line.characterId}, ${second}, ${line.sourceLine}, ${line.sourcePage}) returning id`;
+        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_reason, source_line, source_page)
+        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${kind}, ${characterId}, ${second}, ${flagged}, ${flagReason}, ${sourceLine}, ${sourcePage}) returning id`;
       return row!.id;
     });
     return { lines: [await selectLine(sql, line.id), await selectLine(sql, newId)] };

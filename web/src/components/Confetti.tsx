@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
-const COLOURS = ["var(--accent)", "var(--sun)", "var(--ink)", "#7cc4a4", "#8fb6f0"];
+// Muted paper in the page's own colours: a brief, quiet flourish, not a party.
+const COLOURS = ["var(--accent)", "var(--sun)", "var(--accent-line)", "#b9d4c3", "var(--line-strong)"];
 
-/** A short burst of paper confetti. Renders nothing for people who prefer reduced motion. */
-export function Confetti({ pieces = 60, durationMs = 2800 }: { pieces?: number; durationMs?: number }) {
+/** A short, gentle fall of paper. Renders nothing for people who prefer reduced motion. */
+export function Confetti({ pieces = 28, durationMs = 2600 }: { pieces?: number; durationMs?: number }) {
   const [done, setDone] = useState(false);
   const reduced = typeof window !== "undefined" && (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   const bits = useMemo(
@@ -12,8 +13,8 @@ export function Confetti({ pieces = 60, durationMs = 2800 }: { pieces?: number; 
         left: Math.random() * 100,
         delay: Math.random() * 400,
         fall: 1600 + Math.random() * 1200,
-        drift: (Math.random() - 0.5) * 160,
-        spin: (Math.random() - 0.5) * 900,
+        drift: (Math.random() - 0.5) * 80,
+        spin: (Math.random() - 0.5) * 360,
         colour: COLOURS[i % COLOURS.length]!,
         wide: Math.random() > 0.5,
       })),
@@ -35,8 +36,8 @@ export function Confetti({ pieces = 60, durationMs = 2800 }: { pieces?: number; 
             {
               left: `${b.left}%`,
               background: b.colour,
-              width: b.wide ? 10 : 6,
-              height: b.wide ? 6 : 12,
+              width: b.wide ? 7 : 4,
+              height: b.wide ? 4 : 8,
               animationDelay: `${b.delay}ms`,
               animationDuration: `${b.fall}ms`,
               "--drift": `${b.drift}px`,

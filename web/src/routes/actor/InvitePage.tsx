@@ -118,7 +118,7 @@ function LinkGone({ body, token }: { body: Record<string, unknown> | null; token
   return (
     <main className="page page-narrow center-page">
       <Brand to={null} />
-      <div className="sticker message-card stack">
+      <div className="raised message-card stack">
         <h1 className="display">This link has closed</h1>
         <p>
           {title ? `The link for ${title} ` : "This link "}has expired or been replaced.{" "}
