@@ -18,7 +18,7 @@ export interface Ctx {
   log: Log;
   jobs: Jobs;
   labeler: Labeler | null;
-  renderWorker: { kick(): void }; // wakes the in-process render worker after a forced render
+  renderWorker: { kick(): void }; // wakes the in-process render worker when a render is queued
   tts: TtsService | null; // null when TTS_DRIVER=off; otherwise it may still report itself unavailable
 }
 

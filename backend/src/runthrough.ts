@@ -22,7 +22,6 @@ export async function runThrough(ctx: Ctx, production: { id: string; title: stri
   const hasDialogue = lines.some((l) => l.kind === "dialogue");
   if (hasDialogue && (render.status === "none" || (render.status === "ready" && render.stale))) {
     await scheduleRender(ctx, production.id, { force: render.status === "none" });
-    if (render.status === "none") ctx.renderWorker.kick();
     render = { ...render, status: "queued" };
   }
   return {

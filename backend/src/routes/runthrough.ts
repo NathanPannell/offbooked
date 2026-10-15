@@ -33,7 +33,6 @@ export function runthroughRoutes(app: FastifyInstance, ctx: Ctx) {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, idOf(req.params));
     await scheduleRender(ctx, p.id, { force: true });
-    ctx.renderWorker.kick();
     return reply.code(202).send({ render: await renderView(ctx, p.id) });
   });
 }
