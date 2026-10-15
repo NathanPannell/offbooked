@@ -3,6 +3,7 @@ import { ownedProduction, requireDirector, type Director } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
+import { classifyFlagReason, FLAG_CODES, isFlagCode, type FlagCode } from "../parse/flags.ts";
 import { body, idOf, idParam, optionalString, requiredString } from "../input.ts";
 import { charactersOf, characterView, lineView, sectionsOf, sectionView, type CharacterRow, type LineRow } from "../views.ts";
 
@@ -11,7 +12,7 @@ const KINDS = ["dialogue", "stage_direction", "heading"] as const;
 
 async function ownedLine(sql: Sql, user: Director, lineId: string): Promise<LineRow & { productionId: string }> {
   const [line] = await sql<(LineRow & { productionId: string })[]>`
-    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.production_id
+    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_code, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.production_id
     from lines l join productions p on p.id = l.production_id
     where l.id = ${lineId} and p.owner_id = ${user.id}`;
   if (!line) throw notFound("Line not found.");
@@ -28,7 +29,7 @@ async function ownedCharacter(sql: Sql, user: Director, characterId: string): Pr
 }
 
 const selectLine = (sql: Sql, id: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_reason, current_take_id, source_line, source_page from lines where id = ${id}`.then((r) => lineView(r[0]!));
+  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page from lines where id = ${id}`.then((r) => lineView(r[0]!));
 
 // Drops sections left empty by an edit and renumbers the rest in script order.
 async function tidySections(sql: Tx, productionId: string): Promise<void> {
@@ -68,7 +69,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       characterId = guess.characterId;
       text = guess.text;
     }
-    await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = false, flag_reason = null, updated_at = now()
+    await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = false, flag_code = null, flag_reason = null, updated_at = now()
               where id = ${line.id}`;
     return { line: await selectLine(sql, line.id) };
   });
@@ -93,15 +94,19 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     if (kind === "dialogue" && !characterId) throw badRequest("Pick a character for a dialogue line.");
     const flagged = was.flagged === true;
-    const flagReason = flagged ? optionalString(was, "flagReason", 500) ?? null : null;
+    if (flagged && was.flagCode !== undefined && was.flagCode !== null && !isFlagCode(was.flagCode)) throw badRequest(`flagCode must be one of ${FLAG_CODES.join(", ")}.`);
+    const flagReason = flagged ? (optionalString(was, "flagReason", 500) ?? null) : null;
+    // A client that sends no code gets the reason's nearest one, else the usual one for the kind.
+    const kindCode: FlagCode = kind === "dialogue" ? "speaker" : kind === "heading" ? "heading" : "direction";
+    const flagCode: FlagCode | null = !flagged ? null : isFlagCode(was.flagCode) ? was.flagCode : ((flagReason && classifyFlagReason(flagReason)) || kindCode);
     const sourceLine = Number.isInteger(was.sourceLine) ? (was.sourceLine as number) : line.sourceLine;
     const sourcePage = Number.isInteger(was.sourcePage) ? (was.sourcePage as number) : line.sourcePage;
     const newId = await sql.begin(async (tx) => {
       await tx`update lines set seq = seq + 1 where production_id = ${line.productionId} and seq > ${line.seq}`;
       await tx`update lines set text = ${first}, updated_at = now() where id = ${line.id}`;
       const [row] = await tx<{ id: string }[]>`
-        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_reason, source_line, source_page)
-        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${kind}, ${characterId}, ${second}, ${flagged}, ${flagReason}, ${sourceLine}, ${sourcePage}) returning id`;
+        insert into lines (production_id, section_id, seq, kind, character_id, text, flagged, flag_code, flag_reason, source_line, source_page)
+        values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${kind}, ${characterId}, ${second}, ${flagged}, ${flagCode}, ${flagReason}, ${sourceLine}, ${sourcePage}) returning id`;
       return row!.id;
     });
     return { lines: [await selectLine(sql, line.id), await selectLine(sql, newId)] };
@@ -117,7 +122,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!upper || !lower) throw badRequest("There is no line on that side to join with.");
       const [recorded] = await tx`select 1 from takes where line_id = ${lower.id} limit 1`;
       if (recorded) throw conflict("has_recordings", "The lower line has recordings, so it can't be joined into the one above.");
-      await tx`update lines set text = ${`${upper.text}\n${lower.text}`}, flagged = false, flag_reason = null, updated_at = now() where id = ${upper.id}`;
+      await tx`update lines set text = ${`${upper.text}\n${lower.text}`}, flagged = false, flag_code = null, flag_reason = null, updated_at = now() where id = ${upper.id}`;
       await tx`delete from lines where id = ${lower.id}`;
       await tx`update lines set seq = seq - 1 where production_id = ${productionId} and seq > ${lower.seq}`;
       await tidySections(tx, productionId);
@@ -173,7 +178,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post("/api/lines/:id/resolve", async (req) => {
     const user = await requireDirector(ctx, req);
     const line = await ownedLine(sql, user, idOf(req.params));
-    await sql`update lines set flagged = false, flag_reason = null where id = ${line.id}`;
+    await sql`update lines set flagged = false, flag_code = null, flag_reason = null where id = ${line.id}`;
     return { line: await selectLine(sql, line.id) };
   });
 

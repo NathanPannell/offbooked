@@ -2,6 +2,7 @@ import type { Log } from "../log.ts";
 import { abbreviates, assembleSegments, PARENTHESES, type AssembledLine } from "./assemble.ts";
 import { learnCues, reclaimSkips, repairCues } from "./cues.ts";
 import { canonicalName, heuristicParse, parseHeading } from "./heuristic.ts";
+import { flag } from "./flags.ts";
 import { PARSE_MODEL, type Labeler, type Segment } from "./label.ts";
 import { stripLineNumbers } from "./noise.ts";
 import { PAGE_BREAK, ScriptInputError } from "./pdf.ts";
@@ -14,8 +15,8 @@ const MAX_PARALLEL_CHUNKS = 64;
 const MAX_ATTEMPTS = 4;
 const CHUNK_LINES = 180;
 const MAX_CHUNK_CHARS = 14_000;
-const FALLBACK_NOTE = "This part was read by the backup parser; check speakers and stage directions here";
-const GAP_NOTE = "This line wasn't labelled by the parser; check it belongs here";
+const FALLBACK_NOTE = flag("backup");
+const GAP_NOTE = flag("text", "This line wasn't labelled by the parser");
 
 export function cleanScriptText(text: string): string {
   return text
@@ -103,7 +104,7 @@ export async function parseScriptText(
       let fallback: ParsedLine[] = [];
       if (cursor <= to) {
         usage.fallbackChunks += 1;
-        fallback = heuristicParse(docLines.slice(cursor - 1, to).join("\n")).map((l) => ({ ...l, flagReason: l.flagReason ?? FALLBACK_NOTE }));
+        fallback = heuristicParse(docLines.slice(cursor - 1, to).join("\n")).map((l) => ({ ...l, flag: l.flag ?? FALLBACK_NOTE }));
       }
       progress.chunksDone++;
       live[index] = {
@@ -207,9 +208,9 @@ export function validPrefix(segments: Segment[], lines: string[], from: number, 
       const prev = out[out.length - 1];
       if (prev && prev.type !== "skip") {
         prev.to = seg.from - 1;
-        prev.note ??= GAP_NOTE;
+        prev.flag ??= GAP_NOTE;
       } else {
-        out.push({ from: next, to: seg.from - 1, type: "direction", speaker: null, cue: null, act: null, scene: null, inlineDirections: [], note: GAP_NOTE });
+        out.push({ from: next, to: seg.from - 1, type: "direction", speaker: null, cue: null, act: null, scene: null, inlineDirections: [], flag: GAP_NOTE });
       }
     }
     out.push(seg);
@@ -233,7 +234,7 @@ export function validPrefix(segments: Segment[], lines: string[], from: number, 
     const prev = out[out.length - 1]!;
     if (prev.type !== "skip") {
       prev.to = to;
-      prev.note ??= GAP_NOTE;
+      prev.flag ??= GAP_NOTE;
       next = to + 1;
     }
   }
@@ -263,7 +264,7 @@ export function joinContinuations(chunks: AssembledLine[][]): ParsedLine[] {
           continue;
         }
         if (lastSpeaker) Object.assign(line, lastSpeaker);
-        else line.flagReason ??= "No speaker found for this line";
+        else line.flag ??= flag("direction", "No speaker found for this line");
       }
       if (line.kind === "dialogue" && line.speaker) lastSpeaker = { speaker: line.speaker, speakerAsWritten: line.speakerAsWritten };
       if (line.kind === "dialogue") cuePending = false;

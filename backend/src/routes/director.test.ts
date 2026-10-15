@@ -102,12 +102,15 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     // Undoing a join puts the lower line back as it was: its kind, flag and place in the source.
     const restored = (await send("POST", `/api/lines/${line.id}/split`, {
       at: 38,
-      second: { kind: "stage_direction", characterId: line.characterId, flagged: true, flagReason: "Who speaks?", sourceLine: 41, sourcePage: 3 },
+      second: { kind: "stage_direction", characterId: line.characterId, flagged: true, flagCode: "speaker", flagReason: "Who speaks?", sourceLine: 41, sourcePage: 3 },
     })).json().lines[1];
     assert.equal(restored.kind, "stage_direction");
     assert.equal(restored.characterId, null);
     assert.equal(restored.flagged, true);
+    assert.equal(restored.flagCode, "speaker");
     assert.equal(restored.flagReason, "Who speaks?");
+    const badCode = { kind: "stage_direction", characterId: null, flagged: true, flagCode: "maybe" };
+    assert.equal((await send("POST", `/api/lines/${line.id}/split`, { at: 10, second: badCode })).statusCode, 400);
     assert.equal(restored.sourceLine, 41);
     assert.equal(restored.page, 3);
     assert.equal((await send("POST", `/api/lines/${line.id}/split`, { at: 10, second: { kind: "dialogue", characterId: null } })).statusCode, 400);
@@ -119,7 +122,9 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
 
     const flagged = script.lines.find((l) => l.flagged)!;
-    assert.equal((await send("POST", `/api/lines/${flagged.id}/resolve`)).json().line.flagged, false);
+    assert.ok(["speaker", "missed_cue", "direction", "text", "heading", "backup"].includes((flagged as { flagCode?: string }).flagCode!), "flagged lines carry a standard code");
+    const resolved = (await send("POST", `/api/lines/${flagged.id}/resolve`)).json().line;
+    assert.deepEqual([resolved.flagged, resolved.flagCode, resolved.flagReason], [false, null, null]);
   });
 
   test("section breaks and renames", async () => {

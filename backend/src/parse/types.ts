@@ -1,3 +1,5 @@
+import type { Flag, FlagCode } from "./flags.ts";
+
 export type LineKind = "dialogue" | "stage_direction" | "heading";
 
 // One line as a parser emits it, before characters and sections are resolved.
@@ -8,14 +10,14 @@ export interface ParsedLine {
   text: string;
   act: string | null; // only set on heading lines that start an act or scene
   scene: string | null;
-  flagReason: string | null;
+  flag: Flag | null; // something for the director to check
   sourceLine?: number | null; // 1-based line of the prepared source text it came from
 }
 
 export interface StructuredScript {
   sections: { act: string | null; scene: string | null; title: string }[];
   characters: { name: string; aliases: string[] }[];
-  lines: { section: number; kind: LineKind; character: string | null; text: string; flagReason: string | null; sourceLine: number | null; page: number | null }[];
+  lines: { section: number; kind: LineKind; character: string | null; text: string; flagCode: FlagCode | null; flagReason: string | null; sourceLine: number | null; page: number | null }[];
 }
 
 export interface ParseUsage {

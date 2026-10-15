@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { parseFlagNote, type Flag, type FlagCode } from "./flags.ts";
 
 // Owner decision: every Claude call uses Haiku. Never escalate to a larger model; when Haiku's
 // labels fail validation the pipeline retries once with Haiku, then uses the heuristic parser.
@@ -15,8 +16,8 @@ export interface Segment {
   cue: string | null; // the cue as printed, when it differs from the speaker
   act: string | null;
   scene: string | null;
-  inlineDirections: string[]; // directions printed inside a speech
-  note: string | null; // set when the model is unsure
+  inlineDirections: string[]; // directions printed inside a speech; they stay in its text in [brackets]
+  flag: Flag | null; // set when the model, or a later repair, is unsure
 }
 
 export interface LabelRequest {
@@ -58,16 +59,24 @@ Speeches:
 - SPEAKER is the character's full name in capitals, spelled as the script prints it (never modernise old spellings: "EUERY MAN" stays) and the same way every time (HAMLET even when the cue reads "HAM." or "Ham."; KING for "King."; "SECOND OFFICER" for "Sec. Off.").
 - After "|", give only the speaker cue as printed, never the spoken words: for "HAM. To be, or not to be" write "| HAM."; for "BARNARDO Who's there?" write "| BARNARDO". Leave out "| ..." only when the speech has no cue (a C row never has one).
 - Cues can sit on their own line above the speech, at the start of the first line, or after a line reference. A new cue always starts a new S row: a line that is only a character name, like "POLONIUS" or "HAMLET, aside", is the cue of the next speech.
-- A stage direction printed on the same line as spoken words never splits the speech: keep the whole speech as ONE S row, including the words before and after the direction, and add " >> <the direction text exactly as printed>" to that row for each direction, e.g. "Give you good night. Francisco exits." gives ">> Francisco exits." and "[Aside] I'll do it." gives ">> [Aside]". A direction on its own line between two parts of a speech is its own D row instead. Parentheses inside verse or prose that are part of what the character says are not directions; a parenthesis is a direction only when it describes action or delivery, like "(aside)" or "(to Ben)".
+- A stage direction printed on the same line as spoken words never splits the speech: keep the whole speech as ONE S row, including the words before and after the direction, and add " >> <the direction text exactly as printed>" to that row for each direction, e.g. "Give you good night. Francisco exits." gives ">> Francisco exits." and "[Aside] I'll do it." gives ">> [Aside]". A delivery note between the cue and the words is a direction too: "POLONIUS, aside How say you by that?" gives "| POLONIUS >> aside", and "ROSENCRANTZ, to Polonius God save you" gives "| ROSENCRANTZ >> to Polonius". A direction on its own line between two parts of a speech is its own D row instead. Parentheses inside verse or prose that are part of what the character says are not directions; a parenthesis is a direction only when it describes action or delivery, like "(aside)" or "(to Ben)".
 - Songs, prologues, epilogues and choruses that are spoken or sung are speeches.
-- A speech carries on across stage directions, page breaks and blank lines. Spoken words that follow a direction with no new cue still belong to the previous speaker: label them "S <that same SPEAKER>" without "| cue" (or C at the very start of the excerpt). Only add "??" when it is genuinely unclear who is speaking.
+- A speech carries on across stage directions, page breaks, headers and blank lines. Spoken words that follow a direction with no new cue still belong to the previous speaker: label them "S <that same SPEAKER>" without "| cue" (or C at the very start of the excerpt). This is always right, so never flag it.
 - A speech can open with a direction before the words, e.g. "NORA." then "_In a low voice._—Where is she?" or "HAM. [Aside] A little more than kin". That line is still part of the speech: label it with the speech and mark the direction with ">>".
 
 Not part of the play (X): title pages, contents, copyright and licence text, introductions, essays, synopses, notes, footnotes, glossaries, lists of characters or cast, production notes, advertisements, running page headers and page numbers. Everything from the first act/scene heading or first stage direction or speech of the play to its end is the play.
 
-When unsure about a row, end it with " ?? <short reason>". Output only the rows, nothing else.`;
+Flags: when a director really needs to check a row, end it with " ?? <code>", using exactly one of these codes and nothing after it:
+  speaker      who speaks is uncertain: no cue and the words suggest someone other than the last speaker (for example right after that speaker exits), a garbled or ambiguous cue, a joint cue
+  missed_cue   the block may hold two speakers because a cue seems to be missing inside it
+  direction    unsure whether the text is a stage direction or spoken words
+  heading      the act or scene number is not printed and you inferred it
+  text         unsure whether the lines belong to the play, or stray numbers or marks sit inside spoken words
+Never flag routine cases: a speech that carries on after a direction, page break or header without a new cue, a cue on its own line, a delivery note on the cue line, directions inside a speech (mark them with ">>"), songs, letters read aloud, or page furniture you labelled X. Most rows need no flag.
 
-const EXAMPLE_INPUT = `FROM 101 TO 114
+Output only the rows, nothing else.`;
+
+const EXAMPLE_INPUT = `FROM 101 TO 115
 
 101| THE TRAGEDY OF EXAMPLE
 102| Characters in the Play
@@ -78,11 +87,12 @@ const EXAMPLE_INPUT = `FROM 101 TO 114
 107| BEN Where were you last night?
 108| ANNA
 109| Out. Ask me no more. [She sits.]
-110| Ben. Then I'll ask the moon. He crosses
-111| to the window. Exit.
-112| ANNA (to herself)
-113| Gone.
-114| 47`;
+110| Ben. Then I'll ask the moon. He crosses to the window.
+111| Exit.
+112| Who's there? Ben? Speak.
+113| ANNA (to herself)
+114| Gone.
+115| 47`;
 
 const EXAMPLE_OUTPUT = `101-103 X
 104 H act=1
@@ -90,10 +100,11 @@ const EXAMPLE_OUTPUT = `101-103 X
 106 D
 107 S BEN | BEN
 108-109 S ANNA | ANNA >> [She sits.]
-110 S BEN | Ben. >> He crosses
-111 D ?? direction split across lines 110-111
-112-113 S ANNA | ANNA >> (to herself)
-114 X`;
+110 S BEN | Ben. >> He crosses to the window.
+111 D
+112 S ANNA ?? speaker
+113-114 S ANNA | ANNA >> (to herself)
+115 X`;
 
 const ROW = /^(\d+)(?:\s*-\s*(\d+))?\s+([SCDHX])\b\s*(.*)$/;
 
@@ -163,15 +174,16 @@ export function parseRows(text: string): Segment[] {
     const from = Number(m[1]);
     const to = m[2] ? Number(m[2]) : from;
     let rest = m[4]!;
-    let note: string | null = null;
+    const type = TYPES[m[3] as keyof typeof TYPES];
+    let flag: Flag | null = null;
     const q = rest.indexOf("??");
     if (q >= 0) {
-      note = rest.slice(q + 2).trim() || "The parser was unsure about this line";
+      flag = parseFlagNote(rest.slice(q + 2), DEFAULT_FLAG[type]);
       rest = rest.slice(0, q);
     }
     const [head, ...directions] = rest.split(">>");
     const inlineDirections = directions.map((d) => d.trim()).filter(Boolean);
-    const seg: Segment = { from, to, type: TYPES[m[3] as keyof typeof TYPES], speaker: null, cue: null, act: null, scene: null, inlineDirections, note };
+    const seg: Segment = { from, to, type, speaker: null, cue: null, act: null, scene: null, inlineDirections, flag };
     if (seg.type === "speech") {
       const [speaker, cue] = head!.split("|").map((s) => s.trim());
       seg.speaker = speaker ? speaker.toUpperCase() : null;
@@ -186,6 +198,8 @@ export function parseRows(text: string): Segment[] {
 }
 
 const TYPES = { S: "speech", C: "continue", D: "direction", H: "heading", X: "skip" } as const;
+// The code for a "??" note that names no known code.
+const DEFAULT_FLAG: Record<SegmentType, FlagCode> = { speech: "speaker", continue: "speaker", direction: "direction", heading: "heading", skip: "text" };
 
 // Every non-blank line in the range must be labelled exactly once, in order.
 export function coverageProblem(segments: Segment[], lines: string[], from: number, to: number): string | null {

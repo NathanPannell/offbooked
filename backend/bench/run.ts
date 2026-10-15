@@ -59,7 +59,9 @@ for (const slug of slugs) {
     const text = await extractSourceText(data, kind);
     const { structure, usage } = await parseScriptText(text, { labeler, log });
     const seconds = (Date.now() - started) / 1000;
-    const flagged = structure.lines.filter((l) => l.flagReason).length;
+    const flagged = structure.lines.filter((l) => l.flagCode).length;
+    const flagCodes: Record<string, number> = {};
+    for (const l of structure.lines) if (l.flagCode) flagCodes[l.flagCode] = (flagCodes[l.flagCode] ?? 0) + 1;
     fs.writeFileSync(path.join(outDir, `${slug}.pred.json`), JSON.stringify({ usage, structure }, null, 1));
     const record: Record<string, unknown> = {
       at: new Date().toISOString(),
@@ -74,13 +76,14 @@ for (const slug of slugs) {
       outputTokens: usage.outputTokens,
       lines: structure.lines.length,
       flagged,
+      flagCodes,
       characters: structure.characters.length,
     };
     if (golden) {
       const { errors, ...score } = scoreParse(golden, structure);
       Object.assign(record, score);
       fs.writeFileSync(path.join(outDir, `${slug}.errors.txt`), [...score.failures, "", ...errors].join("\n"));
-      console.log(`${score.pass ? "PASS" : "FAIL"} ${seconds.toFixed(0)}s speaker ${pct(score.speakerAccuracy)} speech ${pct(score.speechAccuracy)} recall ${pct(score.recall)} precision ${pct(score.precision)} names ${pct(score.nameAgreement)} sections ${score.sections.pred}/${score.sections.gold} flagged ${flagged}`);
+      console.log(`${score.pass ? "PASS" : "FAIL"} ${seconds.toFixed(0)}s speaker ${pct(score.speakerAccuracy)} speech ${pct(score.speechAccuracy)} recall ${pct(score.recall)} precision ${pct(score.precision)} names ${pct(score.nameAgreement)} sections ${score.sections.pred}/${score.sections.gold} flagged ${flagged} ${JSON.stringify(flagCodes)}`);
       if (!score.pass) console.log(`   ${score.failures.join(" | ")}`);
       rows.push(`| ${slug} | ${kind} | ${score.pass ? "✅" : "❌"} | ${pct(score.speakerAccuracy)} | ${pct(score.speechAccuracy)} | ${pct(score.recall)} | ${pct(score.precision)} | ${pct(score.nameAgreement)} | ${score.sections.pred}/${score.sections.gold} | ${flagged} | ${seconds.toFixed(0)}s | ${usage.inputTokens + usage.outputTokens} |`);
     } else {

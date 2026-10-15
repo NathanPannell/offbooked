@@ -1,3 +1,4 @@
+import type { FlagCode } from "./parse/flags.ts";
 import type { Config } from "./config.ts";
 import type { Sql } from "./db.ts";
 import { inviteUrl } from "./invite.ts";
@@ -83,6 +84,7 @@ export interface LineRow {
   characterId: string | null;
   text: string;
   flagged: boolean;
+  flagCode: FlagCode | null;
   flagReason: string | null;
   currentTakeId: string | null;
   sourceLine: number | null;
@@ -97,7 +99,8 @@ export const lineView = (l: LineRow) => ({
   characterId: l.characterId,
   text: l.text,
   flagged: l.flagged,
-  flagReason: l.flagReason,
+  flagCode: l.flagged ? l.flagCode : null, // one of FLAG_CODES; FLAG_LABELS has the text to show
+  flagReason: l.flagged ? l.flagReason : null,
   sourceLine: l.sourceLine,
   page: l.sourcePage,
 });
@@ -106,7 +109,7 @@ export const sectionsOf = (sql: Sql, productionId: string) =>
   sql<SectionRow[]>`select id, seq, act, scene, title from sections where production_id = ${productionId} order by seq`;
 
 export const linesOf = (sql: Sql, productionId: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_reason, current_take_id, source_line, source_page
+  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page
                  from lines where production_id = ${productionId} order by seq`;
 
 export const charactersOf = (sql: Sql, productionId: string) =>

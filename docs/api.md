@@ -24,8 +24,11 @@ interface Line {
   id: string; seq: number; sectionId: string; kind: LineKind;
   characterId: string | null;            // required for dialogue, null otherwise
   text: string;
-  flagged: boolean; flagReason: string | null;   // parser uncertainty, shown in the review UI
+  flagged: boolean;                      // the parser wants the director to check this line
+  flagCode: FlagCode | null;             // set when flagged; the review UI shows FLAG_LABELS[flagCode]
+  flagReason: string | null;             // optional short detail, e.g. "Cued KING, assigned to CLAUDIUS"
 }
+type FlagCode = "speaker" | "missed_cue" | "direction" | "text" | "heading" | "backup";
 interface Take {
   id: string; lineId: string; audioUrl: string; durationMs: number; createdAt: string;
   stt: { transcript: string; accuracy: number; ops: WordOp[] } | null;   // accuracy 0..1, from on-device STT
@@ -79,14 +82,14 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 | POST | `/api/productions/:id/script` | `multipart/form-data` with a `file` field (PDF, Word `.docx` or plain text, ≤ 20 MB; the type is detected from the bytes) **or** JSON `{ text }` | `202 { scriptStatus: "parsing" }`. Parsing runs in the background. Replacing a script with recordings is refused (409). |
 | GET | `/api/productions/:id/script` | | `{ status, error, sections: Section[], characters: Character[], lines: Line[], flaggedCount }` |
 | PATCH | `/api/lines/:id` | `{ characterId?, kind?, text? }` | `{ line }` |
-| POST | `/api/lines/:id/split` | `{ at }` (character offset) | `{ lines: [Line, Line] }` |
+| POST | `/api/lines/:id/split` | `{ at, second? }` (character offset; `second: { kind, characterId, flagged, flagCode, flagReason, sourceLine, sourcePage }` restores a joined line exactly when undoing a join) | `{ lines: [Line, Line] }` |
 | POST | `/api/lines/:id/merge-next` | | `{ line }` |
 | POST | `/api/lines/:id/section-break` | `{ title, act?, scene? }` | `{ sections }`. Starts a new section at this line. |
 | PATCH | `/api/sections/:id` | `{ title }` | `{ section }` |
 | POST | `/api/productions/:id/characters` | `{ name }` | `{ character }` |
 | PATCH | `/api/characters/:id` | `{ name }` | `{ character }` |
 | POST | `/api/characters/:id/merge` | `{ intoId }` | `{ characters }`. Moves lines and aliases to `intoId`, removes this one. |
-| POST | `/api/lines/:id/resolve` | | `{ line }`. Clears `flagged`. |
+| POST | `/api/lines/:id/resolve` | | `{ line }`. Clears `flagged`, `flagCode` and `flagReason`, as do `PATCH`, joins and merges. |
 
 ## Cast (director)
 
@@ -268,4 +271,19 @@ interface RunThrough {
 ### Joining lines (2026-10-15)
 
 - `POST /api/lines/:id/merge-previous` → `{ line }`: joins this line into the one above it. `merge-next` joins the next line into this one. Either way the upper line keeps its id, kind and speaker, the texts are joined with a newline, and the lower line must have no recordings (409 `has_recordings`).
-- The parser keeps each speech as one dialogue line: a stage direction printed inside a speech becomes its own stage-direction line before the speech (or after it, when it follows the last words).
+- The parser keeps each speech as one dialogue line. A stage direction printed inside a speech, or on its cue line ("MACBETH, to the Servant"), stays in the line's text in square brackets, whatever the script used (parentheses, italics, underscores or nothing): `[to the Servant] Now go to the door… [Servant exits.] Was it not yesterday…`. Directions on their own line between speeches stay separate stage-direction lines. TTS skips bracketed text.
+
+### Flag codes (2026-10-15)
+
+Every flagged line has one standard `flagCode`; `flagReason` is an optional short detail and may be `null`. The labels live in `FLAG_LABELS` in `backend/src/parse/flags.ts`:
+
+| `flagCode` | Label | Used for |
+| --- | --- | --- |
+| `speaker` | Confirm the speaker | Speaker inferred from the content rather than a cue, joint or garbled cues, a character who speaks only once, lines cued X assigned to Y, an unclear speaker after an exit |
+| `missed_cue` | Check for a missed speaker | A very long speech that may hold two speakers, a speech split at a cue the parser missed |
+| `direction` | Review stage direction | No speaker found so the text became a direction, a direction that may be dialogue or the other way round |
+| `text` | Check the text against the original | Text that differs from or wasn't found in the source, skipped or unlabelled lines, stray numbers inside speech |
+| `heading` | Check the scene heading | An act or scene number that was inferred |
+| `backup` | Check this passage | Read by the backup (heuristic) parser |
+
+A speech that carries on after a stage direction, page break or heading without a new cue keeps the previous speaker and is not flagged. Migration `006_flag_codes.sql` gave older flags a code by matching their text.

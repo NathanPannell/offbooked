@@ -1,4 +1,5 @@
 import { parseHeading } from "./heuristic.ts";
+import type { Flag } from "./flags.ts";
 import type { Segment } from "./label.ts";
 import type { ParsedLine } from "./types.ts";
 
@@ -15,7 +16,10 @@ export interface AssembledLine extends ParsedLine {
 interface Orphan {
   speaker: string;
   cue: string;
-  note: string | null;
+  flag: Flag | null;
+  // Directions printed between the cue and its words ("(Aside)" on its own line). They are output
+  // as directions while the cue waits, and move into the speech's text when its words come.
+  lead: number;
 }
 
 export function assembleSegments(segments: Segment[], lines: string[], opts: { parenDirections?: boolean } = {}): AssembledLine[] {
@@ -44,27 +48,35 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
     if (seg.type === "direction") {
       const pieces = pending ? splitDirections(text, seg.inlineDirections, parens, around).map(asDirectionIfWrapped) : [];
       if (pending && pieces.some((p) => !p.direction)) {
-        emitSpeech(out, pieces, { speaker: pending.speaker, cue: pending.cue, note: pending.note ?? seg.note, continuation: false });
+        emitSpeech(out, [...takeLead(out, pending), ...pieces], { speaker: pending.speaker, cue: pending.cue, flag: pending.flag ?? seg.flag, continuation: false });
+      } else if (!pending && lastSpeech && around.openedBefore && openDirectionAtEnd(out, lastSpeech.speaker)) {
+        // "…Wykeham. (Blots and folds" / "letter.) Splendid, Jack!": the direction the speech left
+        // open closes here, inside the speech's [brackets], and spoken words after it carry on.
+        const rest = splitDirections(text, seg.inlineDirections, parens, around).map(asDirectionIfWrapped);
+        const speech = out[out.length - 1]!;
+        if (rest[0]?.direction) speech.text = `${speech.text.slice(0, -1)}\n${bracketed(rest.shift()!.text).slice(1)}`;
+        if (rest.some((p) => !p.direction)) speech.text += " " + inlineText(rest);
+        else if (rest.length) out.push(line("stage_direction", null, null, joinPieces(rest), null));
       } else if (!pending && lastSpeech && around.openedBefore && spokenAfterClose(text, seg.inlineDirections, parens, around)) {
         // "letter.) Splendid, Jack!" after "…Wykeham. (Blots and folds": the direction closes and
-        // the same speech carries on.
+        // the same speech carries on. That guess has always been right, so it is not flagged.
         const rest = splitDirections(text, seg.inlineDirections, parens, around).map(asDirectionIfWrapped);
-        emitSpeech(out, rest, { speaker: lastSpeech.speaker, cue: lastSpeech.cue, note: seg.note ?? CARRY_NOTE, continuation: false });
+        emitSpeech(out, rest, { speaker: lastSpeech.speaker, cue: lastSpeech.cue, flag: seg.flag, continuation: false });
       } else if (pending) {
         // A cue, then "(Aside)" on its own line: the cue is still waiting for its speech.
-        out.push(line("stage_direction", null, null, text, seg.note));
-        orphan = pending;
+        out.push(line("stage_direction", null, null, text, seg.flag));
+        orphan = { ...pending, lead: pending.lead + 1 };
       } else if (seg.from === seg.to && actOrScene(text)) {
         // A plain "ACT II" / "SCENE 3" line the model called a direction.
-        out.push({ ...line("heading", null, null, text, seg.note), ...actOrScene(text)! });
+        out.push({ ...line("heading", null, null, text, seg.flag), ...actOrScene(text)! });
       } else if (actOrScene(lines[seg.from - 1]!.trim())) {
         // A heading folded into the scene description under it.
         const heading = lines[seg.from - 1]!.trim();
         out.push({ ...line("heading", null, null, heading, null), ...actOrScene(heading)! });
         const rest = joinLines(lines.slice(seg.from, seg.to));
-        if (rest) out.push(line("stage_direction", null, null, rest, seg.note));
+        if (rest) out.push(line("stage_direction", null, null, rest, seg.flag));
       } else {
-        out.push(line("stage_direction", null, null, text, seg.note));
+        out.push(line("stage_direction", null, null, text, seg.flag));
       }
     } else if (seg.type === "heading") {
       // The printed heading wins over the model's numbers when it can be read.
@@ -73,7 +85,7 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
       // A heading with no number in it ("SCENE" above a setting) gets no number from the model.
       const numbered = printed !== null || HAS_NUMBER.test(text);
       out.push({
-        ...line("heading", null, null, text, seg.note),
+        ...line("heading", null, null, text, seg.flag),
         act: printed ? printed.act : numbered ? (seg.act ?? parsed?.act ?? null) : (parsed?.act ?? null),
         scene: printed ? printed.scene : numbered ? (seg.scene ?? parsed?.scene ?? null) : (parsed?.scene ?? null),
       });
@@ -86,22 +98,37 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
       const cue = seg.type === "speech" ? (ownLine ? reported : preferSpeaker(bestCue(seg.cue, seg.speaker), seg.speaker)) : null;
       let body = seg.type === "speech" ? (ownLine ? joinLines(lines.slice(seg.from, seg.to)) : stripCue(text, [cue, seg.speaker])) : text;
       const cueDirection = seg.type === "speech" && seg.to > seg.from ? cueLineDirection(lines[seg.from - 1]!, [cue, seg.speaker]) : null;
-      if (cueDirection) {
-        out.push(line("stage_direction", null, null, cueDirection, null));
-        body = joinLines(lines.slice(seg.from, seg.to));
-      }
-      const pieces = splitDirections(body, seg.inlineDirections, parens, around);
+      if (cueDirection) body = joinLines(lines.slice(seg.from, seg.to));
+      // A direction on the cue's line ("MACBETH, to the Servant") opens the speech's text.
+      const pieces = [...(cueDirection ? [{ text: cueDirection, direction: true }] : []), ...splitDirections(body, seg.inlineDirections, parens, around)];
       // Words labelled as continuing a speech, after a cue that is still waiting, are that cue's.
       const owner = seg.type === "continue" && pending ? pending : null;
       const speaker: string | null = seg.type === "speech" ? seg.speaker : (owner?.speaker ?? null);
       const cueAsWritten: string | null = seg.type === "speech" ? (speaker ? (cue ?? speaker) : null) : (owner?.cue ?? null);
-      const spoke = emitSpeech(out, pieces, { speaker, cue: cueAsWritten, note: seg.note ?? owner?.note ?? null, continuation: seg.type === "continue" && !owner });
-      if (!spoke && speaker) orphan = { speaker, cue: cueAsWritten ?? speaker, note: seg.note };
+      const lead = owner ? takeLead(out, owner) : [];
+      const emitted = out.length;
+      const spoke = emitSpeech(out, [...lead, ...pieces], { speaker, cue: cueAsWritten, flag: seg.flag ?? owner?.flag ?? null, continuation: seg.type === "continue" && !owner });
+      if (!spoke && speaker) orphan = { speaker, cue: cueAsWritten ?? speaker, flag: seg.flag, lead: out.length - emitted };
     }
     for (let i = before; i < out.length; i++) out[i]!.sourceLine ??= seg.from;
   }
-  if (orphan) out.push({ ...line("dialogue", orphan.speaker, orphan.cue, "", orphan.note), cueOnly: true });
+  if (orphan) out.push({ ...line("dialogue", orphan.speaker, orphan.cue, "", orphan.flag), cueOnly: true });
   return out;
+}
+
+// The last line out is this speaker's speech, ending in a direction left open on its last line.
+function openDirectionAtEnd(out: AssembledLine[], speaker: string): boolean {
+  const last = out[out.length - 1];
+  return last?.kind === "dialogue" && last.speaker === speaker && last.text.endsWith("]");
+}
+
+// Removes the directions a waiting cue collected from the end of the output, to open its speech.
+function takeLead(out: AssembledLine[], orphan: Orphan): Piece[] {
+  const n = Math.min(orphan.lead, out.length);
+  const taken = out.slice(out.length - n);
+  if (taken.some((l) => l.kind !== "stage_direction")) return [];
+  out.length -= n;
+  return taken.map((l) => ({ text: l.text, direction: true }));
 }
 
 // Whether a block's text leaves a bracket open at its end, or closes one it didn't open.
@@ -119,8 +146,6 @@ export function bracketBalance(text: string, parens: boolean): { openAtEnd: bool
   }
   return { openAtEnd: depth > 0, closesFirst };
 }
-
-const CARRY_NOTE = "This speech carries on after a stage direction; check the speaker";
 
 function spokenAfterClose(text: string, inline: string[], parens: boolean, around: { closesNext?: boolean; openedBefore?: boolean }): boolean {
   return splitDirections(text, inline, parens, around).map(asDirectionIfWrapped).some((p) => !p.direction);
@@ -146,26 +171,40 @@ export function cueLineDirection(firstLine: string, cues: (string | null)[]): st
   return null;
 }
 
-// Emits the pieces of one speech; returns whether any spoken words were found.
+// Emits the pieces of one speech as ONE dialogue line; returns whether any spoken words were found.
+// Directions printed inside the speech, or on its cue line, stay in its text in [square brackets],
+// with the line breaks and indentation they were printed with.
 function emitSpeech(
   out: AssembledLine[],
   pieces: Piece[],
-  who: { speaker: string | null; cue: string | null; note: string | null; continuation: boolean },
+  who: { speaker: string | null; cue: string | null; flag: Flag | null; continuation: boolean },
 ): boolean {
-  // One speech stays one line for the actor to record: directions printed inside it are lifted out
-  // and placed before the speech, except ones after its last words, which follow it.
-  const spoken = pieces.filter((p) => !p.direction);
-  if (!spoken.length) {
-    for (const p of pieces) out.push(line("stage_direction", null, null, p.text, null));
+  if (!pieces.some((p) => !p.direction)) {
+    if (pieces.length) out.push(line("stage_direction", null, null, joinPieces(pieces), null));
     return false;
   }
-  const lastSpoken = pieces.lastIndexOf(spoken[spoken.length - 1]!);
-  for (const [i, p] of pieces.entries()) if (p.direction && i < lastSpoken) out.push(line("stage_direction", null, null, p.text, null));
-  const l: AssembledLine = line("dialogue", who.speaker, who.cue, spoken.map((p) => p.text).join(" "), who.note);
+  const l: AssembledLine = line("dialogue", who.speaker, who.cue, inlineText(pieces), who.flag);
   if (who.continuation) l.continuation = true;
   out.push(l);
-  for (const [i, p] of pieces.entries()) if (p.direction && i > lastSpoken) out.push(line("stage_direction", null, null, p.text, null));
   return true;
+}
+
+export function inlineText(pieces: Piece[]): string {
+  return joinPieces(pieces.map((p) => (p.direction ? { ...p, text: bracketed(p.text) } : p)));
+}
+
+function joinPieces(pieces: Piece[]): string {
+  let text = "";
+  for (const p of pieces) text = text ? text + (p.gap ?? " ") + p.text : p.text;
+  return text;
+}
+
+// "(aside)", "_Knocking._", "He exits." and "[Exit.]" all become "[...]" inside a speech.
+export function bracketed(raw: string): string {
+  let t = raw.trim().replace(/^[_*]+|[_*]+$/g, "").trim().replace(/\(/g, "[").replace(/\)/g, "]");
+  if (/^(?:\[[^[\]]*\][\s.,;:!?—–-]*)+$/.test(t)) return t;
+  t = t.replace(/[[\]]/g, "").trim();
+  return `[${t}]`;
 }
 
 const HAS_NUMBER = /\d|\b[IVXLC]+\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final)\b/i;
@@ -177,14 +216,14 @@ function actOrScene(text: string): { act: string | null; scene: string | null } 
   return h.act !== null || /^\d+$/.test(h.scene ?? "") ? h : null;
 }
 
-const line = (kind: ParsedLine["kind"], speaker: string | null, speakerAsWritten: string | null, text: string, flagReason: string | null): AssembledLine => ({
+const line = (kind: ParsedLine["kind"], speaker: string | null, speakerAsWritten: string | null, text: string, flag: Flag | null): AssembledLine => ({
   kind,
   speaker,
   speakerAsWritten,
   text,
   act: null,
   scene: null,
-  flagReason,
+  flag,
 });
 
 // Joins wrapped lines. A word broken with a hyphen at a line end ("some-" / "thing") is rejoined.
@@ -298,7 +337,7 @@ export function stripCue(text: string, cues: (string | null)[]): string {
     const bare = cue.replace(/[.:]+$/, "").trim();
     if (!bare) continue;
     // The cue ends at punctuation (even with no space after, as in "MRS LINDE.No."), a space or a dash.
-    const m = new RegExp(`^\\s*${escape(bare)}(?:\\s*[.:]\\s*|\\s+|\\s*$|(?=[([—–-]))`, "i").exec(text);
+    const m = new RegExp(`^\\s*${escape(bare)}(?:\\s*[.:,]\\s*|\\s+|\\s*$|(?=[([—–-]))`, "i").exec(text);
     if (m) return text.slice(m[0].length).replace(/^\s*[.:,]\s*/, "").trim();
   }
   return text;
@@ -307,6 +346,7 @@ export function stripCue(text: string, cues: (string | null)[]): string {
 interface Piece {
   text: string;
   direction: boolean;
+  gap?: string; // a line break (and indentation) printed before this piece; a space when absent
 }
 
 // Square brackets are always editorial or stage directions. Parentheses are not: verse uses them
@@ -362,27 +402,36 @@ export function splitDirections(
   spans.sort((a, b) => a[0] - b[0]);
 
   const pieces: Piece[] = [];
+  const state = { trail: "" };
   let pos = 0;
   for (const [start, end] of spans) {
     if (start < pos) continue;
-    push(pieces, text.slice(pos, start), false);
-    push(pieces, text.slice(start, end), true);
+    push(pieces, text.slice(pos, start), false, state);
+    push(pieces, text.slice(start, end), true, state);
     pos = end;
   }
-  push(pieces, text.slice(pos), false);
+  push(pieces, text.slice(pos), false, state);
   return pieces;
 }
 
-function push(pieces: Piece[], raw: string, direction: boolean) {
+function push(pieces: Piece[], raw: string, direction: boolean, state: { trail: string }) {
+  // The whitespace between this piece and the one before: a printed line break is kept.
+  const space = state.trail + /^\s*/.exec(raw)![0];
+  state.trail = raw.trim() ? /\s*$/.exec(raw)![0] : space;
+  const gap = space.includes("\n") ? "\n" + space.slice(space.lastIndexOf("\n") + 1).replace(/\t/g, " ") : undefined;
   // Punctuation left at the start after a cut direction (", " or ". "), but not an ellipsis.
   let text = tidyText(raw).replace(/^(?:[,;:]|\.(?!\.))\s*/, "");
   // A dash left at the start of a speech after cutting a direction ("_Looking out._—Did you…").
   if (!direction) text = text.replace(/^[—–-]+\s*/, "").replace(EMPHASIS, "$1");
   else text = text.replace(/^_(.+)_$/, "$1");
-  if (!/[\p{L}\p{N}]/u.test(text)) return;
+  if (!/[\p{L}\p{N}]/u.test(text)) {
+    if (raw.trim()) state.trail = space + state.trail;
+    return;
+  }
   const last = pieces[pieces.length - 1];
-  if (last && last.direction === direction) last.text += " " + text;
-  else pieces.push({ text, direction });
+  // Directions stay separate pieces, so each gets its own [brackets] inside a speech.
+  if (last && !last.direction && !direction) last.text += (gap ?? " ") + text;
+  else pieces.push(gap ? { text, direction, gap } : { text, direction });
 }
 
 // Finds a direction even when the model normalised spacing or curly quotes.
