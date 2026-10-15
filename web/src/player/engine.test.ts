@@ -38,10 +38,10 @@ const isSilence = (src: string) => src.startsWith("blob:");
 // Scene 1: a, b, c. Scene 2: d, e, f. Every clip is ready unless the test holds it back.
 const lines: QueueLine[] = ["a", "b", "c", "d", "e", "f"].map((id, i) => ({ lineId: id, sectionId: i < 3 ? "s1" : "s2", text: "Five words are spoken here." }));
 
-function setup(opts: { hold?: (lineId: string, prefetch: boolean) => boolean; source?: (lineId: string) => LineAudio["source"] } = {}) {
+function setup(opts: { hold?: (lineId: string, prefetch: boolean) => boolean; source?: (lineId: string) => LineAudio["source"]; segments?: LineAudio["segments"] } = {}) {
   const calls: { lineId: string; prefetch: boolean }[] = [];
   const held: { lineId: string; resolve: (a: LineAudio) => void }[] = [];
-  const answer = (lineId: string): LineAudio => ({ lineId, audioUrl: `clip:${lineId}`, durationMs: 2000, source: opts.source?.(lineId) ?? "tts", ready: true });
+  const answer = (lineId: string): LineAudio => ({ lineId, audioUrl: `clip:${lineId}`, durationMs: 2000, source: opts.source?.(lineId) ?? "tts", ready: true, segments: opts.segments });
   const api: LineAudioApi = {
     line: (lineId, o = {}) => {
       calls.push({ lineId, prefetch: Boolean(o.prefetch) });
@@ -211,5 +211,39 @@ describe("clip loader", () => {
     const play = await clips.load("x");
     expect(calls).toEqual([false, false, false]);
     expect(play).toMatchObject({ url: null, durationMs: 1500 });
+  });
+});
+
+describe("position, for word highlighting", () => {
+  const segments = [{ startMs: 100, endMs: 1800, text: "Five words are spoken here.", narrator: false }];
+
+  it("reports the clip's media time and its segments while a line plays, then 'after' in the pause", async () => {
+    const { audio, engine } = setup({ segments });
+    await flush();
+    expect(engine.position()).toBeNull();
+    engine.play();
+    await flush();
+    audio.currentTime = 0.75;
+    expect(engine.position()).toEqual({ index: 0, kind: "clip", timeMs: 750, durationMs: 2000, segments });
+    audio.finish();
+    await flush();
+    expect(engine.position()).toMatchObject({ index: 0, kind: "after" });
+  });
+
+  it("reports the listener's silence on their own line as a gap", async () => {
+    const { audio, engine } = setup();
+    engine.setPart({ mine: new Set(["b"]), mode: "pause" });
+    await flush();
+    engine.play();
+    await flush();
+    audio.finish(); // a ends
+    await flush();
+    audio.finish(); // the pause before b ends
+    await flush();
+    audio.currentTime = 0.4;
+    const pos = engine.position();
+    expect(pos).toMatchObject({ index: 1, kind: "gap", timeMs: 400 });
+    expect(pos!.durationMs).toBeGreaterThan(1000);
+    expect(pos!.segments).toBeUndefined();
   });
 });

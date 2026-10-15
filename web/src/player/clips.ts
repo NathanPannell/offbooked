@@ -1,4 +1,4 @@
-import type { AudioSource, LineAudio, LineAudioApi } from "../api/types";
+import type { AudioSource, LineAudio, LineAudioApi, SpokenSegment } from "../api/types";
 
 /** A line's playable audio: a local blob URL (or the signed URL when it can't be downloaded), or null for silence. */
 export interface Clip {
@@ -6,6 +6,8 @@ export interface Clip {
   url: string | null;
   durationMs: number;
   source: AudioSource;
+  /** When each part of a synthesized clip is said, for highlighting words. */
+  segments?: SpokenSegment[];
 }
 
 interface Entry {
@@ -139,7 +141,7 @@ export class ClipLoader {
         // Cross-origin download refused: the <audio> element can still stream the signed URL.
       }
     }
-    const clip: Clip = { lineId, url, durationMs: audio.durationMs, source: audio.source };
+    const clip: Clip = { lineId, url, durationMs: audio.durationMs, source: audio.source, ...(audio.segments?.length ? { segments: audio.segments } : {}) };
     if (this.disposed) {
       if (blob && url) URL.revokeObjectURL(url);
       return clip;

@@ -1,4 +1,5 @@
-import type { ClipLoader } from "./clips";
+import type { SpokenSegment } from "../api/types";
+import type { Clip, ClipLoader } from "./clips";
 import {
   gapBetweenMs,
   isMine,
@@ -32,6 +33,19 @@ export interface PlayerState {
   waiting: boolean;
 }
 
+/**
+ * Where playback is inside the current line, for highlighting its words. "clip": its audio is
+ * playing (timeMs is media time, so it holds at any speed). "gap": the listener's silence on their
+ * own line. "before": waiting for the clip. "after": the line is done, the pause before the next.
+ */
+export interface LinePosition {
+  index: number;
+  kind: "clip" | "gap" | "before" | "after";
+  timeMs: number;
+  durationMs: number;
+  segments?: SpokenSegment[];
+}
+
 export interface GapLine {
   index: number;
   lineId: string;
@@ -49,7 +63,7 @@ export const WARM_LINES = 25;
 const WAIT_LOOP_MS = 250;
 
 type Phase =
-  | { kind: "line"; index: number }
+  | { kind: "line"; index: number; clip: Clip }
   | { kind: "wait"; index: number; afterSpeak: boolean } // the clip is loading; a short silence loops meanwhile
   | { kind: "speak"; index: number; durationMs: number; then: "read" | "next" } // the listener says their line; then it plays, or the next one does
   | { kind: "pause"; index: number; next: number }; // the pause between two lines
@@ -131,6 +145,23 @@ export class PlayerEngine {
     this.speed = Math.min(3, Math.max(1, speed));
     const phase = this.phase;
     if (phase?.kind === "line") this.applyRate(isMine(this.part, this.lines[phase.index]));
+  }
+
+  /** Where playback is inside the current line (see LinePosition), or null when stopped. */
+  position(): LinePosition | null {
+    const phase = this.phase;
+    if (!phase) return null;
+    const timeMs = this.audio.currentTime * 1000;
+    switch (phase.kind) {
+      case "line":
+        return { index: phase.index, kind: "clip", timeMs, durationMs: phase.clip.durationMs, segments: phase.clip.url ? phase.clip.segments : undefined };
+      case "speak":
+        return { index: phase.index, kind: "gap", timeMs, durationMs: phase.durationMs };
+      case "wait":
+        return { index: phase.index, kind: phase.afterSpeak ? "after" : "before", timeMs: 0, durationMs: 0 };
+      case "pause":
+        return { index: phase.index, kind: "after", timeMs: 0, durationMs: 0 };
+    }
   }
 
   get hasLines(): boolean {
@@ -258,7 +289,7 @@ export class PlayerEngine {
     const mine = isMine(this.part, line);
     const clip = this.clips.ready(line.lineId);
     if (clip) {
-      this.phase = { kind: "line", index };
+      this.phase = { kind: "line", index, clip };
       this.set({ waiting: false });
       const rate = mine ? 1 : this.speed;
       this.playUrl(clip.url ?? silenceUrl(clip.durationMs), { rate });

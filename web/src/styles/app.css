@@ -3767,6 +3767,45 @@
   font-weight: 500;
 }
 
+/* The line being read, word by word: said words in ink, the current word underlined in soft red,
+   the words still to come a little muted. */
+.lyric-text.is-live .rw {
+  color: var(--muted);
+  border-radius: 3px;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: transparent;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+  transition:
+    color 0.12s var(--ease),
+    background-color 0.12s var(--ease),
+    text-decoration-color 0.12s var(--ease);
+}
+
+.lyric-text.is-live .rw.is-said {
+  color: var(--ink);
+}
+
+.lyric-text.is-live .rw.is-now {
+  color: var(--ink);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  text-decoration-color: var(--accent-line);
+}
+
+/* A [direction] inside a line, read by the narrator. */
+.lyric-text.is-live .rw-dir {
+  font-size: 0.82em;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.kind-stage_direction .lyric-text.is-live .rw.is-said,
+.kind-stage_direction .lyric-text.is-live .rw.is-now {
+  color: var(--ink-soft);
+}
+
 .lyric.kind-heading {
   padding: 4px 12px;
   color: var(--faint);
@@ -3987,7 +4026,8 @@
    ====================================================================== */
 
 @media (prefers-reduced-motion: reduce) {
-  .my-text.is-live .lw {
+  .my-text.is-live .lw,
+  .lyric-text.is-live .rw {
     transition: none;
   }
 

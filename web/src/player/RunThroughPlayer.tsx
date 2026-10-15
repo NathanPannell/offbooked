@@ -1,5 +1,5 @@
 import { Crosshair, Mic, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
 import { CharacterName } from "../components/CharacterName";
@@ -14,12 +14,15 @@ import { useResource } from "../lib/useResource";
 import { formatAccuracy, overallAccuracy, scoreLabel, verdict } from "../stt/score";
 import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
+import { keepInView } from "./follow";
+import { LiveText } from "./LiveText";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
 import { defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
 import { SPEEDS } from "./timing";
 import { usePractice } from "./usePractice";
 
-const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+/** After scrolling by hand, how long before the play is followed again. */
+const RESUME_FOLLOW_MS = 4000;
 
 /** What happens on the listener's own lines: the closed label, a phone-width label, and the fuller option text. */
 const MODES: { mode: MyLineMode; label: string; short: string; option: string }[] = [
@@ -49,6 +52,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   const [following, setFollowing] = useState(true);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const lineRefs = useRef(new Map<string, HTMLElement>());
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const data = rt.data;
   const lines = useMemo(() => (data ? [...data.lines].sort((a, b) => a.seq - b.seq) : []), [data]);
@@ -141,17 +145,30 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
   const currentSeq = currentLine?.seq ?? -Infinity;
 
-  // Keep the current line centred, unless the listener has scrolled away.
+  // Keep the current line in view between the pinned row and the player bar, unless the listener
+  // has scrolled away. While it plays, LiveText keeps its current word in view the same way.
   useEffect(() => {
     if (!following || !currentSegment) return;
-    lineRefs.current.get(currentSegment.lineId)?.scrollIntoView({
-      block: "center",
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-    });
+    const el = lineRefs.current.get(currentSegment.lineId);
+    if (el) keepInView(el, rootRef.current);
   }, [currentSegment, following]);
 
+  const playingRef = useRef(false);
+  playingRef.current = state.playing;
+  const followingRef = useRef(following);
+  followingRef.current = following;
+  const shouldFollow = useCallback(() => followingRef.current && playingRef.current, []);
+
+  // Scrolling by hand pauses following for a few seconds; it picks up again if the play is running.
   useEffect(() => {
-    const stopFollowing = () => setFollowing(false);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stopFollowing = () => {
+      setFollowing(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (playingRef.current) setFollowing(true);
+      }, RESUME_FOLLOW_MS);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (["PageUp", "PageDown", "Home", "End"].includes(e.key)) stopFollowing();
     };
@@ -159,6 +176,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     window.addEventListener("touchmove", stopFollowing, { passive: true });
     window.addEventListener("keydown", onKey);
     return () => {
+      clearTimeout(timer);
       window.removeEventListener("wheel", stopFollowing);
       window.removeEventListener("touchmove", stopFollowing);
       window.removeEventListener("keydown", onKey);
@@ -225,7 +243,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   };
 
   return (
-    <div className={`player ${hasRole ? "is-my-part" : ""}`}>
+    <div ref={rootRef} className={`player ${hasRole ? "is-my-part" : ""}`}>
       <audio ref={audioRef} preload="auto" playsInline />
 
       {/* One row pinned to the top: who you are, what happens on your lines, and the scene. */}
@@ -357,7 +375,19 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                             )}
                           </span>
                         )}
-                        <span className="lyric-text">{line.text}</span>
+                        {isCurrent && engine && audioRef.current ? (
+                          <LiveText
+                            text={line.text}
+                            kind={line.kind === "stage_direction" ? "stage_direction" : "dialogue"}
+                            index={segment}
+                            engine={engine}
+                            audio={audioRef.current}
+                            shouldFollow={shouldFollow}
+                            root={rootRef}
+                          />
+                        ) : (
+                          <span className="lyric-text">{line.text}</span>
+                        )}
                       </button>
                       {inGap && state.gap && (
                         <div
