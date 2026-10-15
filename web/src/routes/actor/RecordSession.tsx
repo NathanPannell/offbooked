@@ -155,6 +155,14 @@ export function RecordSession({ token, api, invite }: { token: string; api: Acto
     [uploader, token, setLinesData, stt, postStt],
   );
 
+  // Live word highlighting needs the model, so start its (low-priority) download once the page has
+  // settled rather than after the first upload: it is usually ready a line or two in. Takes never
+  // wait for it, and `start` still declines on data saver or an unsupported device.
+  useEffect(() => {
+    const id = window.setTimeout(() => void stt.start(), 1500);
+    return () => window.clearTimeout(id);
+  }, [stt]);
+
   useEffect(() => {
     if (sttState.status === "unavailable" && stt.claimUnavailableNotice()) setSttNotice(true);
   }, [sttState.status, stt]);

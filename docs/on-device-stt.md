@@ -126,7 +126,7 @@ Also fall back at run time. If the worker posts an `error` (a model fetch fails 
 
 ### Lazy loading after the first take
 
-1. On the recording page, do nothing STT-related until the **first take has been saved and its upload has finished** (or failed). The first two minutes are spent only on getting the actor recording.
+1. On the recording page, start the model 1.5 s after the page opens, at low fetch priority (changed 2026-10-15 so live word highlighting is ready a line or two in). Recording never waits for it.
 2. Then call `sttClient.start()`. It runs `canRunStt()`, creates the worker and sends `{ type: 'load' }`. The worker starts downloading the model at low fetch priority (see `env.fetch` below), so take uploads keep their bandwidth.
 3. Takes recorded while the model is loading are queued, including take 1. Decoded audio is small (30 s × 16 000 × 4 B ≈ 1.9 MB), so keep the `Float32Array`s in the worker queue and score them in order once the model is ready.
 4. UI: a small status chip on the recording screen shows "Accuracy check: preparing (37%)", then "ready". Per-line badges fill in as results arrive. Nothing waits on them.
