@@ -144,6 +144,16 @@ export interface LineAudio {
   source: AudioSource;
   /** False while the clip is still being made: ask again. */
   ready: boolean;
+  /** A synthesized clip: when each printed line (and narrated [direction]) is said. Absent for takes. */
+  segments?: SpokenSegment[];
+}
+
+/** One spoken stretch of a clip, in ms of the clip as served. `text` is what was said. */
+export interface SpokenSegment {
+  startMs: number;
+  endMs: number;
+  text: string;
+  narrator: boolean;
 }
 
 /** Line audio calls, scoped to a director's production or an actor's invite. */

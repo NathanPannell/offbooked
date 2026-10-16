@@ -3,23 +3,42 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Sql } from "../db.ts";
 import type { Log } from "../log.ts";
-import { encodeCue, normalizeClip } from "../render/ffmpeg.ts";
+import { encodeCue, normalizeClipCut } from "../render/ffmpeg.ts";
+import { RENDER_SETTINGS } from "../render/plan.ts";
 import type { Storage } from "../storage/storage.ts";
 import type { Synthesizer } from "./piper.ts";
-import { assignVoices, clipHash, NARRATOR, speakable, speakableDirection, type Voice } from "./voices.ts";
+import { assignVoices, clipHash, NARRATOR, speakableDirection, spokenParts, TTS_SETTINGS, type Voice } from "./voices.ts";
+import { joinWavs } from "./wav.ts";
+
+// One spoken stretch of a clip: a printed line, or the narrator's part of a line. Times are in the
+// normalized clip, so the run-through can light up words as they are read.
+export interface SpokenSegment {
+  startMs: number;
+  endMs: number;
+  text: string;
+  narrator: boolean;
+}
 
 export interface TtsClip {
   hash: string;
   storageKey: string; // normalized FLAC
   samples: number;
   cueKey: string | null; // .m4a for cue playback
+  timings?: SpokenSegment[] | null;
 }
 
 export interface TtsRequest {
   hash: string;
-  text: string; // already speakable()
-  voice: Voice;
+  text: string; // what is said, for logs and word counts
+  voice: Voice; // the line's own voice (the narrator's for a stage direction)
+  // In order: the character's words and, read by the narrator in their place, any [bracketed]
+  // direction inside the line. Each part's printed lines are spoken one at a time.
+  parts: { voice: Voice; text: string; narrator: boolean }[];
 }
+
+// The silence when the voice changes inside a line (character to narrator and back), on top of the
+// ~0.2 s Piper leaves after each utterance.
+const VOICE_SWITCH_MS = 200;
 
 // Lower runs first. A listener waiting on a line beats prefetching, which beats cue warm-ups and
 // the background render.
@@ -149,23 +168,28 @@ export class TtsService {
   }
 
   // The clip request for a line, or null when there is nothing to say.
+  // A [bracketed] direction inside the line is read by the narrator, between the character's words.
   request(engine: string, voice: Voice | undefined, text: string): TtsRequest | null {
-    const spoken = speakable(text);
-    if (!voice || !spoken) return null;
-    return { hash: clipHash(engine, voice, spoken), text: spoken, voice };
+    if (!voice) return null;
+    const parts = spokenParts(text).map((p) => ({ voice: p.narrator ? NARRATOR : voice, text: p.text, narrator: p.narrator }));
+    if (!parts.some((p) => !p.narrator)) return null;
+    const spoken = parts.map((p) => p.text).join("\n");
+    // A line the character says alone keeps the key it always had.
+    const key = parts.length === 1 ? spoken : parts.map((p) => `${p.narrator ? "N" : "C"}:${p.text}`).join("\n|");
+    return { hash: clipHash(engine, voice, key), text: spoken, voice, parts };
   }
 
   // A stage direction, read by the narrator (a voice no character has).
   directionRequest(engine: string, text: string): TtsRequest | null {
     const spoken = speakableDirection(text);
     if (!spoken) return null;
-    return { hash: clipHash(engine, NARRATOR, spoken), text: spoken, voice: NARRATOR };
+    return { hash: clipHash(engine, NARRATOR, spoken), text: spoken, voice: NARRATOR, parts: [{ voice: NARRATOR, text: spoken, narrator: true }] };
   }
 
   async cached(hashes: string[]): Promise<Map<string, TtsClip>> {
     if (!hashes.length) return new Map();
     const rows = await this.sql<TtsClip[]>`
-      select hash, storage_key, samples, cue_key from tts_clips where hash = any(${[...new Set(hashes)]}::text[])`;
+      select hash, storage_key, samples, cue_key, timings from tts_clips where hash = any(${[...new Set(hashes)]}::text[])`;
     return new Map(rows.map((r) => [r.hash, r]));
   }
 
@@ -222,8 +246,30 @@ export class TtsService {
       const m4a = path.join(dir, "clip.m4a");
       if (!clip) {
         const wav = path.join(dir, "clip.wav");
-        await this.synth.synthesize(r.text, r.voice, wav);
-        const samples = await normalizeClip(wav, flac, m4a);
+        // One utterance per printed line, in its part's voice, joined with a pause, so verse isn't
+        // run together and a direction inside a line is heard in the narrator's voice.
+        const pieces: { file: string; text: string; voice: Voice; narrator: boolean; gapBeforeMs: number }[] = [];
+        r.parts.forEach((part, pi) =>
+          part.text.split("\n").forEach((text, li) =>
+            pieces.push({
+              file: path.join(dir, `piece-${pieces.length}.wav`),
+              text,
+              voice: part.voice,
+              narrator: part.narrator,
+              gapBeforeMs: pieces.length === 0 ? 0 : li === 0 && pi > 0 ? VOICE_SWITCH_MS : TTS_SETTINGS.lineBreakMs,
+            }),
+          ),
+        );
+        for (const piece of pieces) await this.synth.synthesize(piece.text, piece.voice, piece.file);
+        const spans = await joinWavs(
+          pieces.map((p) => p.file),
+          pieces.map((p) => p.gapBeforeMs),
+          wav,
+        );
+        const { samples, cutStartMs } = await normalizeClipCut(wav, flac, m4a);
+        const lengthMs = Math.round((samples * 1000) / RENDER_SETTINGS.sampleRate);
+        const at = (ms: number) => Math.max(0, Math.min(lengthMs, Math.round(ms - cutStartMs)));
+        const timings: SpokenSegment[] = pieces.map((p, i) => ({ startMs: at(spans[i]!.startMs), endMs: at(spans[i]!.endMs), text: p.text, narrator: p.narrator }));
         if (samples <= 0) throw new Error("synthesized clip is empty");
         const storageKey = `tts/${r.hash}.flac`;
         const cueKey = `tts/${r.hash}.m4a`;
@@ -231,9 +277,9 @@ export class TtsService {
           this.storage.put(storageKey, await readFile(flac), "audio/flac"),
           this.storage.put(cueKey, await readFile(m4a), "audio/mp4"),
         ]);
-        await this.sql`insert into tts_clips (hash, voice, storage_key, samples, cue_key) values (${r.hash}, ${r.voice.id}, ${storageKey}, ${samples}, ${cueKey})
+        await this.sql`insert into tts_clips (hash, voice, storage_key, samples, cue_key, timings) values (${r.hash}, ${r.voice.id}, ${storageKey}, ${samples}, ${cueKey}, ${this.sql.json(timings as never)})
                        on conflict (hash) do update set cue_key = coalesce(tts_clips.cue_key, excluded.cue_key)`;
-        return { hash: r.hash, storageKey, samples, cueKey };
+        return { hash: r.hash, storageKey, samples, cueKey, timings };
       }
       // A clip made before every clip had an .m4a.
       await writeFile(flac, await this.storage.get(clip.storageKey));

@@ -10,6 +10,7 @@ import { Loading } from "../../components/Loading";
 import { firstWord, joinNames, plural } from "../../lib/format";
 import { forgetJoin, joinTokenForInvite } from "../../lib/joinMemory";
 import { useResource } from "../../lib/useResource";
+import { usePrewarmStt } from "../../stt/useStt";
 import { RecordSession } from "./RecordSession";
 
 export default function InvitePage() {
@@ -17,6 +18,8 @@ export default function InvitePage() {
   const api = useMemo(() => actorApi(token), [token]);
   const invite = useResource(() => api.invite(), token);
   const [started, setStarted] = useState(false);
+  // Load the speech model while they read the welcome and type a name.
+  usePrewarmStt(!!invite.data);
 
   if (invite.loading) return <Loading />;
   if (invite.error instanceof ApiError && (invite.error.status === 410 || invite.error.status === 401 || invite.error.status === 404)) {

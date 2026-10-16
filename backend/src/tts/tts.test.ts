@@ -6,7 +6,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { silentLog } from "../log.ts";
 import { PiperSynthesizer, pooledProcs } from "./piper.ts";
-import { assignVoices, clipHash, guessGender, NARRATOR, NARRATOR_VOICE_ID, speakable, speakableDirection, VOICE_MODELS, VOICES } from "./voices.ts";
+import { assignVoices, clipHash, guessGender, NARRATOR, NARRATOR_VOICE_ID, speakable, speakableDirection, spokenParts, TTS_SETTINGS, VOICE_MODELS, VOICES } from "./voices.ts";
+import { joinWavs } from "./wav.ts";
+import { toneWav } from "../test/tts.ts";
 
 const chars = (names: string[]) => names.map((name) => ({ id: randomUUID(), name }));
 
@@ -60,11 +62,11 @@ test("the narrator's voice is reserved: no character ever gets it", () => {
 });
 
 test("stage directions are read without their brackets; asides inside dialogue are dropped", () => {
-  assert.equal(speakableDirection("[Flourish. Enter Claudius, King of Denmark,\n  Gertrude the Queen.]"), "Flourish. Enter Claudius, King of Denmark, Gertrude the Queen.");
+  assert.equal(speakableDirection("[Flourish. Enter Claudius, King of Denmark,\n  Gertrude the Queen.]"), "Flourish. Enter Claudius, King of Denmark,\nGertrude the Queen.");
   assert.equal(speakableDirection("_Exit._"), "Exit.");
   assert.equal(speakableDirection("[ ]"), "");
   assert.equal(speakable("Now go. [To the Servant.] Was it not"), "Now go. Was it not");
-  assert.equal(speakable("Stay, I say. [Enter the Ghost\nand more"), "Stay, I say. and more");
+  assert.equal(speakable("Stay, I say. [Enter the Ghost\nand more"), "Stay, I say.\nand more");
 });
 
 test("Piper keeps one process per model, so alternating voices never reload a model", async () => {
@@ -105,8 +107,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 
-test("spoken text drops bracketed directions and markup and joins verse lines", () => {
-  assert.equal(speakable("[Aside.] A little more than kin,\n  and less than kind."), "A little more than kin, and less than kind.");
+test("spoken text drops bracketed directions and markup and keeps each printed line", () => {
+  assert.equal(speakable("[Aside.] A little more than kin,\n  and less than kind."), "A little more than kin,\nand less than kind.");
+  assert.equal(speakable("To be, or not\n\n   —\nto be"), "To be, or not\nto be", "blank and wordless lines go");
   assert.equal(speakable("_Exit._ Farewell {beat} now"), "Exit. Farewell now");
   assert.equal(speakable("—"), "");
   assert.equal(speakable("[Exit.]"), "");
@@ -122,8 +125,10 @@ test("TTS cache key covers text, voice, engine and settings", () => {
   assert.notEqual(clipHash("piper 1.3.0", a, "Hail to your lordship!"), key, "engine");
   const vctk = VOICES.filter((v) => v.model === "en_GB-vctk-medium");
   assert.notEqual(clipHash("piper 1.2.0", vctk[0]!, "x"), clipHash("piper 1.2.0", vctk[1]!, "x"), "speaker within a model");
-  // Whitespace and brackets are cleaned before hashing, so cosmetic edits reuse the clip.
-  assert.equal(speakable("Hail to  your\nlordship!"), speakable("[Bowing.] Hail to your lordship!"));
+  // Spaces and brackets are cleaned before hashing, so cosmetic edits reuse the clip. A line break
+  // is a pause, so it counts.
+  assert.equal(speakable("Hail to  your lordship! "), speakable("[Bowing.] Hail to your lordship!"));
+  assert.notEqual(speakable("Hail to your\nlordship!"), speakable("Hail to your lordship!"));
 });
 
 test("Piper reports itself unavailable when the binary or voices are missing", async () => {
@@ -132,6 +137,49 @@ test("Piper reports itself unavailable when the binary or voices are missing", a
     const piper = new PiperSynthesizer({ bin: path.join(dir, "no-piper"), voicesDir: dir, maxProcs: 1, log: silentLog });
     assert.equal(await piper.probe(), null);
     await piper.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a line splits into the character's words and the narrator's directions, in order", () => {
+  assert.deepEqual(spokenParts("Now go. [To the Servant.] Was it not"), [
+    { narrator: false, text: "Now go." },
+    { narrator: true, text: "To the Servant." },
+    { narrator: false, text: "Was it not" },
+  ]);
+  assert.deepEqual(spokenParts("[Aside.] A little more than kin,\n  and less than kind."), [
+    { narrator: true, text: "Aside." },
+    { narrator: false, text: "A little more than kin,\nand less than kind." },
+  ]);
+  // A direction closed on a later printed line, and one never closed (it ends with its line).
+  assert.deepEqual(spokenParts("Go. [He blots and folds\nthe letter.] Splendid."), [
+    { narrator: false, text: "Go." },
+    { narrator: true, text: "He blots and folds\nthe letter." },
+    { narrator: false, text: "Splendid." },
+  ]);
+  assert.deepEqual(spokenParts("Stay. [Enter the Ghost\nand more"), [
+    { narrator: false, text: "Stay." },
+    { narrator: true, text: "Enter the Ghost" },
+    { narrator: false, text: "and more" },
+  ]);
+  assert.deepEqual(spokenParts("— [ ] —"), []);
+});
+
+test("printed lines are joined with a pause between them", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "offbooked-wav-"));
+  try {
+    const parts = [path.join(dir, "a.wav"), path.join(dir, "b.wav")];
+    await writeFile(parts[0]!, toneWav(0.5, 300));
+    await writeFile(parts[1]!, toneWav(0.25, 300));
+    const out = path.join(dir, "out.wav");
+    await joinWavs(parts, TTS_SETTINGS.lineBreakMs, out);
+    const wav = await readFile(out);
+    const gap = Math.round((22_050 * TTS_SETTINGS.lineBreakMs) / 1000);
+    assert.equal(wav.readUInt32LE(40) / 2, Math.round(22_050 * 0.5) + Math.round(22_050 * 0.25) + gap);
+    assert.equal(wav.readUInt32LE(4), wav.length - 8);
+    await writeFile(parts[1]!, toneWav(0.25, 300, 16_000));
+    await assert.rejects(joinWavs(parts, 300, out), /differ in format/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

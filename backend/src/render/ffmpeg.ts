@@ -62,18 +62,27 @@ const measure = async (flac: string) => (await flacSamples(flac)) ?? (await prob
 
 // The filters that cut a clip to its speech (see trim.ts), with a few ms of fade at each cut so it
 // never clicks. Empty when there is nothing to cut.
-async function trimFilters(input: string): Promise<string> {
+async function trimFilters(input: string): Promise<{ filters: string; startMs: number }> {
   const b = await detectSpeech(input);
-  if (!b || b.endMs - b.startMs < 50) return "";
+  if (!b || b.endMs - b.startMs < 50) return { filters: "", startMs: 0 };
   const s = (ms: number) => (ms / 1000).toFixed(3);
   const length = b.endMs - b.startMs;
-  return `asetpts=PTS-STARTPTS,atrim=start=${s(b.startMs)}:end=${s(b.endMs)},asetpts=PTS-STARTPTS,afade=t=in:d=0.005,afade=t=out:st=${s(Math.max(0, length - 10))}:d=0.01,`;
+  return {
+    filters: `asetpts=PTS-STARTPTS,atrim=start=${s(b.startMs)}:end=${s(b.endMs)},asetpts=PTS-STARTPTS,afade=t=in:d=0.005,afade=t=out:st=${s(Math.max(0, length - 10))}:d=0.01,`,
+    startMs: b.startMs,
+  };
 }
 
 // Decode, cut to the speech (leading and trailing silence and noise, with a small pad), loudness-
 // normalize, 48 kHz mono FLAC. With `m4a`, the same ffmpeg run also writes the AAC file that
 // browsers play line by line (about 50 ms extra). Returns the FLAC's length in samples.
 export async function normalizeClip(input: string, output: string, m4a?: string): Promise<number> {
+  return (await normalizeClipCut(input, output, m4a)).samples;
+}
+
+// normalizeClip, also saying where the cut started in the input (ms), so timings measured on the
+// input (TTS word timings) can be moved onto the output.
+export async function normalizeClipCut(input: string, output: string, m4a?: string): Promise<{ samples: number; cutStartMs: number }> {
   const run = (filters: string) =>
     ffmpeg(
       m4a
@@ -82,14 +91,15 @@ export async function normalizeClip(input: string, output: string, m4a?: string)
            "-map", "[a]", "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", m4a]
         : ["-i", input, "-vn", "-af", filters, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output],
     );
-  await run(`${await trimFilters(input)}${loudnorm}`);
+  const cut = await trimFilters(input);
+  await run(`${cut.filters}${loudnorm}`);
   let samples = await measure(output);
   if (samples < RATE / 20) {
     // Nearly everything was below the silence threshold; keep the take untrimmed instead.
     await run(loudnorm);
-    samples = await measure(output);
+    return { samples: await measure(output), cutStartMs: 0 };
   }
-  return samples;
+  return { samples, cutStartMs: cut.startMs };
 }
 
 export function normalizeTake(input: string, output: string): Promise<number> {

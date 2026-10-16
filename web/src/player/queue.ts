@@ -17,8 +17,9 @@ export interface QueueLine {
 }
 
 /**
- * What happens on the listener's own lines: played like everyone else's, left out altogether, or
- * a pause long enough to say the line, then the line itself.
+ * What happens on the listener's own lines: played like everyone else's ("read"), a silence as
+ * long as the line takes to say and then on to the next ("skip": the voice is left out, the time
+ * isn't), or that silence and then the line itself ("pause").
  */
 export type MyLineMode = "read" | "skip" | "pause";
 
@@ -32,18 +33,13 @@ export const NO_PART: Part = { mine: null, mode: "read" };
 
 export const isMine = (part: Part, line: QueueLine | undefined): boolean => Boolean(line && part.mine?.has(line.lineId));
 
-/** True for a line that isn't played at all: the listener's own, in skip mode. */
-export function isSkipped(part: Part, line: QueueLine | undefined): boolean {
-  return part.mode === "skip" && isMine(part, line);
+/** The first line at or after `index`, or null when none is left. Every line takes its time. */
+export function playableFrom(lines: QueueLine[], index: number, _part: Part = NO_PART): number | null {
+  const i = Math.max(0, index);
+  return i < lines.length ? i : null;
 }
 
-/** The first line at or after `index` that plays, or null when none is left. */
-export function playableFrom(lines: QueueLine[], index: number, part: Part): number | null {
-  for (let i = Math.max(0, index); i < lines.length; i++) if (!isSkipped(part, lines[i])) return i;
-  return null;
-}
-
-/** The line that plays after `index`, skipping lines left out. Null at the end of the play. */
+/** The line after `index`. Null at the end of the play. */
 export function nextIndex(lines: QueueLine[], index: number, part: Part = NO_PART): number | null {
   return playableFrom(lines, index + 1, part);
 }
@@ -64,21 +60,25 @@ export function previousIndex(index: number, elapsedMs: number, restartAfterMs =
 
 /**
  * What happens at a line: its audio (at the listener's chosen speed for other people's lines, at
- * normal speed for their own), or first a pause while the listener says it. `recordedMs` is the
- * line's take length when it has one, which times the pause.
+ * normal speed for their own), or a silence while the listener says it, followed by the line
+ * ("pause") or by the next line ("skip"). `recordedMs` is the line's take length when it has one,
+ * which times the silence.
  */
 export type Step =
   | { kind: "line"; index: number; mine: boolean }
-  | { kind: "speak"; index: number; durationMs: number };
+  | { kind: "speak"; index: number; durationMs: number; then: "read" | "next" };
 
 export function stepFor(lines: QueueLine[], index: number, part: Part, recordedMs?: number | null): Step {
   const line = lines[index];
   const mine = isMine(part, line);
-  if (line && mine && part.mode === "pause") return { kind: "speak", index, durationMs: myLinePauseMs({ text: line.text, recordedMs }) };
+  if (line && mine && part.mode !== "read") {
+    return { kind: "speak", index, durationMs: myLinePauseMs({ text: line.text, recordedMs }), then: part.mode === "pause" ? "read" : "next" };
+  }
   return { kind: "line", index, mine };
 }
 
-/** The line IDs to have ready, in playback order from `index` (included), leaving out skipped lines. */
+/** The line IDs to have ready, in playback order from `index` (included). My lines in "skip" are
+ * fetched too: a recorded take times their silence. */
 export function prefetchWindow(lines: QueueLine[], index: number, count: number, part: Part = NO_PART): string[] {
   const out: string[] = [];
   for (let i = playableFrom(lines, index, part); i !== null && out.length < count; i = nextIndex(lines, i, part)) {

@@ -3,7 +3,7 @@ import { badRequest, notFound } from "./errors.ts";
 import { body, uuidList } from "./input.ts";
 import { placeholderMs, RENDER_SETTINGS, type AudioSource } from "./render/plan.ts";
 import { isCurrentNormalized, normalizedTake, type TakeAudioRow } from "./render/takeaudio.ts";
-import { TTS_PRIORITY, type TtsClip, type TtsPriority, type TtsRequest, type TtsService } from "./tts/service.ts";
+import { TTS_PRIORITY, type SpokenSegment, type TtsClip, type TtsPriority, type TtsRequest, type TtsService } from "./tts/service.ts";
 import type { Voice } from "./tts/voices.ts";
 
 // Line-by-line playback: each dialogue line's audio as its own small .m4a, so the run-through can
@@ -17,6 +17,9 @@ export interface LineAudioView {
   durationMs: number; // the clip's length; for a silent line, how long the render's silence lasts
   source: AudioSource;
   ready: boolean; // false while the clip is still being made; ask again
+  // A synthesized line: when each printed line (and narrated direction) is said, for highlighting
+  // words as they are read. Absent for takes and silent lines.
+  segments?: SpokenSegment[];
 }
 
 interface LineAudioRow {
@@ -141,7 +144,7 @@ export async function lineAudio(
       const req = requests.get(r.id);
       const key = req ? clips.get(req.hash)?.cueKey : null;
       if (req && key) {
-        return { lineId: r.id, audioUrl: await ctx.storage.signedUrl(key), durationMs: samplesToMs(clips.get(req.hash)!.samples), source: "tts", ready: true };
+        return { lineId: r.id, audioUrl: await ctx.storage.signedUrl(key), durationMs: samplesToMs(clips.get(req.hash)!.samples), source: "tts", ready: true, ...(clips.get(req.hash)!.timings ? { segments: clips.get(req.hash)!.timings! } : {}) };
       }
       // Still being synthesized, or no TTS here (or synthesis failed): silent, like the render.
       if (req && !ttsSettled) return { lineId: r.id, audioUrl: null, durationMs: silentMs(r), source: "tts", ready: false };

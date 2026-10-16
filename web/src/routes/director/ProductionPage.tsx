@@ -1,13 +1,11 @@
-import { ArrowLeft, Check, Pencil } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { Archive, ArrowLeft, Check } from "lucide-react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage } from "../../api/client";
 import { productions } from "../../api/director";
 import type { Production } from "../../api/types";
-import { Dialog } from "../../components/Dialog";
 import { Loading } from "../../components/Loading";
 import { useToast } from "../../components/Toast";
-import { formatDate } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
 import { CastTab } from "./CastTab";
 import { nextStep, type StepTab } from "./nextStep";
@@ -24,7 +22,6 @@ export default function ProductionPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const production = useResource(() => productions.get(id).then((r) => r.production), id);
-  const [editing, setEditing] = useState(false);
 
   if (production.loading) return <Loading />;
   if (production.error || !production.data) {
@@ -56,13 +53,7 @@ export default function ProductionPage() {
         <Link className="back-link" to="/app" aria-label="All productions">
           <ArrowLeft size={16} aria-hidden="true" /> Productions
         </Link>
-        <div className="production-title">
-          <h1 className="display">{p.title}</h1>
-          <button type="button" className="icon-btn" onClick={() => setEditing(true)} aria-label="Edit production" title="Edit production">
-            <Pencil size={17} />
-          </button>
-        </div>
-        {p.performanceDate && <p className="small muted">Opens {formatDate(p.performanceDate)}</p>}
+        <ProductionTitle production={p} onSaved={(updated) => production.setData(updated)} />
       </div>
 
       <nav className="steps" aria-label="Production steps">
@@ -90,47 +81,50 @@ export default function ProductionPage() {
         {tab === "play" && <RunThroughTab production={p} />}
       </section>
 
-      <EditProduction
-        open={editing}
-        production={p}
-        onClose={() => setEditing(false)}
-        onSaved={(updated) => {
-          production.setData(updated);
-          setEditing(false);
-        }}
-      />
     </main>
   );
 }
 
-function EditProduction({
-  open,
-  production,
-  onClose,
-  onSaved,
-}: {
-  open: boolean;
-  production: Production;
-  onClose: () => void;
-  onSaved: (p: Production) => void;
-}) {
+/**
+ * The title edits where it stands, like a script line: click it, type, Enter or click away saves,
+ * Escape cancels. Archive sits beside it and asks once, in place.
+ */
+function ProductionTitle({ production, onSaved }: { production: Production; onSaved: (p: Production) => void }) {
   const navigate = useNavigate();
   const toast = useToast();
-  const [title, setTitle] = useState(production.title);
-  const [date, setDate] = useState(production.performanceDate?.slice(0, 10) ?? "");
+  const [draft, setDraft] = useState<string | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const field = useRef<HTMLInputElement>(null);
 
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
+  useLayoutEffect(() => {
+    if (draft !== null && document.activeElement !== field.current) {
+      field.current?.focus();
+      field.current?.select();
+    }
+  }, [draft]);
+
+  const save = async () => {
+    if (draft === null) return;
+    const title = draft.trim();
+    setDraft(null);
+    if (!title || title === production.title) return;
     try {
-      const { production: updated } = await productions.update(production.id, {
-        title: title.trim(),
-        performanceDate: date || null,
-      });
+      const { production: updated } = await productions.update(production.id, { title });
+      setError(null);
       onSaved(updated);
     } catch (err) {
       setError(errorMessage(err));
+    }
+  };
+
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void save();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setDraft(null);
     }
   };
 
@@ -145,40 +139,49 @@ function EditProduction({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} title="Edit production">
-      <form className="stack" onSubmit={save}>
-        <label className="field">
-          <span>Title</span>
-          <input className="input" required value={title} onChange={(e) => setTitle(e.target.value)} />
-        </label>
-        <label className="field">
-          <span>Performance date</span>
-          <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <span className="field-hint">Cast links keep working until two weeks after this date.</span>
-        </label>
-        {error && <p className="field-error">{error}</p>}
-        <button className="btn btn-primary" disabled={!title.trim()}>
-          Save
-        </button>
-        <hr className="divider" />
-        {confirmArchive ? (
-          <div className="stack" style={{ "--gap": "10px" } as React.CSSProperties}>
-            <p className="small">Archiving hides this production and turns off every cast link. Recordings are kept.</p>
-            <div className="row">
-              <button type="button" className="btn btn-danger btn-sm" onClick={archive}>
-                Archive production
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmArchive(false)}>
-                Keep it
-              </button>
-            </div>
-          </div>
+    <>
+      <div className="production-title">
+        {draft === null ? (
+          <h1 className="display">
+            <button type="button" className="title-edit" onClick={() => setDraft(production.title)} title="Rename">
+              {production.title}
+            </button>
+          </h1>
         ) : (
-          <button type="button" className="quiet-link" style={{ alignSelf: "flex-start" }} onClick={() => setConfirmArchive(true)}>
-            Archive this production…
-          </button>
+          <input
+            ref={field}
+            className="display title-input"
+            aria-label="Production title"
+            value={draft}
+            maxLength={200}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={onKey}
+            onBlur={() => void save()}
+          />
         )}
-      </form>
-    </Dialog>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => setConfirmArchive((c) => !c)}
+          aria-expanded={confirmArchive}
+          aria-label="Archive production"
+          title="Archive production"
+        >
+          <Archive size={18} />
+        </button>
+      </div>
+      {confirmArchive && (
+        <div className="archive-confirm" role="group" aria-label="Archive this production">
+          <p className="small">Archiving hides this production and turns off the cast link. Recordings are kept.</p>
+          <button type="button" className="btn btn-danger btn-sm" onClick={archive}>
+            Archive
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmArchive(false)}>
+            Keep it
+          </button>
+        </div>
+      )}
+      {error && <p className="field-error">{error}</p>}
+    </>
   );
 }

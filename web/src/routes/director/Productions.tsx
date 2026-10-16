@@ -6,7 +6,6 @@ import { auth, productions } from "../../api/director";
 import type { Production } from "../../api/types";
 import { EmptyStage } from "../../components/Illustrations";
 import { Loading } from "../../components/Loading";
-import { formatDate } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
 import { useDirector } from "./DirectorLayout";
 import { nextStep } from "./nextStep";
@@ -67,7 +66,6 @@ function ProductionCard({ production: p }: { production: Production }) {
   return (
     <Link className="ticket" to={`/app/p/${p.id}?tab=${step.tab}`}>
       <div className="ticket-main">
-        <p className="mono">{p.performanceDate ? `Opens ${formatDate(p.performanceDate)}` : "No opening night yet"}</p>
         <h2 className="display">{p.title}</h2>
         <p className="small muted">{step.status}</p>
         {p.scriptStatus === "ready" && linesTotal > 0 && <Seats recorded={linesRecorded} total={linesTotal} />}

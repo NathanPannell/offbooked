@@ -6,7 +6,6 @@ import { productions } from "../../api/director";
 export default function NewProduction() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
-  const [date, setDate] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,7 +14,7 @@ export default function NewProduction() {
     setBusy(true);
     setError(null);
     try {
-      const { production } = await productions.create({ title: title.trim(), performanceDate: date || null });
+      const { production } = await productions.create({ title: title.trim() });
       navigate(`/app/p/${production.id}`, { replace: true });
     } catch (err) {
       setError(errorMessage(err));
@@ -33,11 +32,6 @@ export default function NewProduction() {
         <label className="field">
           <span>Title</span>
           <input className="input input-lg" required autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Hamlet, or Our Town (spring)" />
-        </label>
-        <label className="field">
-          <span>Opening night (optional)</span>
-          <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <span className="field-hint">Cast links keep working until two weeks after this.</span>
         </label>
         {error && (
           <p className="field-error" role="alert">

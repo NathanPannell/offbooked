@@ -1,6 +1,6 @@
 # On-device speech-to-text for take scoring
 
-Status: research and recommendation, 2026-10-13. Nothing here is implemented yet.
+Status: research and recommendation, 2026-10-13, now implemented in `web/src/stt/`. Changed 2026-10-15 for load time: the model is self-hosted, uses an fp16 encoder, and starts loading when an actor page opens (see "Load time").
 
 ## Goal
 
@@ -20,7 +20,7 @@ Constraints:
 
 ## Recommendation in one paragraph
 
-Use **transformers.js** (`@huggingface/transformers@4.3.1`, pinned exactly) in a module Web Worker. Run **Moonshine Tiny** (`onnx-community/moonshine-tiny-ONNX`, MIT) on the **WASM backend**, with an fp32 encoder and a q8 merged decoder. The download is about 55 MB of model files plus the ONNX Runtime WASM binary. Both are cached in the Cache API after the first load. Decode each MediaRecorder blob on the main thread with an `OfflineAudioContext` at 16 kHz. Then transfer the `Float32Array` to the worker and score the transcript with a normalized word-level Levenshtein alignment that tolerates near-misses. **Do not enable COOP/COEP for the MVP**: single-threaded WASM is fast enough for Moonshine Tiny on clips this short, and cross-origin isolation would constrain our audio and third-party embeds. Do not use the Web Speech API as the main path. It cannot transcribe a recorded blob, and on Android and iOS it is not on-device.
+Use **transformers.js** (`@huggingface/transformers@4.3.1`, pinned exactly) in a module Web Worker. Run **Moonshine Tiny** (`onnx-community/moonshine-tiny-ONNX`, MIT) on the **WASM backend**, with an fp16 encoder and a q8 merged decoder (fp32 encoder until 2026-10-15). The download is about 40 MB of model files plus the plain ONNX Runtime WASM binary (14 MB, about 3 MB compressed), all served from our own origin. Both are cached in the Cache API after the first load. Decode each MediaRecorder blob on the main thread with an `OfflineAudioContext` at 16 kHz. Then transfer the `Float32Array` to the worker and score the transcript with a normalized word-level Levenshtein alignment that tolerates near-misses. **Do not enable COOP/COEP for the MVP**: single-threaded WASM is fast enough for Moonshine Tiny on clips this short, and cross-origin isolation would constrain our audio and third-party embeds. Do not use the Web Speech API as the main path. It cannot transcribe a recorded blob, and on Android and iOS it is not on-device.
 
 ## Options compared
 
@@ -30,7 +30,7 @@ WER is on LibriSpeech test-clean (read speech), from the model authors. Expect a
 
 | Option | On-device? | Download (first use) | iOS Safari | Est. latency, 10 s clip | WER, read speech | Licence | Maturity |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **transformers.js + Moonshine Tiny** (`onnx-community/moonshine-tiny-ONNX`) | Yes, in every browser | ~55 MB model (fp32 encoder 30.9 MB + q8 decoder 20.2 MB + 3.9 MB tokenizer and config), plus the ORT WASM binary (14–27 MB uncompressed, much less over the wire). An all-q8 variant is ~32 MB. | Works on WASM (needs WASM SIMD, so iOS 16.4+). WebGPU on iOS 26+ (enabled in transformers.js 4.3.0). | ~1–2 s | 4.5% (Whisper tiny.en 5.7%) | Library Apache-2.0, ORT MIT, model MIT | Library: high (HF-maintained, v4.3.1 released 2026-10-06). Model: stable since Jan 2025; a token-decoding fix landed in 4.3.0. |
+| **transformers.js + Moonshine Tiny** (`onnx-community/moonshine-tiny-ONNX`) | Yes, in every browser | ~55 MB model (fp32 encoder 30.9 MB + q8 decoder 20.2 MB + 3.9 MB tokenizer and config), plus the ORT WASM binary (14–27 MB uncompressed, much less over the wire). An all-q8 variant is ~32 MB. We ship an fp16 encoder (15.5 MB), ~40 MB in all. | Works on WASM (needs WASM SIMD, so iOS 16.4+). WebGPU on iOS 26+ (enabled in transformers.js 4.3.0). | ~1–2 s | 4.5% (Whisper tiny.en 5.7%) | Library Apache-2.0, ORT MIT, model MIT | Library: high (HF-maintained, v4.3.1 released 2026-10-06). Model: stable since Jan 2025; a token-decoding fix landed in 4.3.0. |
 | transformers.js + Moonshine Base (`onnx-community/moonshine-base-ONNX`) | Yes | ~63 MB all q8, ~123 MB with fp32 encoder | As above. Memory is fine; the download is heavy on cellular. | ~2–5 s | 3.2% | MIT | As above |
 | transformers.js + Whisper tiny.en (`onnx-community/whisper-tiny.en`) | Yes | ~41 MB q8 (encoder 10.1 MB + merged decoder 30.7 MB) + ~4 MB tokenizer; fp32 encoder + q4 decoder ≈ 120 MB | Works on WASM; WebGPU on iOS 26+ | ~4–8 s (fixed 30 s encoder window, whatever the clip length) | 5.7% | MIT | Very mature. Prone to hallucinating on silence ("Thank you."). |
 | transformers.js + Whisper base.en | Yes | ~77 MB q8 | Works, but slow on one thread | ~8–15 s | 4.3% | MIT | Mature |
@@ -122,16 +122,62 @@ export async function canRunStt(): Promise<boolean> {
 }
 ```
 
-Also fall back at run time. If the worker posts an `error` (a model fetch fails after retries, or session creation fails or runs out of memory), or the worker dies (`worker.onerror`), mark all pending and future takes in this session as "Accuracy unavailable" and terminate the worker. Do not retry in a loop. On `navigator.connection?.saveData === true`, do not auto-download. Show a small "Turn on accuracy check (55 MB download)" toggle instead.
+Also fall back at run time. If the worker posts an `error` (a model fetch fails after retries, or session creation fails or runs out of memory), or the worker dies (`worker.onerror`), mark all pending and future takes in this session as "Accuracy unavailable" and terminate the worker. Do not retry in a loop. On `navigator.connection?.saveData === true`, do not auto-download. Show a small "Turn on accuracy check (43 MB download)" toggle instead.
 
-### Lazy loading after the first take
+### Loading early (changed 2026-10-15)
 
-1. On the recording page, start the model 1.5 s after the page opens, at low fetch priority (changed 2026-10-15 so live word highlighting is ready a line or two in). Recording never waits for it.
-2. Then call `sttClient.start()`. It runs `canRunStt()`, creates the worker and sends `{ type: 'load' }`. The worker starts downloading the model at low fetch priority (see `env.fetch` below), so take uploads keep their bandwidth.
-3. Takes recorded while the model is loading are queued, including take 1. Decoded audio is small (30 s × 16 000 × 4 B ≈ 1.9 MB), so keep the `Float32Array`s in the worker queue and score them in order once the model is ready.
-4. UI: a small status chip on the recording screen shows "Accuracy check: preparing (37%)", then "ready". Per-line badges fill in as results arrive. Nothing waits on them.
-5. When a line is re-recorded, send `{ type: 'cancel', takeId }` for the superseded take so the queue doesn't waste time on it.
-6. When the actor leaves the recording or practice screens, call `transcriber.dispose()` and terminate the worker. That frees roughly 200–300 MB, which matters on iOS. The model stays in the Cache API, so the next load takes seconds.
+1. Start loading as soon as an actor page opens: the cast link `/join/:token` once its parts have loaded (and one is still free), and `/i/:token` once the invite has loaded, so the download runs while the actor picks a part and types a name. The recorder also calls `start()` itself in case it was reached another way. Recording never waits for it.
+2. `start()` runs the capability check, creates the worker and sends `{ type: 'load' }`. Fetches use the default priority: the model comes down while a take goes up, so they don't compete for the same direction of the link.
+3. One session per tab (`useStt.ts`), shared by the join page, the welcome, the recorder and practice, so the model loaded on the cast link is the one the recorder uses. It is disposed 20 s after the last screen using it unmounts.
+4. Takes recorded while the model is loading are queued, including take 1. Decoded audio is small (30 s × 16 000 × 4 B ≈ 1.9 MB), so keep the `Float32Array`s in the worker queue and score them in order once the model is ready.
+5. UI: the recorder header shows "Getting the accuracy check ready… 37%" ("Accuracy check 37%" on phones). The percentage is real: bytes read of the files not already cached. After the last byte the chip stays, without a percentage, until the sessions are built. Per-line badges fill in as results arrive. Nothing waits on them.
+6. When a line is re-recorded, send `{ type: 'cancel', takeId }` for the superseded take so the queue doesn't waste time on it.
+7. Disposing frees roughly 200–300 MB, which matters on iOS. The model stays in the Cache API, so the next load takes a second or so.
+8. Once loaded, the session asks for persistent storage (`navigator.storage.persist()`, skipped in Firefox, which would prompt), and the worker deletes Cache API entries that aren't current files (older versions' Hugging Face and jsDelivr URLs, about 80 MB).
+
+### Load time (measured 2026-10-15)
+
+Measured in the desktop app's Chromium (Chrome 152) against `vite preview` production builds of `main` (before) and this change (after). Times run from opening a returning actor's `/i/:token` to the worker's `ready`, on a cold cache (Cache API cleared, `cache: 'no-store'`) and a warm one. "Simulated 4G" is throttled inside the worker: 10 Mbps shared by all downloads, 60 ms per request and 120 ms more per redirect, compressed files counted at their compressed size. The browser pane was hidden, so Windows sometimes ran the worker on efficiency cores, about 3× slower; ranges show both. A mid-range phone will be nearer the slow end, or slower.
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Cold, desktop network | 6.4–9.3 s | 1.8–4.6 s |
+| Warm, desktop | 3.8–8.0 s | 1.1–4.0 s |
+| Cold, simulated 4G | 51.6 s | 33.2 s |
+| Warm, simulated 4G | 8.2 s | 1.3 s (no network at all) |
+| First transcription of a 7.75 s take | 0.55–1.8 s | 0.55–1.9 s (no first-run penalty) |
+
+From the cast link the clock starts on `/join`, so for a new actor most of a cold load overlaps with picking a part and typing a name.
+
+What made the old load slow:
+
+- The worker started 1.5 s after the recorder opened, plus its render (1.7–2.4 s in all).
+- transformers.js 4.3.1 fetched `config.json` at revision `main` (unpinned), then made six `Range: bytes=0-0` probes for progress, each through a Hugging Face redirect, before any download started (1.3–1.5 s in). It repeated the probes on every warm load, because they ask for `main`, which is never cached. The probes also guessed the encoder as `_quantized`, so the progress total was wrong and the chip stalled at 87%.
+- The ONNX Runtime WASM was fetched only when the first session was created, after the model files, so it queued behind them (12.9 s of the 51.6 s on 4G).
+- It was the asyncify build (27 MB, 5.5 MB compressed), which is meant for WebGPU and builds sessions more slowly.
+
+What the worker does now (`stt.worker.ts`):
+
+- Model files come from `/models/<dir>/` on our own origin: no redirects, no preflights, `Cache-Control: immutable` (`vercel.json`). `env.remotePathTemplate` is the folder name, so every request, including transformers.js's `main` lookups, maps to the pinned files. `web/scripts/fetch-stt-model.mjs` downloads the files listed in `src/stt/hosted-model.json` from the pinned Hugging Face revision, checks each SHA-256, keeps them in `node_modules/.cache/offbooked-stt` and copies them to `web/public/models/` (gitignored). It runs before `npm run dev` (warns on failure) and `npm run build` (fails the build). Change `dir` whenever a file changes, because the URLs are cached forever.
+- The plain `ort-wasm-simd-threaded.{mjs,wasm}` are imported with `?url`, so Vite serves the installed `onnxruntime-web` copies from `/assets/` with a hash. Vercel serves `.wasm` brotli-compressed (checked on offbooked.com). A small Vite plugin leaves the unused 27 MB asyncify copy out of the build.
+- Every file and the WASM start downloading in parallel the moment the worker starts. `env.fetch` hands transformers.js the responses already on their way and counts bytes for progress. There is no `progress_callback`, so no probes.
+- Warm-up is half a second of silence with a 4-token budget (about 0.1 s).
+- The worker logs `[stt] ready` with its timings (`console.debug`).
+
+On 4G the cold load is now bound by bytes: about 40 MB at 10 Mbps. Multi-threaded WASM would cut session time but needs COOP/COEP, which stays off.
+
+### Choosing the encoder (2026-10-15)
+
+120 synthetic takes (24 lines, Shakespeare and modern, in five voices: Piper alan, cori and vctk, Windows SAPI David and Zira), transcribed with onnxruntime-node on one thread, then again with pink noise at about 15–20 dB SNR and a short echo. WER is plain word error rate; accuracy and verdicts come from the app's `scoreLine`.
+
+| Encoder (decoder q8) | Encoder size | Clean WER | Clean accuracy; good/check/re-record | Noisy WER | Noisy accuracy; good/check/re-record |
+| --- | --- | --- | --- | --- | --- |
+| fp32 (before) | 30.9 MB | 9.2% | 91.7%; 88/17/15 | 13.6% | 88.6%; 76/26/18 |
+| **fp16 (now)** | 15.5 MB | 9.5% | 91.3%; 86/18/16 | 13.2% | 88.4%; 78/25/17 |
+| q8 | 7.9 MB | 9.8% | 91.3%; 87/21/12 | 16.8% | 85.0%; 67/26/27 |
+| q4 | 10.7 MB | 10.2% | 91.0%; 83/20/17 | not run | not run |
+
+q8 looks fine on clean audio but loses three points of WER on noisy takes and raises false re-records from 18 to 27. fp16 matches fp32 at half the size. In the browser (WASM, alternating runs in one tab) the three encoders transcribe a 7.75 s take in about the same time (fp32 ~520 ms, q8 ~490 ms, fp16 ~560 ms) and build their sessions in 1.1–1.2 s.
 
 ### The worker
 
@@ -146,14 +192,7 @@ const SAMPLE_RATE = 16_000;
 env.allowLocalModels = false;  // never probe /models/ on our origin
 env.useBrowserCache = true;    // Cache API ("transformers-cache"); default true where available
 env.useWasmCache = true;       // cache the ORT .wasm/.mjs too (v4)
-// Low priority so model bytes don't starve take uploads (Fetch Priority: Chrome 101+, Safari 17.2+; ignored elsewhere).
-const baseFetch = env.fetch;
-env.fetch = (url: RequestInfo | URL, init?: RequestInit) =>
-  baseFetch(url, { ...init, priority: 'low' } as RequestInit);
-// Optional self-hosting, see "Caching and hosting":
-// env.remoteHost = 'https://offbooked.com/models/';
-// env.remotePathTemplate = '{model}/{revision}/';
-// env.backends.onnx.wasm!.wasmPaths = { mjs: '/ort/ort-wasm-simd-threaded.mjs', wasm: '/ort/ort-wasm-simd-threaded.wasm' };
+// The shipped worker also self-hosts the files and prefetches them in parallel; see "Load time".
 
 type Asr = (audio: Float32Array, opts?: Record<string, unknown>) => Promise<{ text: string } | { text: string }[]>;
 let asrPromise: Promise<Asr & { tokenizer: any; dispose(): Promise<void> }> | null = null;
@@ -162,7 +201,7 @@ function load() {
   asrPromise ??= (pipeline('automatic-speech-recognition', MODEL_ID, {
     revision: REVISION,
     device: 'wasm',
-    dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' },
+    dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' }, // fp32 until 2026-10-15
     progress_callback: (p: unknown) => postMessage({ type: 'progress', p }),
   }) as any).then(async (asr: any) => {
     await asr(new Float32Array(SAMPLE_RATE)); // warm-up run (JIT, allocations)
@@ -336,13 +375,11 @@ A display word is highlighted if any normalized token from it is `sub` or `del`.
 ### Caching and hosting the model
 
 - **Cache API**: transformers.js stores every model file in the `transformers-cache` Cache Storage bucket, keyed by URL, and (v4, `env.useWasmCache`) the ORT WASM binary too. The second visit loads from disk in a second or two with no network. `ModelRegistry` (v4) can report cache status, which is useful for a "ready" indicator on a return visit.
-- **HTTP cache**: Hugging Face answers `/resolve/` with a `Cache-Control: no-store` redirect to its CDN, so the browser HTTP cache doesn't help there. The Cache API is what we rely on.
-- **Eviction**: Safari deletes all script-writable storage, Cache API included, for sites without user interaction in 7 days (ITP). An iOS actor who returns after a week re-downloads. Calling `navigator.storage.persist()` in Chromium reduces eviction under storage pressure. Everything is a cache, so correctness never depends on it.
-- **MVP: load from the Hugging Face CDN** with the pinned `revision`. Verified 2026-10-13: the CDN sends `Access-Control-Allow-Origin: *` on the file responses and echoes our origin on `/resolve/`, so it works from offbooked.com with no extra setup. ORT WASM files come from jsDelivr by default (`cdn.jsdelivr.net/npm/onnxruntime-web@<version>/dist/`), and jsDelivr also sends CORS.
-- **Later: self-host on our own domain**, for availability, no third-party IP exposure and version control. Copy the files of the pinned revision to `web/public/models/onnx-community/moonshine-tiny-ONNX/<revision>/...` and set `env.remoteHost = 'https://offbooked.com/models/'` and `env.remotePathTemplate = '{model}/{revision}/'`. Copy `ort-wasm-simd-threaded.{mjs,wasm}` from the installed `node_modules/onnxruntime-web/dist/` (it must be the exact installed version) to `web/public/ort/` and set `env.backends.onnx.wasm.wasmPaths`. The non-asyncify build is 14 MB versus 27 MB and is enough for WASM-only use. Serve both with `Cache-Control: public, max-age=31536000, immutable`. Same origin means no CORS or CORP concerns. Things to check first:
-  - Vercel's static upload limits (Hobby 100 MB, Pro 1 GB per deployment; our largest file is 31 MB and the set is about 70 MB)
-  - bandwidth: about 55–70 MB per new device
-  - R2 would avoid egress cost, but an R2 custom domain needs the zone on Cloudflare, and offbooked.com DNS is on Vercel.
+- **HTTP cache**: our `/models/` and `/assets/` responses are `immutable`, but the Cache API is what transformers.js reads.
+- **Eviction**: Safari deletes all script-writable storage, Cache API included, for sites without user interaction in 7 days (ITP). An iOS actor who returns after a week re-downloads. The session calls `navigator.storage.persist()` after a load (not in Firefox, which would prompt), which reduces eviction under storage pressure. Everything is a cache, so correctness never depends on it.
+- **Self-hosted since 2026-10-15** (see "Load time"). Until then the files came from the Hugging Face CDN (a redirect per file) and the runtime from jsDelivr.
+- Vercel: the static output is about 55 MB with the model (largest file 20 MB). Bandwidth is about 43 MB per new device.
+- R2 would avoid egress cost, but an R2 custom domain needs the zone on Cloudflare, and offbooked.com DNS is on Vercel.
 
 ### Headers: COOP/COEP
 
@@ -372,7 +409,7 @@ If profiling later shows we need threads (for example to move to Moonshine Base)
 - Safari does not support `COEP: credentialless`. Only Chrome 96+ and Firefox 119+ do. So for iOS it has to be `require-corp`, and **every cross-origin subresource must then opt in**:
   - `api.offbooked.com` responses that the page loads in no-cors mode (audio in `<audio src>`, images) must send `Cross-Origin-Resource-Policy: same-site`. api.offbooked.com and offbooked.com are the same site. Alternatively, use them in CORS mode (`<audio crossorigin="anonymous">` plus `Access-Control-Allow-Origin`). `fetch()` calls are already CORS.
   - R2 presigned URLs (`*.r2.cloudflarestorage.com`) are cross-site, and we can't add CORP headers to them. Load that audio with `crossorigin="anonymous"` and configure CORS rules on the bucket for `https://offbooked.com`, or proxy it through the API.
-  - Model and runtime files from HF and jsDelivr are fetched with CORS, so they keep working.
+  - Model and runtime files are same-origin, so they keep working.
   - Third-party iframes and embeds (analytics widgets, video, payment) break unless they send CORP or COEP themselves.
 - COOP `same-origin` cuts `window.opener` links, which breaks OAuth or payment popups opened from those pages. Keep director sign-in off the isolated routes.
 
@@ -387,9 +424,9 @@ If profiling later shows we need threads (for example to move to Moonshine Base)
 
 - **Moonshine `max_new_tokens`**: the pipeline default is `floor(seconds) × 6`. That gives zero tokens, and an empty transcript, for takes under 1 s, and it truncates fast speech. Always pass `max_new_tokens` (see the worker code). Moonshine can also loop on repeated tokens near the cap. Collapse three or more immediate repeats of the same n-gram at the end of the transcript before scoring.
 - **Silence**: never send silent or near-silent audio to the model. Gate it with the RMS check.
-- **The first take must never wait**: the worker is created only after take 1's upload. Watch for accidental static imports of `@huggingface/transformers` in main-thread code, because that would pull the library into the first bundle.
+- **The first take must never wait**: the model loads in the background from the actor pages and takes queue for it. Watch for accidental static imports of `@huggingface/transformers` in main-thread code, because that would pull the library into the first bundle.
 - **iOS memory**: one Moonshine Tiny session plus the runtime uses about 200–300 MB. That is fine, but dispose of it when leaving the recording screens. Never load two models at once.
-- **Version pinning**: transformers.js 4.3.1 is a week old and depends on an ORT dev build. Pin exactly, and when self-hosting the WASM, copy it from the installed `onnxruntime-web`. Never mix versions.
+- **Version pinning**: transformers.js 4.3.1 is a week old and depends on an ORT dev build. Pin exactly. The WASM comes from the installed `onnxruntime-web` through Vite, so it always matches. Never mix versions.
 - **Do not bias toward the expected line** (no Whisper prompt containing the line, no grammar restricted to it). It hides the drift we're trying to catch.
 - **Echo in practice mode**: playback bleeding into the microphone shows up as extra words. Use echo cancellation, cut to the gap windows and suggest headphones.
 - **Safari 7-day storage eviction** means occasional re-downloads on iOS. Data-saver users get an opt-in instead of an automatic download.

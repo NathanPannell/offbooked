@@ -1,4 +1,4 @@
-import { Check, Copy, Headphones, Mic, Share2 } from "lucide-react";
+import { Check, ChevronDown, Copy, Headphones, Mic, Share2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { errorMessage } from "../../api/client";
@@ -13,11 +13,11 @@ import { useToast } from "../../components/Toast";
 import { plural } from "../../lib/format";
 import { copyText, shareOrCopy } from "../../lib/share";
 import { readStorage, writeStorage } from "../../lib/storage";
-import { useInterval, useResource } from "../../lib/useResource";
+import { useInterval, useResource, type Resource } from "../../lib/useResource";
 
 /**
- * The director's cast page: the one cast link up top, a read-only call sheet of every part, and a
- * way to record a part yourself in the same recording flow the cast uses.
+ * The director's cast page. Two actions: share the cast link (the main one), and record some lines
+ * yourself. Who has taken which part and what's recorded fold away below.
  */
 export function CastTab({
   production,
@@ -32,6 +32,7 @@ export function CastTab({
   const toast = useToast();
   const sheet = useResource(() => castApi.callSheet(production.id).then((r) => r.characters), `sheet:${production.id}`);
   const [opening, setOpening] = useState<string | null>(null);
+  const link = useResource(() => joinLink.get(production.id).then((r) => r.joinUrl), `join:${production.id}`);
 
   useInterval(() => void sheet.reload(), 15_000, !!sheet.data);
 
@@ -80,38 +81,36 @@ export function CastTab({
 
   return (
     <div className="cast">
-      <CastLink production={production} />
+      <section className="cast-actions" aria-label="Get the lines recorded">
+        <CastLink production={production} link={link} />
+        <RecordYourself parts={parts} opening={opening} onRecord={(id) => void recordAs(id)} />
+      </section>
 
       {wrapped && <WrapBanner productionId={production.id} onListen={onOpenPlay} />}
 
-      <section className="call-sheet" aria-labelledby="call-sheet-title">
-        <header className="call-sheet-head">
-          <div>
-            <p className="eyebrow">Call sheet</p>
-            <h2 id="call-sheet-title" className="display">
-              {linesRecorded.toLocaleString()} of {plural(linesTotal, "line")} recorded
-            </h2>
-            <p className="small muted">
-              {taken === 0 ? "Nobody has picked a part yet." : `${taken} of ${plural(parts.length, "part")} taken.`}
-            </p>
-          </div>
-          {linesRecorded > 0 && !wrapped && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenPlay}>
-              <Headphones size={16} aria-hidden="true" /> Listen so far
-            </button>
-          )}
-        </header>
+      <details className="call-sheet">
+        <summary>
+          <span className="call-sheet-summary">
+            <span className="call-sheet-title">Cast and recordings</span>
+            <span className="small muted">
+              {linesRecorded.toLocaleString()} of {plural(linesTotal, "line")} recorded · {taken} of {plural(parts.length, "part")} taken
+            </span>
+          </span>
+          <ChevronDown size={18} aria-hidden="true" className="call-sheet-chevron" />
+        </summary>
         <ProgressBar value={linesRecorded} max={linesTotal} label="Lines recorded across the cast" />
-
+        {linesRecorded > 0 && !wrapped && (
+          <button type="button" className="btn btn-ghost btn-sm call-sheet-listen" onClick={onOpenPlay}>
+            <Headphones size={16} aria-hidden="true" /> Listen so far
+          </button>
+        )}
         <ul className="sheet-list" aria-label="Parts">
           {parts.map((c) => (
             <SheetRow key={c.id} part={c} busy={opening === c.id} onRecord={() => void recordAs(c.id)} />
           ))}
         </ul>
-        <p className="small muted">Until someone records a part, its lines play in a computer voice in the run-through.</p>
-      </section>
-
-      <RecordYourself parts={parts} opening={opening} onRecord={(id) => void recordAs(id)} />
+        <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />
+      </details>
     </div>
   );
 }
@@ -150,9 +149,14 @@ function SheetRow({ part, busy, onRecord }: { part: CallSheetCharacter; busy: bo
   );
 }
 
-/** Pick a free part (or one already yours) and record it in the same flow the cast uses. */
+/**
+ * The secondary action: record lines yourself, in the same flow the cast uses. A part you already
+ * have opens straight away; otherwise a picker of free parts opens in place.
+ */
 function RecordYourself({ parts, opening, onRecord }: { parts: CallSheetCharacter[]; opening: string | null; onRecord: (characterId: string) => void }) {
+  const mine = parts.filter((c) => c.mine);
   const choices = parts.filter((c) => c.mine || !c.takenBy);
+  const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState("");
   const value = choices.some((c) => c.id === picked) ? picked : (choices[0]?.id ?? "");
 
@@ -161,47 +165,56 @@ function RecordYourself({ parts, opening, onRecord }: { parts: CallSheetCharacte
     if (value) onRecord(value);
   };
 
-  return (
-    <section className="record-yourself" aria-labelledby="record-yourself-title">
-      <div>
-        <p className="eyebrow">Reading in</p>
-        <h2 id="record-yourself-title" className="display">
-          Record a part yourself
-        </h2>
-        <p className="small muted">
-          Pick a part and record its lines on this device, just like the cast does. It shows as yours on the call sheet, so nobody else can claim it.
-        </p>
-      </div>
-      {choices.length === 0 ? (
-        <p className="small muted">Every part is taken.</p>
-      ) : (
-        <form className="record-yourself-form" onSubmit={submit}>
-          <label className="field grow">
-            <span className="sr-only">Part to record</span>
-            <select className="input" value={value} onChange={(e) => setPicked(e.target.value)}>
-              {choices.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} · {plural(c.lineCount, "line")}
-                  {c.mine ? " · yours" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="btn btn-secondary" disabled={!value || opening !== null}>
-            <Mic size={16} aria-hidden="true" /> {opening ? "Opening…" : "Start recording"}
+  if (choices.length === 0) return null;
+  if (!picking && mine.length === 1) {
+    const part = mine[0]!;
+    return (
+      <div className="record-yourself">
+        <button type="button" className="btn btn-secondary btn-lg" onClick={() => onRecord(part.id)} disabled={opening !== null}>
+          <Mic size={18} aria-hidden="true" /> {opening ? "Opening…" : `Record ${part.name}'s lines`}
+        </button>
+        {choices.length > 1 && (
+          <button type="button" className="quiet-link" onClick={() => setPicking(true)}>
+            Record another part
           </button>
-        </form>
-      )}
-    </section>
+        )}
+      </div>
+    );
+  }
+  if (!picking) {
+    return (
+      <div className="record-yourself">
+        <button type="button" className="btn btn-secondary btn-lg" onClick={() => setPicking(true)}>
+          <Mic size={18} aria-hidden="true" /> Record some lines yourself
+        </button>
+      </div>
+    );
+  }
+  return (
+    <form className="record-yourself record-yourself-form" onSubmit={submit}>
+      <label className="field grow">
+        <span className="sr-only">Part to record</span>
+        <select className="input" value={value} onChange={(e) => setPicked(e.target.value)} autoFocus>
+          {choices.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} · {plural(c.lineCount, "line")}
+              {c.mine ? " · yours" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button className="btn btn-secondary" disabled={!value || opening !== null}>
+        <Mic size={16} aria-hidden="true" /> {opening ? "Opening…" : "Record"}
+      </button>
+    </form>
   );
 }
 
 /** The one link for the whole cast: the main way people join. */
-function CastLink({ production }: { production: Production }) {
+type LinkResource = Resource<string>;
+
+function CastLink({ production, link }: { production: Production; link: LinkResource }) {
   const toast = useToast();
-  const link = useResource(() => joinLink.get(production.id).then((r) => r.joinUrl), `join:${production.id}`);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [busy, setBusy] = useState(false);
 
   const share = async () => {
     if (!link.data) return;
@@ -214,29 +227,11 @@ function CastLink({ production }: { production: Production }) {
     if (outcome === "failed") toast("Couldn't copy. Select the link and copy it by hand.");
   };
 
-  const reset = async () => {
-    setBusy(true);
-    try {
-      const { joinUrl } = await joinLink.reset(production.id);
-      link.setData(joinUrl);
-      setConfirmReset(false);
-      toast("New cast link made. The old one no longer works.");
-    } catch (err) {
-      toast(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <section className="cast-link raised" aria-labelledby="cast-link-title">
-      <div className="cast-link-copy">
-        <p className="eyebrow">Cast link</p>
-        <h2 id="cast-link-title" className="display">
-          One link for the whole cast
-        </h2>
-        <p className="muted">Drop it in the group chat. Each person picks their part, types their first name and starts recording. No accounts.</p>
-      </div>
+      <h2 id="cast-link-title" className="display cast-link-title">
+        Send this to your cast
+      </h2>
       {link.error ? (
         <div className="notice notice-error" role="alert">
           {errorMessage(link.error)}{" "}
@@ -261,26 +256,51 @@ function CastLink({ production }: { production: Production }) {
           <button type="button" className="btn btn-primary btn-lg cast-link-share" onClick={share} disabled={!link.data}>
             <Share2 size={18} aria-hidden="true" /> Share the cast link
           </button>
-          {confirmReset ? (
-            <div className="reset-confirm">
-              <p className="small">The old link stops working for anyone who hasn't joined yet. People already in keep their place.</p>
-              <div className="row">
-                <button type="button" className="btn btn-danger btn-sm" onClick={reset} disabled={busy}>
-                  Make a new link
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmReset(false)}>
-                  Keep this one
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" className="quiet-link cast-link-reset" onClick={() => setConfirmReset(true)}>
-              Link shared with the wrong people? Reset it
-            </button>
-          )}
         </>
       )}
     </section>
+  );
+}
+
+/** A new cast link, for one shared with the wrong people. People already in keep their place. */
+function ResetLink({ productionId, onReset }: { productionId: string; onReset: (url: string) => void }) {
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const reset = async () => {
+    setBusy(true);
+    try {
+      const { joinUrl } = await joinLink.reset(productionId);
+      onReset(joinUrl);
+      setConfirm(false);
+      toast("New cast link made. The old one no longer works.");
+    } catch (err) {
+      toast(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!confirm) {
+    return (
+      <button type="button" className="quiet-link cast-link-reset" onClick={() => setConfirm(true)}>
+        Link shared with the wrong people? Make a new one
+      </button>
+    );
+  }
+  return (
+    <div className="reset-confirm">
+      <p className="small">The old link stops working for anyone who hasn't joined yet. People already in keep their place.</p>
+      <div className="row">
+        <button type="button" className="btn btn-danger btn-sm" onClick={reset} disabled={busy}>
+          Make a new link
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirm(false)}>
+          Keep this one
+        </button>
+      </div>
+    </div>
   );
 }
 

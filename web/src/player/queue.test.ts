@@ -58,19 +58,19 @@ describe("my lines", () => {
     expect(nextIndex(lines, 0, part("read"))).toBe(1);
   });
 
-  it("skip: my lines are left out, with no gap of their own", () => {
-    expect(nextIndex(lines, 0, part("skip"))).toBe(2);
-    expect(nextIndex(lines, 3, part("skip"))).toBe(5);
-    expect(playableFrom(lines, 1, part("skip"))).toBe(2);
-    expect(playableFrom(lines, 5, part("skip", ["f"]))).toBeNull();
-    expect(gapBetweenMs(lines, 0, 2)).toBe(LINE_GAP_MS);
+  it("skip: my lines keep their time as a silence, then the play moves on", () => {
+    expect(nextIndex(lines, 0, part("skip"))).toBe(1);
+    expect(playableFrom(lines, 1, part("skip"))).toBe(1);
+    expect(playableFrom(lines, 6, part("skip"))).toBeNull();
+    expect(stepFor(lines, 1, part("skip"))).toEqual({ kind: "speak", index: 1, durationMs: 4000, then: "next" });
+    expect(gapBetweenMs(lines, 0, 1)).toBe(LINE_GAP_MS);
   });
 
-  it("pause: a pause timed from my spoken words, or from my take when there is one", () => {
+  it("pause: a pause timed from my spoken words, or from my take when there is one, then my line", () => {
     // Ten words at 2.5 words a second.
-    expect(stepFor(lines, 1, part("pause"))).toEqual({ kind: "speak", index: 1, durationMs: 4000 });
+    expect(stepFor(lines, 1, part("pause"))).toEqual({ kind: "speak", index: 1, durationMs: 4000, then: "read" });
     // A 3 s take: plus 15% (450 ms) or 500 ms, whichever is more.
-    expect(stepFor(lines, 1, part("pause"), 3000)).toEqual({ kind: "speak", index: 1, durationMs: 3500 });
+    expect(stepFor(lines, 1, part("pause"), 3000)).toEqual({ kind: "speak", index: 1, durationMs: 3500, then: "read" });
     expect(stepFor(lines, 0, part("pause"))).toEqual({ kind: "line", index: 0, mine: false });
   });
 
@@ -88,8 +88,8 @@ describe("prefetch window", () => {
     expect(prefetchWindow(lines, -1, 1)).toEqual(["a"]);
   });
 
-  it("leaves out my lines only when they are skipped", () => {
-    expect(prefetchWindow(lines, 0, 4, part("skip"))).toEqual(["a", "c", "d", "f"]);
+  it("fetches my lines in every mode (a take times my silence)", () => {
+    expect(prefetchWindow(lines, 0, 4, part("skip"))).toEqual(["a", "b", "c", "d"]);
     expect(prefetchWindow(lines, 0, 4, part("pause"))).toEqual(["a", "b", "c", "d"]);
     expect(prefetchWindow(lines, 0, 4, part("read"))).toEqual(["a", "b", "c", "d"]);
   });

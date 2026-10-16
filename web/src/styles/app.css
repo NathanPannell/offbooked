@@ -1168,9 +1168,55 @@
   gap: 4px;
 }
 
-.production-title h1 {
+.production-title h1,
+.production-title .title-input {
+  flex: 1;
+  min-width: 0;
   font-size: clamp(30px, 6vw, 44px);
   font-weight: 400;
+  line-height: 1.15;
+}
+
+/* The title reads as a heading and edits in place, like a script line. */
+.title-edit {
+  display: block;
+  width: 100%;
+  margin: 0 -8px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.title-edit:hover {
+  border-color: var(--line);
+}
+
+.title-input {
+  margin: 0 -8px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-display);
+  outline: none;
+}
+
+.archive-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2) var(--s-3);
+}
+
+.archive-confirm p {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .steps {
@@ -1371,12 +1417,18 @@
   gap: var(--s-4);
 }
 
+/* The script page keeps one row pinned to the top: Next on the left, scenes on the right. The
+   site header scrolls away there. */
+.director:has(.review-bar) .app-header {
+  position: static;
+}
+
 .review-bar {
   position: sticky;
-  top: var(--header-h);
+  top: 0;
   z-index: 20;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--s-2) var(--s-3);
@@ -1432,10 +1484,33 @@
   background: var(--sun);
 }
 
+.review-next {
+  flex: none;
+  gap: 10px;
+}
+
+.review-next .flag-dot {
+  background: #fff;
+  opacity: 0.85;
+}
+
+.review-next-count {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.review-bar .section-nav {
+  min-width: 0;
+}
+
 .review-tools {
   display: flex;
   align-items: center;
   gap: 2px;
+  margin-bottom: var(--s-3);
 }
 
 .review-body {
@@ -1507,7 +1582,7 @@
   margin-bottom: var(--s-4);
   padding-bottom: var(--s-3);
   border-bottom: 1px solid var(--line-strong);
-  scroll-margin-top: 140px;
+  scroll-margin-top: 76px;
 }
 
 .section-head h3 {
@@ -1536,7 +1611,7 @@
 }
 
 .script-line-item {
-  scroll-margin: 150px 0 120px;
+  scroll-margin: 90px 0 120px;
 }
 
 .script-row {
@@ -2157,8 +2232,8 @@
   .source-pane {
     display: flex;
     position: sticky;
-    top: calc(var(--header-h) + 76px);
-    height: calc(100dvh - var(--header-h) - 92px);
+    top: 76px;
+    height: calc(100dvh - 92px);
   }
 }
 
@@ -2356,28 +2431,27 @@
 .cast {
   display: flex;
   flex-direction: column;
-  gap: var(--s-8);
+  gap: var(--s-6);
   padding-bottom: var(--s-8);
 }
 
-/* The cast link is the hero of the page. */
+/* Two actions: share the cast link (primary), record some lines yourself (secondary). */
+.cast-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
 .cast-link {
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
-  padding: var(--s-8) var(--s-6);
+  gap: var(--s-3);
+  padding: var(--s-6);
 }
 
-.cast-link-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 560px;
-}
-
-.cast-link-copy h2 {
-  font-size: clamp(30px, 6vw, 42px);
-  line-height: 1.08;
+.cast-link-title {
+  font-size: clamp(24px, 5vw, 32px);
+  line-height: 1.1;
 }
 
 .link-ticket {
@@ -2393,11 +2467,13 @@
 .link-ticket-url {
   flex: 1;
   min-width: 0;
-  font-size: 15px;
+  font-size: 14px;
   letter-spacing: 0;
   text-transform: none;
-  color: var(--ink);
-  word-break: break-all;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .link-ticket-copy {
@@ -2405,6 +2481,90 @@
 }
 
 .cast-link-share {
+  align-self: stretch;
+}
+
+.record-yourself {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s-2);
+}
+
+.record-yourself .quiet-link {
+  align-self: center;
+}
+
+.record-yourself-form {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.record-yourself-form .field {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .cast-link {
+    padding: var(--s-5) var(--s-4);
+  }
+
+  .record-yourself-form .btn {
+    flex: 1 1 100%;
+  }
+}
+
+/* Who has which part and what's recorded, folded away. */
+.call-sheet {
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.call-sheet > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 60px;
+  padding: 10px 2px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.call-sheet > summary::-webkit-details-marker {
+  display: none;
+}
+
+.call-sheet-summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.call-sheet-title {
+  font-weight: 600;
+}
+
+.call-sheet-chevron {
+  flex: none;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.call-sheet[open] .call-sheet-chevron {
+  transform: rotate(180deg);
+}
+
+.call-sheet[open] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding-bottom: var(--s-4);
+}
+
+.call-sheet-listen {
   align-self: flex-start;
 }
 
@@ -2421,51 +2581,19 @@
   background: var(--bad-soft);
 }
 
-@media (max-width: 640px) {
-  .cast-link {
-    padding: var(--s-6) var(--s-4);
-  }
-
-  .cast-link-share {
-    align-self: stretch;
-  }
-}
-
-/* Call sheet: one quiet row per part, read-only. */
-
-.call-sheet,
-.record-yourself {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-4);
-}
-
-.call-sheet-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--s-3);
-}
-
-.call-sheet-head h2,
-.record-yourself h2 {
-  font-size: clamp(22px, 4vw, 28px);
-}
-
 .sheet-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  border-top: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line);
 }
 
 .sheet-row {
   display: flex;
   align-items: center;
   gap: var(--s-3);
-  min-height: 60px;
-  padding: 10px 2px;
+  min-height: 56px;
+  padding: 8px 2px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -2479,7 +2607,7 @@
 
 .sheet-name {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 500;
   letter-spacing: -0.005em;
   overflow-wrap: anywhere;
@@ -2528,34 +2656,6 @@
   }
 
   .sheet-progress .mono {
-    min-width: 0;
-  }
-}
-
-/* Record a part yourself. */
-
-.record-yourself {
-  padding: var(--s-5);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  background: #fff;
-}
-
-.record-yourself-form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: var(--s-2);
-}
-
-.record-yourself-form .field {
-  min-width: 220px;
-}
-
-@media (max-width: 640px) {
-  .record-yourself-form .field,
-  .record-yourself-form .btn {
-    flex: 1 1 100%;
     min-width: 0;
   }
 }
@@ -2619,21 +2719,6 @@
 /* ======================================================================
    Director: run-through and stand-ins
    ====================================================================== */
-
-.runthrough-intro {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-3);
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--radius);
-  background: var(--paper);
-}
-
-.runthrough-intro p {
-  flex: 1 1 320px;
-}
 
 .scene-head {
   max-width: 720px;
@@ -2972,6 +3057,7 @@
 }
 
 .record-progress {
+  white-space: nowrap;
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
@@ -2980,6 +3066,21 @@
 
 .stt-chip {
   font-weight: 500;
+}
+
+.stt-chip-short {
+  display: none;
+}
+
+/* Phones: a short label, so the line count beside it keeps its one line. */
+@media (max-width: 520px) {
+  .stt-chip-long {
+    display: none;
+  }
+
+  .stt-chip-short {
+    display: inline;
+  }
 }
 
 .record-main {
@@ -3491,47 +3592,86 @@
   gap: 14px;
 }
 
-.player-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px var(--s-4);
+/* Like the script page: one row pinned to the top (part, my lines, scene) while the site header
+   scrolls away. */
+.director:has(.runthrough-bar) .app-header {
+  position: static;
 }
 
-/* Role and speed: small pill selects, like the scene picker. */
-.pill-select {
+.runthrough-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
-  color: var(--muted);
+  gap: var(--s-2);
+  margin: 0 calc(-1 * var(--s-4));
+  padding: 10px var(--s-4);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
 }
 
-.pill-select .input {
+.runthrough-bar .section-nav {
+  flex: none;
+  margin-left: auto;
+}
+
+/* A select whose closed state is our own short label; the real <select> sits invisibly on top. */
+.bar-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
   min-height: 36px;
-  width: auto;
-  max-width: 220px;
-  padding: 4px 34px 4px 12px;
-  border-width: 1.5px;
+  padding: 4px 30px 4px 12px;
+  border: 1.5px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--card)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%231d1a16' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 12px center;
+  color: var(--ink);
   font-size: var(--text-sm);
   font-weight: 600;
+  cursor: pointer;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
 }
 
-.my-lines-setting {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-2) var(--s-4);
+.bar-select:hover {
+  border-color: var(--edge-strong);
+}
+
+.bar-select:focus-within {
+  border-color: var(--ink-soft);
+  box-shadow: 0 0 0 3px var(--paper-deep);
+}
+
+.bar-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bar-select select {
+  position: absolute;
+  inset: 0;
   width: 100%;
+  height: 100%;
+  opacity: 0;
+  font-size: 16px;
+  cursor: pointer;
 }
 
-.score-toggle {
-  font-weight: 600;
+.role-select {
+  flex: 0 1 auto;
 }
 
-.practice-tip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.mode-select {
+  flex: none;
+}
+
+.rt-short {
+  display: none;
 }
 
 .practice-bar,
@@ -3546,7 +3686,13 @@
 .lyrics {
   list-style: none;
   margin: 0;
-  padding: var(--s-6) 0 40vh;
+  padding: var(--s-2) 0 40vh;
+}
+
+/* Jumps land below the pinned row, not under it. */
+.lyric-section,
+.lyric {
+  scroll-margin-top: 72px;
 }
 
 .lyric-section > ol {
@@ -3635,6 +3781,45 @@
 .lyric.is-current .lyric-text {
   font-size: 23px;
   font-weight: 500;
+}
+
+/* The line being read, word by word: said words in ink, the current word underlined in soft red,
+   the words still to come a little muted. */
+.lyric-text.is-live .rw {
+  color: var(--muted);
+  border-radius: 3px;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: transparent;
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+  transition:
+    color 0.12s var(--ease),
+    background-color 0.12s var(--ease),
+    text-decoration-color 0.12s var(--ease);
+}
+
+.lyric-text.is-live .rw.is-said {
+  color: var(--ink);
+}
+
+.lyric-text.is-live .rw.is-now {
+  color: var(--ink);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  text-decoration-color: var(--accent-line);
+}
+
+/* A [direction] inside a line, read by the narrator. */
+.lyric-text.is-live .rw-dir {
+  font-size: 0.82em;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.kind-stage_direction .lyric-text.is-live .rw.is-said,
+.kind-stage_direction .lyric-text.is-live .rw.is-now {
+  color: var(--ink-soft);
 }
 
 .lyric.kind-heading {
@@ -3755,6 +3940,39 @@
   border-top: 1px solid var(--line);
 }
 
+/* Speed of everyone else: tap to cycle 1× to 3×. Balanced on the right by "Score me" or a spacer. */
+.speed-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font: 600 14px/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.speed-btn:hover {
+  background: var(--paper-deep);
+  color: var(--ink);
+}
+
+.controls-spacer {
+  flex: none;
+  width: var(--tap);
+}
+
+.score-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
 /* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
 .player-waiting {
   position: fixed;
@@ -3824,7 +4042,8 @@
    ====================================================================== */
 
 @media (prefers-reduced-motion: reduce) {
-  .my-text.is-live .lw {
+  .my-text.is-live .lw,
+  .lyric-text.is-live .rw {
     transition: none;
   }
 
@@ -3849,19 +4068,7 @@
     padding-bottom: 8px;
   }
 
-  .flag-nav {
-    width: 100%;
-  }
-
-  .flag-count {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
   .review-tools {
-    width: 100%;
     justify-content: space-between;
   }
 
@@ -3873,16 +4080,43 @@
     display: none;
   }
 
-  .pill-select .input {
-    max-width: 170px;
-  }
-
   .section-nav .input {
     max-width: 150px;
   }
 
   .production-title h1 {
     font-size: 30px;
+  }
+
+  /* Run-through: part, my lines and scene still share one row at 375 px. */
+  .runthrough-bar {
+    gap: 6px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .bar-select {
+    padding: 4px 26px 4px 10px;
+    background-position: right 9px center;
+  }
+
+  /* The scene picker keeps its full label; the part select gives way and truncates instead. */
+  .runthrough-bar .section-nav .input {
+    max-width: none;
+    padding: 4px 26px 4px 10px;
+    background-position: right 9px center;
+  }
+
+  .rt-long {
+    display: none;
+  }
+
+  .rt-short {
+    display: inline;
+  }
+
+  .player-controls {
+    gap: 12px;
   }
 }
 

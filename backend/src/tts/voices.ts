@@ -92,31 +92,68 @@ export function assignVoices(characters: { id: string; name: string }[], voices:
   return result;
 }
 
-// What the voice should say: no bracketed directions, no markup, one utterance. Empty when there
-// are no words left (a line that is only "—").
+// Keeps the printed line breaks (each one becomes a pause, see TTS_SETTINGS.lineBreakMs), tidies
+// the spaces within each line and drops lines with no words left (a line that is only "—").
+const printedLines = (text: string): string =>
+  text
+    .split("\n")
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter((l) => /[\p{L}\p{N}]/u.test(l))
+    .join("\n");
+
+// What the voice should say: no bracketed directions, no markup, one printed line per text line.
+// Empty when there are no words left.
 export function speakable(text: string): string {
-  const cleaned = text
-    .replace(/\[[^\]]*\]/g, " ")
-    .replace(/\[[^\n]*/g, " ") // an unclosed bracket runs to the end of its line
-    .replace(/\{[^}]*\}/g, " ")
-    .replace(/[_*]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return /[\p{L}\p{N}]/u.test(cleaned) ? cleaned : "";
+  return printedLines(
+    text
+      .replace(/\[[^\]]*\]/g, " ")
+      .replace(/\[[^\n]*/g, " ") // an unclosed bracket runs to the end of its line
+      .replace(/\{[^}]*\}/g, " ")
+      .replace(/[_*]+/g, ""),
+  );
 }
 
 // What the narrator says for a stage direction: the direction itself, without its brackets or
-// markup. Bracketed asides inside dialogue are not read at all (speakable drops them).
+// markup.
 export function speakableDirection(text: string): string {
-  const cleaned = text
-    .replace(/[[\]{}()]/g, " ")
-    .replace(/[_*]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return /[\p{L}\p{N}]/u.test(cleaned) ? cleaned : "";
+  return printedLines(text.replace(/[[\]{}()]/g, " ").replace(/[_*]+/g, ""));
 }
 
-export const TTS_SETTINGS = { version: 1 } as const;
+// A dialogue line as it is read aloud: the character's words, with any [bracketed] direction
+// inside it read by the narrator in its place ("Now go. [To the Servant.] Was it not" is three
+// parts). An unclosed bracket runs to the end of its printed line. Parts with no words are left out.
+export interface SpokenPart {
+  narrator: boolean;
+  text: string;
+}
+
+export function spokenParts(text: string): SpokenPart[] {
+  const parts: SpokenPart[] = [];
+  const push = (narrator: boolean, raw: string) => {
+    const said = narrator ? speakableDirection(raw) : speakable(raw);
+    if (!said) return;
+    const last = parts[parts.length - 1];
+    if (last && last.narrator === narrator) last.text += `\n${said}`;
+    else parts.push({ narrator, text: said });
+  };
+  let at = 0;
+  for (let open = text.indexOf("[", at); open !== -1; open = text.indexOf("[", at)) {
+    push(false, text.slice(at, open));
+    const close = text.indexOf("]", open + 1);
+    const lineEnd = text.indexOf("\n", open);
+    const end = close !== -1 ? close : lineEnd !== -1 ? lineEnd : text.length;
+    push(true, text.slice(open + 1, end));
+    at = close !== -1 ? close + 1 : end;
+  }
+  push(false, text.slice(at));
+  return parts;
+}
+
+// lengthScale: Piper speaks about 2.8–3 words a second; 1.1 brings it nearer a stage pace (about
+// 2.5). lineBreakMs: added at the end of each printed line, on top of the ~0.2 s Piper leaves after
+// each utterance (about 0.6 s in all, measured), as well as after punctuation, so
+// verse isn't run together.
+export const TTS_SETTINGS = { version: 2, lengthScale: 1.1, lineBreakMs: 150 } as const;
 
 // Cache key for a synthesized clip: engine, voice, spoken text and everything that shapes the
 // normalized audio. Same inputs, same clip, so re-renders only synthesize changed lines.
@@ -125,6 +162,8 @@ export function clipHash(engine: string, voice: Voice, text: string): string {
     .update(
       JSON.stringify({
         v: TTS_SETTINGS.version,
+        lengthScale: TTS_SETTINGS.lengthScale,
+        lineBreakMs: TTS_SETTINGS.lineBreakMs,
         engine,
         model: voice.model,
         speaker: voice.speaker,
