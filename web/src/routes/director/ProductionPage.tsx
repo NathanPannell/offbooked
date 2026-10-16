@@ -56,22 +56,25 @@ export default function ProductionPage() {
         <ProductionTitle production={p} onSaved={(updated) => production.setData(updated)} />
       </div>
 
-      <nav className="steps" aria-label="Production steps">
-        {STEPS.map((s, i) => (
-          <button
-            key={s.id}
-            type="button"
-            className="step"
-            aria-current={tab === s.id ? "page" : undefined}
-            onClick={() => selectTab(s.id)}
-          >
-            <span className={`step-dot ${done[s.id] ? "is-done" : ""}`} aria-hidden="true">
-              {done[s.id] ? <Check size={13} strokeWidth={3} /> : i + 1}
-            </span>
-            {s.label}
-          </button>
-        ))}
-      </nav>
+      {/* Pinned to the top while scrolling, with each page’s own row pinned just under it. */}
+      <div className="steps-bar">
+        <nav className="steps" aria-label="Production steps">
+          {STEPS.map((s, i) => (
+            <button
+              key={s.id}
+              type="button"
+              className="step"
+              aria-current={tab === s.id ? "page" : undefined}
+              onClick={() => selectTab(s.id)}
+            >
+              <span className={`step-dot ${done[s.id] ? "is-done" : ""}`} aria-hidden="true">
+                {done[s.id] ? <Check size={13} strokeWidth={3} /> : i + 1}
+              </span>
+              {s.label}
+            </button>
+          ))}
+        </nav>
+      </div>
 
       <section className="step-panel" aria-label={STEPS.find((s) => s.id === tab)!.label}>
         {tab === "script" && (
