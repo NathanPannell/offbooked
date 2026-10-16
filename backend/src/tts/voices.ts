@@ -153,7 +153,8 @@ export function spokenParts(text: string): SpokenPart[] {
 // 2.5). lineBreakMs: added at the end of each printed line, on top of the ~0.2 s Piper leaves after
 // each utterance (about 0.6 s in all, measured), as well as after punctuation, so
 // verse isn't run together.
-export const TTS_SETTINGS = { version: 2, lengthScale: 1.1, lineBreakMs: 150 } as const;
+// version 3: two-pass loudness, so clips match recorded takes.
+export const TTS_SETTINGS = { version: 3, lengthScale: 1.1, lineBreakMs: 150 } as const;
 
 // Cache key for a synthesized clip: engine, voice, spoken text and everything that shapes the
 // normalized audio. Same inputs, same clip, so re-renders only synthesize changed lines.
