@@ -1219,6 +1219,28 @@
   margin: 0;
 }
 
+/* The production pages pin the Script / Cast / Run-through tabs to the top of the screen (the site
+   header scrolls away), and the script and run-through pin their own row just under them. */
+.production-page {
+  --steps-pin: 62px;
+}
+
+.director:has(.steps-bar) .app-header {
+  position: static;
+}
+
+.steps-bar {
+  position: sticky;
+  top: 0;
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  height: var(--steps-pin);
+  margin: 0 calc(-1 * var(--s-4));
+  padding: 0 var(--s-4);
+  background: var(--bg);
+}
+
 .steps {
   display: flex;
   gap: var(--s-1);
@@ -1417,15 +1439,10 @@
   gap: var(--s-4);
 }
 
-/* The script page keeps one row pinned to the top: Next on the left, scenes on the right. The
-   site header scrolls away there. */
-.director:has(.review-bar) .app-header {
-  position: static;
-}
-
+/* The script page pins one row under the tabs: Next on the left, scenes on the right. */
 .review-bar {
   position: sticky;
-  top: 0;
+  top: var(--steps-pin, 0px);
   z-index: 20;
   display: flex;
   flex-wrap: nowrap;
@@ -1582,7 +1599,7 @@
   margin-bottom: var(--s-4);
   padding-bottom: var(--s-3);
   border-bottom: 1px solid var(--line-strong);
-  scroll-margin-top: 76px;
+  scroll-margin-top: calc(var(--steps-pin, 0px) + 76px);
 }
 
 .section-head h3 {
@@ -1611,7 +1628,7 @@
 }
 
 .script-line-item {
-  scroll-margin: 90px 0 120px;
+  scroll-margin: calc(var(--steps-pin, 0px) + 90px) 0 120px;
 }
 
 .script-row {
@@ -2232,8 +2249,8 @@
   .source-pane {
     display: flex;
     position: sticky;
-    top: 76px;
-    height: calc(100dvh - 92px);
+    top: calc(var(--steps-pin, 0px) + 76px);
+    height: calc(100dvh - var(--steps-pin, 0px) - 92px);
   }
 }
 
@@ -3592,15 +3609,10 @@
   gap: 14px;
 }
 
-/* Like the script page: one row pinned to the top (part, my lines, scene) while the site header
-   scrolls away. */
-.director:has(.runthrough-bar) .app-header {
-  position: static;
-}
-
+/* Like the script page: one row pinned under the tabs (part, my lines, scene). */
 .runthrough-bar {
   position: sticky;
-  top: 0;
+  top: var(--steps-pin, 0px);
   z-index: 20;
   display: flex;
   flex-wrap: nowrap;
@@ -3692,7 +3704,7 @@
 /* Jumps land below the pinned row, not under it. */
 .lyric-section,
 .lyric {
-  scroll-margin-top: 72px;
+  scroll-margin-top: calc(var(--steps-pin, 0px) + 72px);
 }
 
 .lyric-section > ol {
