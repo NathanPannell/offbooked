@@ -7,6 +7,7 @@ import { Dialog } from "../components/Dialog";
 import { Loading } from "../components/Loading";
 import { MicHelp } from "../components/MicHelp";
 import { SectionNav } from "../components/SectionNav";
+import { sceneLabel } from "./sceneLabel";
 import { useToast } from "../components/Toast";
 import { WordDiff } from "../components/WordDiff";
 import { plural } from "../lib/format";
@@ -78,10 +79,23 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     if (productionId) saveSettings(productionId, next);
   };
 
+  const roleIds = useMemo(() => roleCharacters(settings.role, myCharacterIds), [settings.role, myCharacterIds]);
+  // Who speaks in each scene, in order of first line.
+  const speakersBySection = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const l of lines) {
+      if (l.kind !== "dialogue" || !l.characterId) continue;
+      const list = out.get(l.sectionId) ?? [];
+      if (!list.includes(l.characterId)) list.push(l.characterId);
+      out.set(l.sectionId, list);
+    }
+    return out;
+  }, [lines]);
+
   const mine = useMemo(() => {
-    const ids = roleCharacters(settings.role, myCharacterIds);
+    const ids = roleIds;
     return new Set(lines.filter((l) => l.kind === "dialogue" && l.characterId && ids.has(l.characterId)).map((l) => l.id));
-  }, [settings.role, myCharacterIds, lines]);
+  }, [roleIds, lines]);
   const hasRole = settings.role !== "";
   const part = useMemo<Part>(() => (hasRole ? { mine, mode: settings.mode } : NO_PART), [hasRole, mine, settings.mode]);
   const pausing = hasRole && settings.mode === "pause";
@@ -227,6 +241,8 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
 
   const hasAudio = queue.length > 0;
   const sections = [...data.sections].sort((a, b) => a.seq - b.seq);
+  // With a part picked, the scene list keeps only the scenes that part speaks in.
+  const sceneChoices = hasRole ? sections.filter((s) => speakersBySection.get(s.id)?.some((id) => roleIds.has(id))) : sections;
   const ownNames = myCharacterIds.map((id) => characterName.get(id)).filter(Boolean).join(" & ");
   const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
   const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
@@ -289,7 +305,10 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
           </BarSelect>
         )}
         <SectionNav
-          sections={sections}
+          sections={sceneChoices}
+          always={hasRole}
+          placeholder={hasRole ? "Jump to your scenes…" : "Jump to scene…"}
+          label={(s) => sceneLabel(s.title, speakersBySection.get(s.id) ?? [], characterName)}
           onJump={(sectionId) => {
             const first = lines.find((l) => l.sectionId === sectionId && segmentByLine.has(l.id));
             if (first && hasAudio) onLineTap(first);

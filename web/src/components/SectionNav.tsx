@@ -1,9 +1,28 @@
 import { ListTree } from "lucide-react";
 import type { Section } from "../api/types";
 
-/** Jump-to-scene picker. Hidden when the script has a single section. */
-export function SectionNav({ sections, onJump, idPrefix = "section-" }: { sections: Section[]; onJump?: (id: string) => void; idPrefix?: string }) {
-  if (sections.length < 2) return null;
+/**
+ * Jump-to-scene picker. Hidden when the script has a single section (unless `label` narrows the
+ * list on purpose). `label` replaces an option's text, e.g. the scene with who is in it;
+ * `placeholder` replaces "Jump to scene…".
+ */
+export function SectionNav({
+  sections,
+  onJump,
+  idPrefix = "section-",
+  label,
+  placeholder = "Jump to scene…",
+  always = false,
+}: {
+  sections: Section[];
+  onJump?: (id: string) => void;
+  idPrefix?: string;
+  label?: (s: Section) => string;
+  placeholder?: string;
+  /** Show even with one section (a filtered list). */
+  always?: boolean;
+}) {
+  if (sections.length === 0 || (sections.length < 2 && !always)) return null;
   return (
     <label className="section-nav">
       <ListTree size={18} aria-hidden="true" />
@@ -18,10 +37,10 @@ export function SectionNav({ sections, onJump, idPrefix = "section-" }: { sectio
           else document.getElementById(idPrefix + id)?.scrollIntoView({ block: "start", behavior: "smooth" });
         }}
       >
-        <option value="">Jump to scene…</option>
+        <option value="">{placeholder}</option>
         {sections.map((s) => (
           <option key={s.id} value={s.id}>
-            {s.title}
+            {label ? label(s) : s.title}
           </option>
         ))}
       </select>
