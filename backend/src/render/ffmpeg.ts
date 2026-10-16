@@ -73,30 +73,77 @@ async function trimFilters(input: string): Promise<{ filters: string; startMs: n
   };
 }
 
-// Decode, cut to the speech (leading and trailing silence and noise, with a small pad), loudness-
-// normalize, 48 kHz mono FLAC. With `m4a`, the same ffmpeg run also writes the AAC file that
-// browsers play line by line (about 50 ms extra). Returns the FLAC's length in samples.
-export async function normalizeClip(input: string, output: string, m4a?: string): Promise<number> {
-  return (await normalizeClipCut(input, output, m4a)).samples;
+// Light clean-up for recordings made on phones: a high-pass for rumble and handling noise, then
+// gentle FFT noise reduction (10 dB at most, tracking the clip's own noise floor). Stronger
+// settings make voices watery, so this leaves the voice itself alone. TTS is clean already.
+const CLEAN = "highpass=f=70,afftdn=nr=10:nf=-45:tn=1,";
+
+interface Loudness {
+  input_i: string;
+  input_tp: string;
+  input_lra: string;
+  input_thresh: string;
+  target_offset: string;
+}
+
+// First loudnorm pass: how loud the clip is after the filters before it.
+async function measureLoudness(input: string, filters: string): Promise<Loudness | null> {
+  try {
+    const stderr = await ffmpeg(["-i", input, "-vn", "-af", `${filters}${loudnorm}:print_format=json`, "-f", "null", "-"]);
+    const json = stderr.slice(stderr.lastIndexOf("{"), stderr.lastIndexOf("}") + 1);
+    const m = JSON.parse(json) as Loudness;
+    return [m.input_i, m.input_tp, m.input_lra, m.input_thresh, m.target_offset].every((v) => Number.isFinite(Number(v))) ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+// Second pass: one fixed gain to the target loudness, so every clip, recorded or synthesized, plays
+// at the same level, with a quick limiter that only touches the odd peak the gain pushes past
+// -1.5 dBFS. Single-pass loudnorm adjusts the gain as it goes and lands several LU off on clips a
+// few seconds long, and its linear mode can't raise a clip that already peaks near full scale.
+// Falls back to it when there was nothing to measure (near silence). The gain is capped at ±30 dB
+// so a nearly silent take isn't turned into loud hiss.
+const PEAK_LIMIT = 10 ** (-1.5 / 20);
+const levelTo = (m: Loudness | null) => {
+  if (!m) return loudnorm;
+  const gainDb = Math.max(-30, Math.min(30, RENDER_SETTINGS.loudnessI - Number(m.input_i)));
+  return `volume=${gainDb.toFixed(2)}dB,alimiter=limit=${PEAK_LIMIT.toFixed(3)}:attack=2:release=40:level=false`;
+};
+
+// Decode, cut to the speech (leading and trailing silence and noise, with a small pad), clean it
+// up when asked (recordings), bring it to the target loudness, 48 kHz mono FLAC. With `m4a`, the
+// same ffmpeg run also writes the AAC file that browsers play line by line (about 50 ms extra).
+// Returns the FLAC's length in samples.
+export async function normalizeClip(input: string, output: string, m4a?: string, opts: { clean?: boolean } = {}): Promise<number> {
+  return (await normalizeClipCut(input, output, m4a, opts)).samples;
 }
 
 // normalizeClip, also saying where the cut started in the input (ms), so timings measured on the
 // input (TTS word timings) can be moved onto the output.
-export async function normalizeClipCut(input: string, output: string, m4a?: string): Promise<{ samples: number; cutStartMs: number }> {
-  const run = (filters: string) =>
-    ffmpeg(
+export async function normalizeClipCut(
+  input: string,
+  output: string,
+  m4a?: string,
+  opts: { clean?: boolean } = {},
+): Promise<{ samples: number; cutStartMs: number }> {
+  const run = async (pre: string) => {
+    const filters = `${pre}${levelTo(await measureLoudness(input, pre))}`;
+    return ffmpeg(
       m4a
         ? ["-i", input, "-vn", "-filter_complex", `${filters},aresample=${RATE},asplit[f][a]`,
            "-map", "[f]", "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output,
            "-map", "[a]", "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", m4a]
         : ["-i", input, "-vn", "-af", filters, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output],
     );
+  };
+  const clean = opts.clean ? CLEAN : "";
   const cut = await trimFilters(input);
-  await run(`${cut.filters}${loudnorm}`);
-  let samples = await measure(output);
+  await run(`${cut.filters}${clean}`);
+  const samples = await measure(output);
   if (samples < RATE / 20) {
     // Nearly everything was below the silence threshold; keep the take untrimmed instead.
-    await run(loudnorm);
+    await run(clean);
     return { samples: await measure(output), cutStartMs: 0 };
   }
   return { samples, cutStartMs: cut.startMs };

@@ -18,10 +18,11 @@ export interface NormalizedTake {
   streamKey: string | null; // AAC .m4a for line-by-line playback, when asked for
 }
 
-// Takes normalized before speech trimming (trim.ts) are made again on first use: the key names the
-// version, so an old FLAC is never mistaken for a trimmed one. No migration or backfill job needed:
-// the next render or playback of each take trims it once.
-export const NORMALIZE_VERSION = "t2";
+// Takes normalized by an older pipeline are made again on first use: the key names the version, so
+// an old FLAC is never mistaken for a current one. No migration or backfill job needed: the next
+// render or playback of each take redoes it once. t2: cut to the speech (trim.ts). t3: light noise
+// clean-up and two-pass loudness, so every take plays at the same level as the TTS.
+export const NORMALIZE_VERSION = "t3";
 export const isCurrentNormalized = (key: string | null): key is string => Boolean(key?.endsWith(`.${NORMALIZE_VERSION}.flac`));
 
 // Concurrent requests for the same take (a render and a listener) share one ffmpeg run.
@@ -69,7 +70,7 @@ async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { 
     }
     const source = path.join(dir, `source${path.extname(take.storageKey)}`);
     await writeFile(source, await storage.get(take.storageKey));
-    const samples = await normalizeClip(source, flac, m4a);
+    const samples = await normalizeClip(source, flac, m4a, { clean: true });
     const normalizedKey = `productions/${productionId}/normalized/${take.id}.${NORMALIZE_VERSION}.flac`;
     await Promise.all([
       storage.put(normalizedKey, await readFile(flac), "audio/flac"),
