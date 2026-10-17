@@ -11,6 +11,7 @@ import { Loading } from "../../components/Loading";
 import { joinNames, plural } from "../../lib/format";
 import { recallJoin, rememberJoin } from "../../lib/joinMemory";
 import { usePrewarmStt } from "../../stt/useStt";
+import { Onboarding, onboardingSeen } from "./Onboarding";
 
 const RETRY_MS = 10_000;
 
@@ -31,6 +32,8 @@ function Join({ token }: { token: string }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
+  // First time on this device: a short intro before picking a part (skippable).
+  const [intro, setIntro] = useState(() => !onboardingSeen());
   // Load the speech model while they pick a part and type a name, so it is ready by the first take.
   usePrewarmStt(!!info?.characters.some((c) => !c.takenBy));
 
@@ -101,6 +104,9 @@ function Join({ token }: { token: string }) {
   }
 
   const data = info!;
+  if (intro && data.characters.some((c) => !c.takenBy)) {
+    return <Onboarding productionTitle={data.production.title} directorName={data.production.directorName} onDone={() => setIntro(false)} />;
+  }
   const chosen = data.characters.filter((c) => picked.has(c.id));
   const lines = chosen.reduce((n, c) => n + c.lineCount, 0);
   const open = data.characters.filter((c) => !c.takenBy);
