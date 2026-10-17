@@ -728,6 +728,11 @@ dialog.dialog::backdrop {
   max-width: calc(100vw - 32px);
 }
 
+/* Recording screens: keep toasts (and their Undo) clear of the record button. */
+body:has(.record-dock) .toast-region {
+  bottom: calc(176px + var(--safe-bottom));
+}
+
 .toast {
   padding: 11px 18px;
   border-radius: var(--radius-pill);
@@ -737,6 +742,30 @@ dialog.dialog::backdrop {
   font-weight: 600;
   box-shadow: var(--shadow-lg);
   animation: toast-in var(--medium) var(--ease);
+}
+
+.toast.has-action {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 6px 6px 6px 18px;
+  pointer-events: auto;
+}
+
+.toast-action {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.16);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.toast-action:hover,
+.toast-action:focus-visible {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 @keyframes toast-in {

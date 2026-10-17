@@ -1,10 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { followDelta } from "./follow";
+import { anchorDelta, FOLLOW_ANCHOR, followDelta, followTarget, ROW_SLACK } from "./follow";
 
 // A phone: pinned row ends at 52 px, player bar starts at 720 px (band 668 px tall).
 const band = { top: 52, bottom: 720 };
+const anchor = band.top + (band.bottom - band.top) * FOLLOW_ANCHOR;
+// One row of the current line: 23 px type at 1.45 line height.
+const ROW = 33;
 
-describe("followDelta", () => {
+describe("anchorDelta", () => {
+  it("leaves a word on the anchored row alone", () => {
+    expect(anchorDelta({ top: anchor }, band)).toBe(0);
+    expect(anchorDelta({ top: anchor + 4 }, band)).toBe(0);
+    expect(anchorDelta({ top: anchor - (ROW_SLACK - 1) }, band)).toBe(0);
+  });
+
+  it("moves about one row when the next row of a long speech starts", () => {
+    // Every word of a row shares its top, so only the first word of each new row scrolls.
+    const rows = [0, 1, 2, 3].map((r) => anchorDelta({ top: anchor + r * ROW }, band));
+    expect(rows[0]).toBe(0);
+    expect(rows[1]).toBeCloseTo(ROW, 5);
+    expect(rows[2]).toBeCloseTo(2 * ROW, 5);
+    expect(ROW).toBeGreaterThan(ROW_SLACK);
+  });
+
+  it("brings a far-off line to the anchor in either direction", () => {
+    expect(anchorDelta({ top: 1400 }, band)).toBeCloseTo(1400 - anchor, 5);
+    expect(anchorDelta({ top: -300 }, band)).toBeCloseTo(-300 - anchor, 5);
+  });
+
+  it("does nothing without a band", () => {
+    expect(anchorDelta({ top: 500 }, { top: 100, bottom: 100 })).toBe(0);
+  });
+});
+
+describe("followTarget", () => {
+  const page = { scrollY: 1000, maxScroll: 5000 };
+
+  it("names the absolute spot, so asking again mid-glide doesn't add up", () => {
+    expect(followTarget({ top: anchor + ROW, bottom: anchor + 2 * ROW }, band, page, false)).toBeCloseTo(1000 + ROW, 5);
+    // Halfway through that glide the same row names the same spot.
+    const half = { scrollY: 1000 + ROW / 2, maxScroll: 5000 };
+    expect(followTarget({ top: anchor + ROW / 2, bottom: anchor + ROW * 1.5 }, band, half, false)).toBeCloseTo(1000 + ROW, 5);
+  });
+
+  it("stays put within a row", () => {
+    expect(followTarget({ top: anchor + 3, bottom: anchor + 36 }, band, page, false)).toBeNull();
+  });
+
+  it("clamps to the page and stays put when it can't move", () => {
+    expect(followTarget({ top: 100, bottom: 130 }, band, { scrollY: 0, maxScroll: 5000 }, false)).toBeNull();
+    expect(followTarget({ top: 900, bottom: 930 }, band, { scrollY: 4990, maxScroll: 5000 }, false)).toBe(5000);
+  });
+
+  it("with reduced motion, keeps the comfort band instead of following every row", () => {
+    expect(followTarget({ top: 300, bottom: 330 }, band, page, true)).toBeNull();
+    expect(followTarget({ top: 300 + ROW, bottom: 330 + ROW }, band, page, true)).toBeNull();
+    expect(followTarget({ top: 600, bottom: 630 }, band, page, true)).toBeGreaterThan(1000);
+  });
+});
+
+describe("followDelta (reduced motion)", () => {
   it("leaves a word in the comfortable middle alone", () => {
     expect(followDelta({ top: 300, bottom: 330 }, band)).toBe(0);
   });

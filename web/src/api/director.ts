@@ -101,7 +101,16 @@ export const script = {
   /** An edit clears the line's flag; undo sends `flagged` (with its code and reason) to put it back. */
   updateLine: (
     lineId: string,
-    input: { characterId?: string | null; kind?: LineKind; text?: string; flagged?: boolean; flagCode?: FlagCode | null; flagReason?: string | null },
+    input: {
+      characterId?: string | null;
+      kind?: LineKind;
+      text?: string;
+      flagged?: boolean;
+      flagCode?: FlagCode | null;
+      flagReason?: string | null;
+      /** Several people say it (a group is made from their names); on an ALL line, who is on stage (null: Claude's guess). */
+      voiceIds?: string[] | null;
+    },
   ) =>
     request<{ line: Line }>(`/lines/${lineId}`, { method: "PATCH", auth: director, json: input }),
   /** `second` restores a line that a join removed (undo); without it the new line copies this one. */
@@ -159,12 +168,21 @@ export const joinLink = {
 
 /** Director stand-in recordings, scene by scene. */
 export const standins = {
+  /** Every line a character says (shared ones too), for their studio: the same items as a scene. */
+  characterLines: (productionId: string, characterId: string) =>
+    request<{ character: { id: string; name: string }; sections: Section[]; lines: SectionLine[] }>(
+      `/productions/${productionId}/characters/${characterId}/lines`,
+      { auth: director },
+    ),
   sectionLines: (productionId: string, sectionId: string) =>
     request<{ section: Section; lines: SectionLine[] }>(`/productions/${productionId}/sections/${sectionId}/lines`, {
       auth: director,
     }),
-  putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal) =>
-    request<TakeUploadResult>(`/lines/${lineId}/take`, {
+  /** Deletes any take in the director's production; `restoreTake` is its Undo. */
+  deleteTake: (takeId: string) => request<void>(`/takes/${takeId}`, { method: "DELETE", auth: director }),
+  restoreTake: (takeId: string) => request<void>(`/takes/${takeId}/restore`, { method: "POST", auth: director }),
+  putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal, characterId?: string | null) =>
+    request<TakeUploadResult>(`/lines/${lineId}/take${characterId ? `?characterId=${characterId}` : ""}`, {
       method: "PUT",
       auth: director,
       body: audio,

@@ -2,8 +2,9 @@ import { ArrowLeft, Headphones } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError, errorMessage } from "../../api/client";
+import { titleCase } from "../../lib/format";
 import { productions, script as scriptApi, standins } from "../../api/director";
-import type { ActorLine, AudioSource, SectionLine } from "../../api/types";
+import type { ActorLine, AudioSource, Section, SectionLine } from "../../api/types";
 import { usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { CharacterName } from "../../components/CharacterName";
 import { Loading } from "../../components/Loading";
@@ -24,11 +25,15 @@ const VOICE_LABEL: Record<AudioSource, string> = {
 
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-/** The director records stand-in lines, scene by scene and partner by partner. */
+/**
+ * The director records stand-in lines, scene by scene and partner by partner, or one character's
+ * lines across the play (`?character=`, their studio, opened from the call sheet).
+ */
 export default function SceneRecorder() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const toast = useToast();
+  const characterId = params.get("character");
   const base = useResource(() => Promise.all([productions.get(id), scriptApi.get(id)]), `scene:${id}`);
   const sections = useMemo(() => [...(base.data?.[1].sections ?? [])].sort((a, b) => a.seq - b.seq), [base.data]);
   const sectionId = params.get("section") ?? sections[0]?.id ?? "";
@@ -43,7 +48,40 @@ export default function SceneRecorder() {
       </main>
     );
   }
-  const [{ production }] = base.data;
+  const [{ production }, script] = base.data;
+
+  if (characterId) {
+    const character = script.characters.find((c) => c.id === characterId);
+    return (
+      <div className="scene-recorder">
+        <div className="page scene-head">
+          <Link className="back-link" to={`/app/p/${id}?tab=cast`}>
+            <ArrowLeft size={16} aria-hidden="true" /> {production.title}
+          </Link>
+          <div className="spread scene-title-row">
+            <div>
+              <p className="eyebrow">Studio</p>
+              <h1 className="display">{character ? titleCase(character.name) : "Character"}</h1>
+            </div>
+            <Link className="btn btn-ghost btn-sm" to={`/app/p/${id}?tab=play`}>
+              <Headphones size={16} aria-hidden="true" /> Run-through
+            </Link>
+          </div>
+          <p className="muted">
+            Every line {character ? titleCase(character.name) : "they"} says, with what's recorded. Listen back, delete a take, or read one in
+            yourself as a stand-in.
+          </p>
+        </div>
+        <SceneLines
+          key={characterId}
+          productionId={id}
+          cacheKey={`character:${id}:${characterId}`}
+          load={() => standins.characterLines(id, characterId)}
+          onError={toast}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="scene-recorder">
@@ -76,7 +114,13 @@ export default function SceneRecorder() {
         </label>
       </div>
       {sectionId ? (
-        <SceneLines key={sectionId} productionId={id} sectionId={sectionId} onError={toast} />
+        <SceneLines
+          key={sectionId}
+          productionId={id}
+          cacheKey={`${id}:${sectionId}`}
+          load={() => standins.sectionLines(id, sectionId)}
+          onError={toast}
+        />
       ) : (
         <p className="page muted">This script has no scenes yet.</p>
       )}
@@ -84,14 +128,28 @@ export default function SceneRecorder() {
   );
 }
 
-function SceneLines({ productionId, sectionId, onError }: { productionId: string; sectionId: string; onError: (m: string) => void }) {
-  const data = useResource(() => standins.sectionLines(productionId, sectionId), `${productionId}:${sectionId}`);
+function SceneLines({
+  productionId,
+  cacheKey,
+  load,
+  onError,
+}: {
+  productionId: string;
+  cacheKey: string;
+  /** A scene's lines, or a character's (with the scenes they're in, for headings). */
+  load: () => Promise<{ lines: SectionLine[]; sections?: Section[] }>;
+  onError: (m: string, action?: { label: string; onClick: () => void }) => void;
+}) {
+  const data = useResource(load, cacheKey);
   const setData = data.setData;
   const { uploader, items } = useUploads();
   const playback = usePlayback(() => onError("Couldn't play that. Try again."));
   const [who, setWho] = useState<string>("all");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [localTakes, setLocalTakes] = useState(new Map<string, LocalTake>());
+  /** Server take ids of stand-ins saved on this screen, by client take id. */
+  const serverTakeIds = useRef(new Map<string, string>());
+  const [deleted, setDeleted] = useState(new Set<string>());
   const cardRefs = useRef(new Map<string, HTMLElement>());
   const stopRef = useRef<() => void>(() => {});
   const recorder = useTakeRecorder({
@@ -123,6 +181,7 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
     () =>
       uploader.onSaved((item, result) => {
         if (item.kind !== "director" || item.token !== productionId) return;
+        serverTakeIds.current.set(item.takeId, result.take.id);
         setData((current) =>
           current
             ? {
@@ -153,7 +212,8 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
     if (take.tooShort) return onError("Too short. Tap record, read the line, then tap stop.");
     const url = URL.createObjectURL(take.blob);
     try {
-      const clientTakeId = await uploader.add({ kind: "director", token: productionId, lineId, audio: take.blob, durationMs: take.durationMs });
+      const voiceId = all.find((l) => l.line.id === lineId)?.voiceId ?? null;
+      const clientTakeId = await uploader.add({ kind: "director", token: productionId, lineId, characterId: voiceId, audio: take.blob, durationMs: take.durationMs });
       setLocalTakes((m) => {
         const next = new Map(m);
         const old = next.get(lineId);
@@ -176,6 +236,42 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
     }
   };
   stopRef.current = () => void stop();
+
+  /** Deletes the take shown on a line (a stand-in or the cast's), with Undo. */
+  const remove = async (lineId: string, takeId: string) => {
+    playback.pause();
+    const local = localTakes.get(lineId);
+    try {
+      await standins.deleteTake(takeId);
+    } catch (err) {
+      return onError(errorMessage(err));
+    }
+    if (local) setDeleted((d) => new Set(d).add(local.clientTakeId));
+    setLocalTakes((m) => {
+      const next = new Map(m);
+      next.delete(lineId);
+      return next;
+    });
+    const refresh = async () => {
+      const fresh = await load().catch(() => null);
+      if (fresh) setData(fresh);
+    };
+    await refresh();
+    onError("Take deleted", {
+      label: "Undo",
+      onClick: () =>
+        void standins.restoreTake(takeId).then(async () => {
+          if (local) {
+            setDeleted((d) => {
+              const next = new Set(d);
+              next.delete(local.clientTakeId);
+              return next;
+            });
+          }
+          await refresh();
+        }, (err) => onError(errorMessage(err))),
+    });
+  };
 
   if (data.loading) return <Loading />;
   if (data.error instanceof ApiError && data.error.status === 404) {
@@ -201,6 +297,16 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
   }
 
   const current = shown.find((l) => l.line.id === currentId) ?? null;
+  const sectionTitles = new Map((data.data.sections ?? []).map((sec) => [sec.id, sec.title]));
+  const uploadFor = (lineId: string) => {
+    const item = latestForLine(myItems, productionId, lineId);
+    return item && !deleted.has(item.takeId) ? item : null;
+  };
+  const shownTake = (l: SectionLine): string | null => {
+    const local = localTakes.get(l.line.id);
+    if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
+    return l.take?.id ?? null;
+  };
   const voiced = (l: SectionLine): AudioSource => (localTakes.has(l.line.id) ? "standin" : l.audioSource);
   const counts = all.reduce((acc, l) => ((acc[voiced(l)] = (acc[voiced(l)] ?? 0) + 1), acc), {} as Partial<Record<AudioSource, number>>);
 
@@ -210,7 +316,7 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
         <p className="small muted nums">
           {plural(all.length, "line")}: {counts.actor ?? 0} by the cast · {counts.standin ?? 0} stand-in · {(counts.tts ?? 0) + (counts.none ?? 0)} still computer voice
         </p>
-        {speakers.length > 1 && (
+        {speakers.length > 1 && !data.data.sections && (
           <div className="chip-row" role="group" aria-label="Show lines for">
             <button type="button" className="filter-chip" aria-pressed={who === "all"} onClick={() => setWho("all")}>
               Everyone
@@ -227,7 +333,9 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
         <ol className="line-list">
           {shown.map((l, i) => {
             const source = voiced(l);
-            const actorLine: ActorLine = { line: l.line, sectionTitle: "", cue: l.cue, directions: [], take: l.take };
+            const actorLine: ActorLine = { line: l.line, sectionTitle: "", cue: l.cue, directions: [], take: l.take, together: l.together };
+            const heading = sectionTitles.size > 0 && (i === 0 || shown[i - 1]!.line.sectionId !== l.line.sectionId) ? sectionTitles.get(l.line.sectionId) : null;
+            const takeId = shownTake(l);
             return (
               <li
                 key={l.line.id}
@@ -236,6 +344,7 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
                   else cardRefs.current.delete(l.line.id);
                 }}
               >
+                {heading && <h2 className="eyebrow studio-scene">{heading}</h2>}
                 <LineCard
                   actorLine={actorLine}
                   speaker={l.characterName}
@@ -244,12 +353,16 @@ function SceneLines({ productionId, sectionId, onError }: { productionId: string
                   current={l.line.id === currentId}
                   recording={recorder.recording?.lineId === l.line.id}
                   localTake={localTakes.get(l.line.id) ?? null}
-                  upload={latestForLine(myItems, productionId, l.line.id)}
+                  upload={uploadFor(l.line.id)}
                   score={null}
                   playing={playback.playing}
                   noCueLabel="Opens the scene"
                   voice={<span className={`tag tag-${source}`}>{VOICE_LABEL[source]}</span>}
+                  progress={playback.progress}
+                  takeLabel={source === "standin" ? "Your stand-in" : "Cast take"}
                   onPlay={playback.play}
+                  onPlayTogether={playback.playTogether}
+                  onDelete={takeId ? () => void remove(l.line.id, takeId) : undefined}
                   onSelect={() => !recorder.recording && setCurrentId(l.line.id)}
                   onRerecord={() => void start(l.line.id)}
                   onRetry={(takeId) => uploader.retry(takeId)}

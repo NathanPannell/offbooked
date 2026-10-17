@@ -3,11 +3,12 @@ import { ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { notFound } from "../errors.ts";
 import { idOf } from "../input.ts";
-import { cueViews, previousCue } from "../lineaudio.ts";
+import { cueViews, previousCue, saysLine } from "../lineaudio.ts";
+import { togetherViews } from "./actor.ts";
 import type { AudioSource } from "../render/plan.ts";
 import { scheduleRender } from "../render/queue.ts";
 import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
-import { linesOf, lineView, productionRows, sectionView, takeColumns, takeView, type SectionRow, type TakeRow } from "../views.ts";
+import { linesOf, lineView, productionRows, sectionsOf, sectionView, takeColumns, takeView, type LineRow, type SectionRow, type TakeRow } from "../views.ts";
 
 // Stand-ins: the director records any line for a scene partner. A stand-in take becomes the line's
 // current take until someone records it again, fills the run-through, and never counts toward an
@@ -80,30 +81,68 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
     const items = lines.flatMap((line, i) =>
       line.kind === "dialogue" && line.sectionId === section.id ? [{ line, cue: previousCue(lines, i, (prev) => prev.characterId === line.characterId) }] : [],
     );
-    const takeIds = items.flatMap((it) => (it.line.currentTakeId ? [it.line.currentTakeId] : []));
+    return { section: sectionView(section), lines: await standinItems(p.id, items, null) };
+  });
+
+  // A character's studio: every line they say (shared ones too) across the play, with the same
+  // detail as a scene. On a shared line the take shown is theirs and `together` has the others.
+  app.get("/api/productions/:id/characters/:characterId/lines", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const [character] = await sql<{ id: string; name: string }[]>`
+      select id, name from characters where id = ${idOf(req.params, "characterId")} and production_id = ${p.id}`;
+    if (!character) throw notFound("Character not found.");
+    const [lines, sections] = await Promise.all([linesOf(sql, p.id), sectionsOf(sql, p.id)]);
+    const own = new Set([character.id]);
+    const items = lines.flatMap((line, i) =>
+      line.kind === "dialogue" && saysLine(line, own) ? [{ line, cue: previousCue(lines, i, (prev) => saysLine(prev, own)) }] : [],
+    );
+    const used = new Set(items.map((it) => it.line.sectionId));
+    return {
+      character,
+      sections: sections.filter((s) => used.has(s.id)).map(sectionView),
+      lines: await standinItems(p.id, items, character),
+    };
+  });
+
+  async function standinItems(productionId: string, items: { line: LineRow; cue: LineRow | null }[], voice: { id: string; name: string } | null) {
+    // A character's own take on a shared line, else each line's current take.
+    const voiceTakeIds = voice
+      ? new Map(
+          (
+            await sql<{ lineId: string; takeId: string | null }[]>`
+              select lv.line_id, voice_take(lv.line_id, lv.shared, lv.character_id, false) as take_id
+              from line_voices lv where lv.character_id = ${voice.id} and lv.shared and lv.production_id = ${productionId}`
+          ).map((r) => [r.lineId, r.takeId]),
+        )
+      : new Map<string, string | null>();
+    const takeFor = (line: LineRow) => (voice && line.voiceIds ? (voiceTakeIds.get(line.id) ?? null) : line.currentTakeId);
+    const takeIds = items.flatMap((it) => takeFor(it.line) ?? []);
     const takes = new Map(
       (takeIds.length ? await sql<TakeRow[]>`select ${takeColumns(sql)} from takes where id = any(${takeIds}::uuid[])` : []).map((t) => [t.id, t]),
     );
     const names = new Map(
-      (await sql<{ id: string; name: string }[]>`select id, name from characters where production_id = ${p.id}`).map((c) => [c.id, c.name]),
+      (await sql<{ id: string; name: string }[]>`select id, name from characters where production_id = ${productionId}`).map((c) => [c.id, c.name]),
     );
     const ttsReady = ctx.tts ? Boolean(await ctx.tts.engine()) : false;
-    const cues = await cueViews(ctx, p.id, items.map((it) => it.cue));
-    return {
-      section: sectionView(section),
-      lines: await Promise.all(
-        items.map(async ({ line }, i) => {
-          const take = line.currentTakeId ? takes.get(line.currentTakeId) : undefined;
-          const audioSource: AudioSource = take ? take.recordedBy : ttsReady ? "tts" : "none";
-          return {
-            line: lineView(line),
-            characterName: names.get(line.characterId!) ?? "",
-            take: take ? await takeView(storage, take) : null,
-            audioSource,
-            cue: cues[i] ?? null,
-          };
-        }),
-      ),
-    };
-  });
+    const cues = await cueViews(ctx, productionId, items.map((it) => it.cue));
+    const together = await togetherViews(ctx, productionId, items.map((it) => it.line), new Set(voice ? [voice.id] : []));
+    return Promise.all(
+      items.map(async ({ line }, i) => {
+        const id = takeFor(line);
+        const take = id ? takes.get(id) : undefined;
+        const audioSource: AudioSource = take ? take.recordedBy : ttsReady ? "tts" : "none";
+        return {
+          line: lineView(line),
+          // A shared line is read as the character in view, or by all its voices in a scene.
+          characterName: voice?.name ?? (line.voiceIds ? line.voiceIds.map((v) => names.get(v) ?? "").filter(Boolean).join(" & ") : (names.get(line.characterId!) ?? "")),
+          take: take ? await takeView(storage, take) : null,
+          audioSource,
+          cue: cues[i] ?? null,
+          together: voice ? (together.get(line.id) ?? []) : [],
+          voiceId: voice && line.voiceIds ? voice.id : null,
+        };
+      }),
+    );
+  }
 }

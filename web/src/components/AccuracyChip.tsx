@@ -1,11 +1,13 @@
-import { Check, CircleAlert, RotateCcw } from "lucide-react";
+import { Check, CircleAlert, MicOff } from "lucide-react";
 import type { SttResult } from "../api/types";
 import { scoreLabel, verdict, VERDICT_MESSAGE, type Verdict } from "../stt/score";
 
-const ICON: Record<Verdict, typeof Check> = { good: Check, check: CircleAlert, rerecord: RotateCcw };
-const CLASS: Record<Verdict, string> = { good: "chip-good", check: "chip-check", rerecord: "chip-bad" };
+const ICON: Record<Verdict, typeof Check> = { complete: Check, partial: CircleAlert, unattempted: MicOff };
 
-/** Accuracy for a take. Tapping it toggles the word-by-word breakdown. */
+/** Chip colour for a verdict. */
+export const VERDICT_CHIP: Record<Verdict, string> = { complete: "chip-good", partial: "chip-check", unattempted: "chip-bad" };
+
+/** Whether a take sounded complete. Tapping it toggles the word-by-word breakdown. */
 export function AccuracyChip({
   result,
   expanded,
@@ -20,14 +22,14 @@ export function AccuracyChip({
   return (
     <button
       type="button"
-      className={`chip ${CLASS[v]}`}
+      className={`chip ${VERDICT_CHIP[v]}`}
       aria-expanded={expanded}
       onClick={onToggle}
       title={VERDICT_MESSAGE[v]}
     >
       <Icon size={14} aria-hidden="true" />
       {scoreLabel(result)}
-      <span className="sr-only">. {VERDICT_MESSAGE[v]}. Show details.</span>
+      <span className="sr-only">. {VERDICT_MESSAGE[v]} Show details.</span>
     </button>
   );
 }

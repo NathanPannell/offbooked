@@ -15,6 +15,12 @@ export interface Character {
   name: string;
   aliases: string[];
   lineCount: number;
+  /** A label for shared lines ("ANGELO, ESCALUS", "ALL"), never a part to take. Missing on older servers. */
+  group?: boolean;
+  /** ALL, BOTH, EVERYONE…: who says each line comes from the scene. */
+  everyone?: boolean;
+  /** A named group's characters, in order. */
+  memberIds?: string[];
 }
 
 /** Why the parser flagged a line (null: no particular reason given). */
@@ -35,6 +41,8 @@ export interface Line {
   sourceLine?: number | null;
   /** PDF page the line came from. Null for DOCX, plain text and older parses. */
   page?: number | null;
+  /** A shared line: every character who says it, in order. Null (or missing) when only `characterId` does. */
+  voiceIds?: string[] | null;
 }
 
 export interface WordOp {
@@ -87,6 +95,10 @@ export interface CallSheetCharacter {
   takenBy: string | null;
   /** The director took it to record themselves. */
   mine: boolean;
+  /** How many of its lines it says with others. */
+  sharedLines?: number;
+  /** The cast member who took it. */
+  actorId?: string | null;
 }
 
 export interface CastMember {
@@ -208,6 +220,10 @@ export interface SectionLine {
   take: Take | null;
   audioSource: AudioSource;
   cue: Cue | null;
+  /** A shared line: who says it with the character in view, and their takes. */
+  together?: Together[];
+  /** The voice a stand-in take is for, on a shared line in a character's studio. */
+  voiceId?: string | null;
 }
 
 export interface Invite {
@@ -227,12 +243,22 @@ export interface Cue {
   audioSource?: AudioSource;
 }
 
+/** Someone else who says a shared line, and their current take. */
+export interface Together {
+  characterId: string;
+  characterName: string;
+  audioUrl: string | null;
+  audioSource: "actor" | "standin" | "none";
+}
+
 export interface ActorLine {
   line: Line;
   sectionTitle: string;
   cue: Cue | null;
   directions: string[];
   take: Take | null;
+  /** A shared line: the others who say it. Empty (or missing) for a line of one's own. */
+  together?: Together[];
 }
 
 export interface PracticeResult extends SttResult {

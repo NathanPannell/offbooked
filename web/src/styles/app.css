@@ -1664,6 +1664,48 @@
   font-size: 11.5px;
 }
 
+/* A shared line: the group's name, then (for ALL and the like) who says it. */
+.script-speaker-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--s-2);
+}
+
+.script-voices,
+.lyric-voices {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.together-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: var(--s-2) 0;
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.together-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--s-3);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.together-option {
+  min-height: 36px;
+  font-size: 14px;
+}
+
+.together-option.is-nearby {
+  font-weight: 600;
+}
+
 .script-text {
   font-family: var(--font-serif);
   font-size: 18px;
@@ -2585,8 +2627,16 @@
   align-self: flex-start;
 }
 
+/* Inside the link card, under the share button: there if needed, easy to pass over. */
 .cast-link-reset {
-  align-self: flex-start;
+  align-self: center;
+  margin-top: calc(-1 * var(--s-1));
+  font-size: 13px;
+  text-align: center;
+}
+
+.cast-link .reset-confirm {
+  margin-top: var(--s-1);
 }
 
 .reset-confirm {
@@ -2606,12 +2656,71 @@
 }
 
 .sheet-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
   min-height: 56px;
   padding: 8px 2px;
   border-bottom: 1px solid var(--line);
+}
+
+.sheet-main {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 40px;
+}
+
+/* The name opens the part's studio. */
+.sheet-name-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sheet-name-link:hover .sheet-name,
+.sheet-name-link:focus-visible .sheet-name {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.sheet-shared {
+  white-space: nowrap;
+}
+
+.sheet-shared svg {
+  vertical-align: -1px;
+}
+
+.sheet-more {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+}
+
+.sheet-row.is-merging .sheet-more {
+  color: var(--ink);
+  background: var(--paper-deep);
+}
+
+.sheet-merge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin: var(--s-2) 0 var(--s-1);
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--radius);
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+
+.studio-scene {
+  margin: var(--s-5) 0 var(--s-2);
 }
 
 .sheet-part {
@@ -3073,6 +3182,10 @@
   white-space: nowrap;
 }
 
+.record-title:has(.name-edit) {
+  overflow: visible;
+}
+
 .record-progress {
   white-space: nowrap;
   font-family: var(--font-display);
@@ -3275,19 +3388,6 @@
   color: var(--muted);
 }
 
-.take-held {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  padding: 10px 12px;
-  border: 1px solid var(--flag-line);
-  border-radius: var(--radius);
-  background: var(--check-soft);
-  color: var(--check);
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
-
 .line-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3295,17 +3395,156 @@
   gap: var(--s-2);
 }
 
+/* After a take: play it (with a quiet progress line), play it with the others on a shared line,
+   the verdict, then redo and delete tucked to the right. */
+.take-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+
+.take-play {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  color: var(--ink);
+  font: 600 var(--text-sm) / 1 var(--font-sans);
+  cursor: pointer;
+}
+
+.take-play:hover {
+  border-color: var(--edge-strong);
+}
+
+.take-play.is-playing {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.take-play.is-pending {
+  border-style: dashed;
+  color: var(--muted);
+  cursor: default;
+}
+
+.take-time {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.take-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--accent);
+  transform-origin: left center;
+  transition: transform 0.25s linear;
+}
+
+.take-together.is-playing {
+  color: var(--accent-text);
+}
+
+.take-tools {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.take-tools .btn {
+  color: var(--ink-soft);
+}
+
+.take-delete:hover,
+.take-delete:focus-visible {
+  color: var(--bad);
+}
+
+@media (max-width: 380px) {
+  .take-tools {
+    margin-left: 0;
+  }
+}
+
+.my-line-who {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px var(--s-2);
+}
+
+.together-with {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* The actor's name on the recorder, editable for a typo made when joining. */
+.name-edit-toggle {
+  margin-left: 6px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.name-edit-toggle:hover,
+.name-edit-toggle:focus-visible {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+
+.name-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.name-edit .input {
+  width: 9em;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+
+.name-edit .icon-btn {
+  width: 32px;
+  height: 32px;
+}
+
 .verdict-hint {
   font-size: var(--text-sm);
   font-weight: 600;
 }
 
-.verdict-check {
+.verdict-partial,
+.verdict-unattempted {
   color: var(--check);
 }
 
-.verdict-rerecord {
-  color: var(--bad);
+/* "12 complete · 2 partial" in the Wrapped and practice summaries. */
+.summary-score .display.summary-counts {
+  font-size: 30px;
+  line-height: 1.15;
 }
 
 .word-diff {
@@ -3601,6 +3840,8 @@
 
 .page-player {
   padding-bottom: calc(130px + var(--safe-bottom));
+  /* Never wider than the phone. clip, unlike hidden, keeps the pinned row sticky. */
+  overflow-x: clip;
 }
 
 .player {
@@ -3609,13 +3850,14 @@
   gap: 14px;
 }
 
-/* Like the script page: one row pinned under the tabs (part, my lines, scene). */
+/* Like the script page: one row pinned under the tabs (part, my lines, scene). When the part's
+   name is long on a phone, the scene picker drops to a second row rather than squeezing it. */
 .runthrough-bar {
   position: sticky;
   top: var(--steps-pin, 0px);
   z-index: 20;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s-2);
   margin: 0 calc(-1 * var(--s-4));
@@ -3659,6 +3901,7 @@
 }
 
 .bar-select-value {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3674,8 +3917,11 @@
   cursor: pointer;
 }
 
+/* Who you are always shows: the part never shrinks for the other controls (they wrap instead),
+   and only a name wider than the whole row is cut short. */
 .role-select {
   flex: 0 1 auto;
+  max-width: 100%;
 }
 
 .mode-select {
@@ -3765,10 +4011,12 @@
 }
 
 .lyric-text {
+  max-width: 100%;
   font-family: var(--font-serif);
   font-size: 19px;
   line-height: 1.45;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   tab-size: 4;
   transition: font-size 0.25s var(--ease);
 }
@@ -4112,11 +4360,20 @@
     background-position: right 9px center;
   }
 
-  /* The scene picker keeps its full label; the part select gives way and truncates instead. */
+  /* The scene picker takes the rest of the row and cuts its label short; with too little room
+     left beside the part (at least 7.5rem) it wraps onto a row of its own. */
+  .runthrough-bar .section-nav {
+    flex: 1 1 0;
+    min-width: 7.5rem;
+  }
+
   .runthrough-bar .section-nav .input {
+    width: 100%;
+    min-width: 0;
     max-width: none;
     padding: 4px 26px 4px 10px;
     background-position: right 9px center;
+    text-overflow: ellipsis;
   }
 
   .rt-long {

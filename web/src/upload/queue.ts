@@ -14,6 +14,8 @@ export interface UploadItem {
   /** The invite token, or the production ID for a director stand-in take. Scopes the queue per screen. */
   token: string;
   lineId: string;
+  /** A director's stand-in on a shared line: the character it voices. */
+  characterId?: string | null;
   mime: string;
   durationMs: number;
   createdAt: number;

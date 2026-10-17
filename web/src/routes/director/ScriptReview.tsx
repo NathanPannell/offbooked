@@ -4,6 +4,7 @@ import { errorMessage } from "../../api/client";
 import { script as scriptApi, type DeletedLine } from "../../api/director";
 import type { Character, Line, Production, Script, Section } from "../../api/types";
 import { CharacterName } from "../../components/CharacterName";
+import { speakerLabel } from "../../lib/voices";
 import { Dialog } from "../../components/Dialog";
 import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
@@ -572,6 +573,7 @@ function ScriptSection({
               <ScriptLine
                 line={line}
                 characterName={line.characterId ? characters.get(line.characterId)?.name ?? null : null}
+                voices={speakerLabel(line, characters).voices}
                 selected={line.id === selectedId}
                 onOpen={onOpen}
                 onApprove={onApprove}
@@ -588,6 +590,7 @@ function ScriptSection({
 const ScriptLine = memo(function ScriptLine({
   line,
   characterName,
+  voices,
   selected,
   onOpen,
   onApprove,
@@ -595,6 +598,8 @@ const ScriptLine = memo(function ScriptLine({
 }: {
   line: Line;
   characterName: string | null;
+  /** An ALL-style line: who says it. */
+  voices: string | null;
   selected: boolean;
   onOpen: (line: Line, at: number | "end" | null) => void;
   onApprove: (line: Line) => void;
@@ -618,7 +623,14 @@ const ScriptLine = memo(function ScriptLine({
         aria-describedby={line.flagged ? reasonId : undefined}
       >
         {line.kind === "dialogue" &&
-          (characterName ? <CharacterName name={characterName} className="script-speaker" /> : <span className="character-name script-speaker missing">Who says this?</span>)}
+          (characterName ? (
+            <span className="script-speaker-row">
+              <CharacterName name={characterName} className="script-speaker" />
+              {voices && <span className="script-voices">{voices}</span>}
+            </span>
+          ) : (
+            <span className="character-name script-speaker missing">Who says this?</span>
+          ))}
         <span className="script-text">
           <LineText text={line.text} kind={line.kind} />
         </span>

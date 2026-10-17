@@ -60,7 +60,7 @@ export function LiveText({ text, kind, index, engine, audio, shouldFollow, root 
     };
   }, [engine, audio, index, tokens]);
 
-  // Keep the word in view as it moves; the band logic only scrolls when it leaves the middle.
+  // Follow the word as it moves: the page only moves when the word starts a new row (follow.ts).
   useEffect(() => {
     const el = wordEls.current[current];
     if (el && shouldFollow()) keepInView(el, root.current);

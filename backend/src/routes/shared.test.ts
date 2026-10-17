@@ -171,6 +171,18 @@ describe("shared lines", { skip: dbSkip }, () => {
     assert.ok(audio.durationMs > 500);
   });
 
+  test("a character's studio lists their shared lines with the others' takes", async () => {
+    const res = await get(`/api/productions/${pid}/characters/${id("ESCALUS")}/lines`);
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json();
+    const shared = body.lines.find((l: { line: { id: string } }) => l.line.id === byText("Benefactors").id);
+    assert.equal(shared.characterName, "ESCALUS");
+    assert.equal(shared.voiceId, id("ESCALUS"));
+    assert.ok(shared.take, "Escalus's own take");
+    assert.deepEqual(shared.together.map((x: { characterId: string }) => x.characterId), [id("ANGELO")]);
+    assert.ok(body.lines.every((l: { line: { text: string } }) => !l.line.text.startsWith("We must")), "only lines Escalus says");
+  });
+
   test("the director picks who says a line: several names make a group", async () => {
     const line = byText("See that Claudio");
     const res = await t.app.inject({

@@ -127,14 +127,7 @@ export default function PdfPage({
     // onPageCount and onMatch are state setters from the parent.
   }, [url, cacheKey, page, highlight, width]);
 
-  // Bring the highlight into view inside the pane.
-  useEffect(() => {
-    const first = wrapRef.current?.querySelector<HTMLElement>(".pdf-hit");
-    const pane = wrapRef.current?.closest<HTMLElement>(".source-body");
-    if (!first || !pane) return;
-    const top = first.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
-    pane.scrollTo({ top: Math.max(0, top - pane.clientHeight / 3) });
-  }, [boxes]);
+  // SourcePane keeps the highlight centred in the pane (as boxes arrive, the sheet opens or resizes).
 
   return (
     <div ref={wrapRef} className={`pdf-page ${rendering ? "is-loading" : ""}`} style={size ? { height: size.h } : undefined}>

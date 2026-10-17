@@ -310,3 +310,26 @@ The director's cast page shows the cast link, a read-only call sheet and a way t
 | POST | `/api/productions/:id/record-as` | director (own production) | `{ characterId }` → `{ inviteToken, inviteUrl }`. The director gets one cast member per production (`actors.director_user_id`), created on first use with their first name and already opened, so `/i/<inviteToken>` goes straight to recording. The character is added to that cast member unless it is already theirs. 409 `character_taken` if someone else has the part; 404 for a character outside the production; 400 for a missing or malformed id. |
 
 - The director's cast member records ordinary actor takes (`recorded_by = 'actor'`), so they count as progress and the part can't be claimed through the cast link. No "finished all lines" email is sent for it.
+
+### Shared lines, deleting takes, studios and renaming (2026-10-17)
+
+A line several characters say together ("ANGELO, ESCALUS", "ALL", "BOTH") is a **shared line**. Its character is a **group**: a character named after two or more others (by name or alias, split on `,` `&` `/` `+` `and`), or an ALL-style name (`ALL`, `BOTH`, `EVERYONE`, `OMNES`, `TOGETHER`, `ALL THREE`…). Groups are never parts: the call sheet and the cast link leave them out. `sync_shared_lines` (migration `011_shared_lines.sql`) recomputes groups and voices after any change to a production's characters or lines.
+
+- `Character` gains `group: boolean`, `everyone: boolean` (ALL-style) and `memberIds: string[]` (a named group's characters, in order).
+- `Line` gains `voiceIds: string[] | null`: who says a shared line, in order; null for a line of one voice (`characterId`). A named group's lines get its members. An ALL line first gets everyone who speaks in its scene, then Claude Haiku reads the scene (entrances, exits, who is addressed) and narrows it to who is on stage; a director's pick replaces either.
+- `PATCH /api/lines/:id` takes `voiceIds`: two or more characters make (or reuse) the group named after them (`"HAMLET, QUEEN"`) and set the line's character to it; one makes it that character's line; on an ALL line the list replaces the guess, and `null` puts the guess back.
+- Each voice's actor records the line. A take on a shared line records which character it voices (`takes.character_id`). The line plays every voice's current take mixed into one clip (`render/mix.ts`, cached in `take_mixes`), in line-by-line playback and the stitched render. Progress counts a shared line for each voice that has an actor take; the production counts it once every voice is in.
+- `GET /api/invite/lines` items gain `together: { characterId, characterName, audioUrl, audioSource }[]`: the others who say a shared line and their current takes (null `audioUrl` until recorded). `take` is the actor's own latest take.
+- `PUT /api/lines/:id/take?characterId=` (stand-in): on a shared line, the voice it stands in for (default its first voice).
+- Call sheet rows gain `sharedLines` (how many of the part's lines are shared) and `actorId`.
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| DELETE | `/api/invite/takes/:takeId` | invite (own takes) | `{ linesRecorded, linesTotal }`. Deletes the take: the line falls back to its newest remaining take, else TTS. 404 for someone else's take. |
+| POST | `/api/invite/takes/:takeId/restore` | invite (own takes) | `{ linesRecorded, linesTotal }`. Undo for the delete. |
+| DELETE | `/api/takes/:id` | director (own production) | 204. Deletes any take in the production, a stand-in or the cast's. |
+| POST | `/api/takes/:id/restore` | director (own production) | 204. Undo. |
+| PATCH | `/api/invite/me` | invite | `{ name }` → `{ actor: { id, name, firstName } }`. The actor fixes their name; `firstName` is its first word. |
+| GET | `/api/productions/:id/characters/:characterId/lines` | director (own production) | `{ character: { id, name }, sections, lines: SectionLine[] }`: a character's studio, every line they say (shared ones too), each like a scene's stand-in line plus `together` and `voiceId` (set on shared lines). |
+
+- Deleting a take only hides it (`takes.deleted_at`). Like every recording, its audio is kept, and restore brings it back.

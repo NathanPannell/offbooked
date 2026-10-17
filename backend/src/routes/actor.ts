@@ -241,7 +241,7 @@ export interface TogetherView {
 }
 
 // For each shared line, the other voices (not `mine`) and their current takes.
-async function togetherViews(ctx: Ctx, productionId: string, lines: LineRow[], mine: ReadonlySet<string>): Promise<Map<string, TogetherView[]>> {
+export async function togetherViews(ctx: Ctx, productionId: string, lines: LineRow[], mine: ReadonlySet<string>): Promise<Map<string, TogetherView[]>> {
   const out = new Map<string, TogetherView[]>();
   const shared = lines.filter((l) => l.voiceIds);
   if (!shared.length) return out;
