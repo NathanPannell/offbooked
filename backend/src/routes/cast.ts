@@ -6,6 +6,7 @@ import { badRequest, conflict, notFound } from "../errors.ts";
 import { isUuid } from "../crypto.ts";
 import { body, idOf, optionalEmail, optionalString, requiredString, uuidList } from "../input.ts";
 import { inviteToken, inviteUrl } from "../invite.ts";
+import { inferInBackground } from "../shared.ts";
 import { castMemberView, castRows } from "../views.ts";
 
 async function ownedActor(sql: Sql, user: Director, actorId: string): Promise<{ id: string; productionId: string }> {
@@ -83,22 +84,27 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   // The call sheet: every speaking character, who has taken it (first name) and how many of its
-  // lines the cast has recorded. Read-only; stand-in takes and TTS don't count.
+  // lines the cast has recorded, shared lines included. Groups ("ALL", "ANGELO, ESCALUS") aren't
+  // parts, so they aren't listed. Stand-in takes and TTS don't count.
   app.get("/api/productions/:id/call-sheet", async (req) => {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, idOf(req.params));
-    const rows = await sql<{ id: string; name: string; lineCount: number; linesRecorded: number; takenBy: string | null; mine: boolean }[]>`
+    const rows = await sql<{ id: string; name: string; lineCount: number; linesRecorded: number; sharedLines: number; takenBy: string | null; actorId: string | null; mine: boolean }[]>`
       select c.id, c.name,
-        (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue') as line_count,
-        (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue'
-          and exists (select 1 from takes t where t.line_id = l.id and t.recorded_by = 'actor')) as lines_recorded,
+        (select count(*)::int from line_voices lv where lv.character_id = c.id) as line_count,
+        (select count(*)::int from line_voices lv where lv.character_id = c.id
+          and voice_take(lv.line_id, lv.shared, lv.character_id, true) is not null) as lines_recorded,
+        (select count(*)::int from line_voices lv where lv.character_id = c.id and lv.shared) as shared_lines,
         coalesce(a.first_name, split_part(a.name, ' ', 1)) as taken_by,
+        a.id as actor_id,
         coalesce(a.director_user_id = ${user.id}, false) as mine
       from characters c
         left join actor_characters ac on ac.character_id = c.id
         left join actors a on a.id = ac.actor_id
-      where c.production_id = ${p.id}
+      where c.production_id = ${p.id} and not c.is_group
       order by line_count desc, lower(c.name)`;
+    // Lines said by ALL only have the whole-scene guess until Claude has read who is on stage.
+    inferInBackground(ctx, p.id);
     return { characters: rows.filter((c) => c.lineCount > 0) };
   });
 

@@ -7,6 +7,7 @@ import { isUuid } from "./crypto.ts";
 import { HttpError, badRequest, conflict, notFound } from "./errors.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
 import { probeDurationSeconds } from "./render/ffmpeg.ts";
+import { scheduleRender } from "./render/queue.ts";
 import { takeColumns, takeView, type TakeRow } from "./views.ts";
 
 // Take uploads, shared by the actor endpoint and the director's stand-in endpoint: same body,
@@ -34,6 +35,7 @@ export interface TakeUpload {
   lineId: string;
   recorder: Recorder;
   lineAllowed: () => Promise<boolean>; // the recorder may record this line
+  voiceId?: () => Promise<string | null>; // on a shared line, the character this take voices
   counts: () => Promise<{ linesRecorded: number; linesTotal: number }>;
   messages?: { lineCap?: string; storageCap?: string };
 }
@@ -89,16 +91,34 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
   if (durationMs > MAX_TAKE_MS) throw badRequest("Takes can be up to two minutes long.");
 
   // The newest take is current, whoever recorded it. Older takes are kept forever.
+  const voiceId = u.voiceId ? await u.voiceId() : null;
   const key = `productions/${u.productionId}/takes/${id}.${ext}`;
   await storage.put(key, audio, contentType);
   await sql.begin(async (tx) => {
     const [inserted] = await tx`
-      insert into takes (id, production_id, line_id, actor_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms)
-      values (${id}, ${u.productionId}, ${u.lineId}, ${actorId}, ${u.recorder.kind}, ${userId}, ${key}, ${contentType}, ${audio.length}, ${durationMs})
+      insert into takes (id, production_id, line_id, actor_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms, character_id)
+      values (${id}, ${u.productionId}, ${u.lineId}, ${actorId}, ${u.recorder.kind}, ${userId}, ${key}, ${contentType}, ${audio.length}, ${durationMs}, ${voiceId})
       on conflict (id) do nothing returning id`;
     if (inserted) await tx`update lines set current_take_id = ${id}, updated_at = now() where id = ${u.lineId}`;
   });
   return respond(true);
+}
+
+// Deletes a take (or puts it back): the line's current take becomes its newest remaining one, so
+// the run-through falls back to the previous take, then TTS. Nothing is removed from storage.
+export async function setTakeDeleted(ctx: Ctx, takeId: string, deleted: boolean): Promise<void> {
+  const [take] = await ctx.sql.begin(async (tx) => {
+    const rows = await tx<{ lineId: string; productionId: string }[]>`
+      update takes set deleted_at = ${deleted ? new Date() : null} where id = ${takeId} returning line_id, production_id`;
+    if (rows[0]) {
+      await tx`
+        update lines set current_take_id = (
+          select id from takes where line_id = ${rows[0].lineId} and deleted_at is null order by created_at desc limit 1), updated_at = now()
+        where id = ${rows[0].lineId}`;
+    }
+    return rows;
+  });
+  if (take) await scheduleRender(ctx, take.productionId);
 }
 
 // ffprobe the upload; the client's X-Duration-Ms is the fallback when probing fails.

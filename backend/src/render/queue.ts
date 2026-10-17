@@ -5,6 +5,7 @@ import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
 import { notifyCastComplete } from "../email/notify.ts";
 import { concatToM4a, makeSilence } from "./ffmpeg.ts";
+import { mixedClip, mixHash, voiceTakes } from "./mix.ts";
 import { normalizedTake, type TakeAudioRow } from "./takeaudio.ts";
 import { TTS_PRIORITY, type TtsRequest } from "../tts/service.ts";
 import { contentHash, planRender, RENDER_SETTINGS, type PlanLine, type TimingEntry } from "./plan.ts";
@@ -13,19 +14,37 @@ const MAX_DEBOUNCE_MS = 120_000;
 
 export interface RenderInput extends PlanLine {
   characterId: string;
-  cast: boolean; // the character has an actor
-  actorRecorded: boolean; // the cast actor has recorded this line (stand-ins don't count)
+  cast: boolean; // one of the line's voices has an actor
+  actorRecorded: boolean; // every cast voice's actor has recorded this line (stand-ins don't count)
+  mixTakeIds?: string[]; // a shared line voiced by several takes: takeId is then "mix-<hash>"
 }
 
 // Dialogue lines in order with their current takes (the newest take, by the actor or a stand-in).
+// A shared line uses its voices' takes: one plays as it is, several are mixed (mix.ts).
 export async function renderInputs(sql: Sql, productionId: string): Promise<RenderInput[]> {
-  return sql<RenderInput[]>`
+  const lines = await sql<(RenderInput & { shared: boolean })[]>`
     select l.id as line_id, l.section_id, l.text, l.character_id, l.current_take_id as take_id, t.recorded_by as take_source,
-      exists (select 1 from actor_characters ac where ac.character_id = l.character_id) as cast,
-      exists (select 1 from takes a where a.line_id = l.id and a.recorded_by = 'actor') as actor_recorded
+      l.voice_ids is not null as shared,
+      exists (select 1 from line_voices lv join actor_characters ac on ac.character_id = lv.character_id where lv.line_id = l.id) as cast,
+      not exists (select 1 from line_voices lv where lv.line_id = l.id
+                    and exists (select 1 from actor_characters ac where ac.character_id = lv.character_id)
+                    and voice_take(lv.line_id, lv.shared, lv.character_id, true) is null) as actor_recorded
     from lines l left join takes t on t.id = l.current_take_id
     where l.production_id = ${productionId} and l.kind = 'dialogue'
     order by l.seq`;
+  if (!lines.some((l) => l.shared)) return lines;
+  const byVoice = await voiceTakes(sql, productionId);
+  for (const l of lines) {
+    const takes = byVoice.get(l.lineId);
+    if (!takes?.length) continue;
+    l.takeSource = takes.some((t) => t.recordedBy === "actor") ? "actor" : "standin";
+    if (takes.length === 1) l.takeId = takes[0]!.id;
+    else {
+      l.mixTakeIds = takes.map((t) => t.id);
+      l.takeId = `mix-${mixHash(l.mixTakeIds)}`;
+    }
+  }
+  return lines;
 }
 
 // Render inputs plus a TTS clip for every line without a take, when TTS can run here. The clip
@@ -176,7 +195,10 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
     } else {
       // Takes normalize while TTS synthesizes on its own worker pool.
       const [takeSamples, ttsSamples] = await Promise.all([
-        prepareTakes(ctx, job.productionId, lines.flatMap((l) => (l.takeId ? [l.takeId] : [])), workDir),
+        prepareTakes(ctx, job.productionId, lines.flatMap((l) => (l.takeId && !l.mixTakeIds ? [l.takeId] : [])), workDir).then(async (samples) => {
+          for (const [key, value] of await prepareMixes(ctx, job.productionId, lines, workDir)) samples.set(key, value);
+          return samples;
+        }),
         prepareTts(ctx, requests, workDir).then((samples) => {
           if (requests.length) log.info({ renderId: job.id, lines: requests.length, ready: samples.size, ms: Date.now() - started }, "render tts ready");
           return samples;
@@ -201,7 +223,7 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
       await concatToM4a(files, workDir, out);
       const key = `productions/${job.productionId}/renders/${job.id}.m4a`;
       await storage.put(key, await readFile(out), "audio/mp4");
-      const takeIds = [...takeSamples.keys()];
+      const takeIds = [...new Set(lines.flatMap((l) => l.mixTakeIds ?? (l.takeId && takeSamples.has(l.takeId) ? [l.takeId] : [])))];
       await sql`update renders set status = 'ready', content_hash = ${hash}, storage_key = ${key},
                 duration_ms = ${Math.round((plan.totalSamples * 1000) / RENDER_SETTINGS.sampleRate)}, timing = ${sql.json(plan.timing as never)},
                 take_ids = ${takeIds}, all_recorded = ${allCastRecorded}, finished_at = now()
@@ -240,6 +262,30 @@ async function eachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<
     while (next < items.length) await fn(items[next++]!);
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+// Shared lines with several takes: each mix, made (and cached) on first use, written to the work
+// directory as take-<takeId>.flac like a take. Returns measured lengths in samples by takeId.
+async function prepareMixes(ctx: Ctx, productionId: string, lines: RenderInput[], workDir: string): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const mixed = lines.filter((l) => l.mixTakeIds && l.takeId);
+  if (!mixed.length) return result;
+  const ids = [...new Set(mixed.flatMap((l) => l.mixTakeIds!))];
+  const takes = new Map(
+    (await ctx.sql<TakeAudioRow[]>`select id, storage_key, normalized_key, normalized_samples, stream_key from takes where id = any(${ids}::uuid[])`).map((t) => [t.id, t]),
+  );
+  for (const l of mixed) {
+    if (result.has(l.takeId!)) continue;
+    try {
+      const clip = await mixedClip(ctx, productionId, l.mixTakeIds!.flatMap((id) => (takes.has(id) ? [takes.get(id)!] : [])), {
+        flacTo: path.join(workDir, `take-${l.takeId}.flac`),
+      });
+      result.set(l.takeId!, clip.samples);
+    } catch (err) {
+      ctx.log.warn({ err, lineId: l.lineId }, "mixing a shared line failed; rendering silence");
+    }
+  }
+  return result;
 }
 
 // Downloads each take's normalized audio, normalizing (and caching in storage) any take seen for

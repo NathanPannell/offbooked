@@ -9,6 +9,7 @@ import { createSql, migrate } from "../db.ts";
 import { LogMailer } from "../email/mailer.ts";
 import { silentLog } from "../log.ts";
 import type { Labeler } from "../parse/label.ts";
+import type { EnsembleInferrer } from "../shared.ts";
 import type { Synthesizer } from "../tts/piper.ts";
 
 process.env.NODE_ENV = "test";
@@ -25,7 +26,7 @@ export interface TestApp {
 
 // Each test file gets its own throwaway schema, migrated from scratch and dropped afterwards.
 // TTS is off unless a test passes a synthesizer (see FakeSynthesizer in ./tts.ts).
-export async function createTestApp(opts: { labeler?: Labeler | null; env?: Record<string, string>; synthesizer?: Synthesizer | null } = {}): Promise<TestApp> {
+export async function createTestApp(opts: { labeler?: Labeler | null; ensemble?: EnsembleInferrer | null; env?: Record<string, string>; synthesizer?: Synthesizer | null } = {}): Promise<TestApp> {
   const url = process.env.DATABASE_URL!;
   const schema = `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const admin = createSql(url, { max: 1 });
@@ -52,7 +53,7 @@ export async function createTestApp(opts: { labeler?: Labeler | null; env?: Reco
     ...opts.env,
   });
   const mailer = new LogMailer(silentLog);
-  const ctx = createCtx(config, sql, silentLog, { mailer, labeler: opts.labeler ?? null, synthesizer: opts.synthesizer ?? null });
+  const ctx = createCtx(config, sql, silentLog, { mailer, labeler: opts.labeler ?? null, ensemble: opts.ensemble ?? null, synthesizer: opts.synthesizer ?? null });
   const app = buildApp({ ctx, probeFfmpeg: async () => "ffmpeg test" });
   await app.ready();
   return {

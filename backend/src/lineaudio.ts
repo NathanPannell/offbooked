@@ -76,12 +76,16 @@ export async function warmCues(ctx: Ctx, productionId: string, cues: LineRow[]):
   await ttsCueUrls(ctx, productionId, cues.filter((c) => !c.currentTakeId), 0);
 }
 
-// The cue for each line: the closest earlier dialogue line by a character that isn't speaking it.
-// `isOwn` says which characters count as "the same speaker" (an actor's characters, or the line's).
-export function previousCue(lines: LineRow[], index: number, isOwn: (characterId: string) => boolean): LineRow | null {
+// The cue for each line: the closest earlier dialogue line not said by the same speaker. `isOwn`
+// says which lines count as "the same speaker" (any of an actor's characters says it, or the line's).
+export function previousCue(lines: LineRow[], index: number, isOwn: (line: LineRow) => boolean): LineRow | null {
   for (let j = index - 1; j >= 0; j--) {
     const prev = lines[j]!;
-    if (prev.kind === "dialogue" && !isOwn(prev.characterId!)) return prev;
+    if (prev.kind === "dialogue" && !isOwn(prev)) return prev;
   }
   return null;
 }
+
+// Whether any of `characterIds` says the line (its character, or one of a shared line's voices).
+export const saysLine = (line: Pick<LineRow, "characterId" | "voiceIds">, characterIds: ReadonlySet<string>) =>
+  (line.characterId !== null && characterIds.has(line.characterId)) || (line.voiceIds ?? []).some((id) => characterIds.has(id));

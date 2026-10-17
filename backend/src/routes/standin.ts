@@ -6,7 +6,7 @@ import { idOf } from "../input.ts";
 import { cueViews, previousCue } from "../lineaudio.ts";
 import type { AudioSource } from "../render/plan.ts";
 import { scheduleRender } from "../render/queue.ts";
-import { acceptTake, MAX_TAKE_BYTES } from "../takes.ts";
+import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
 import { linesOf, lineView, productionRows, sectionView, takeColumns, takeView, type SectionRow, type TakeRow } from "../views.ts";
 
 // Stand-ins: the director records any line for a scene partner. A stand-in take becomes the line's
@@ -27,6 +27,14 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
       lineId,
       recorder: { kind: "standin", userId: user.id },
       lineAllowed: async () => true,
+      // On a shared line, the voice to stand in for (?characterId=), else its first voice.
+      voiceId: async () => {
+        const wanted = (req.query as { characterId?: string }).characterId?.toLowerCase();
+        const [row] = await sql<{ voiceIds: string[] | null }[]>`select voice_ids from lines where id = ${lineId}`;
+        const voices = row?.voiceIds;
+        if (!voices) return null;
+        return wanted && voices.includes(wanted) ? wanted : voices[0]!;
+      },
       // Same response as the actor upload, with the production's progress (cast actors' takes only).
       counts: async () => {
         const [p] = await productionRows(sql, { ownerId: user.id, id: line.productionId, includeArchived: true });
@@ -41,6 +49,25 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
     return body;
   });
 
+  // The director deletes any take in their production, a stand-in or the cast's (Undo: restore).
+  for (const [method, url, deleted] of [
+    ["DELETE", "/api/takes/:id", true],
+    ["POST", "/api/takes/:id/restore", false],
+  ] as const) {
+    app.route({
+      method,
+      url,
+      handler: async (req, reply) => {
+        const user = await requireDirector(ctx, req);
+        const takeId = idOf(req.params);
+        const [take] = await sql`select 1 from takes t join productions p on p.id = t.production_id where t.id = ${takeId} and p.owner_id = ${user.id}`;
+        if (!take) throw notFound("Take not found.");
+        await setTakeDeleted(ctx, takeId, deleted);
+        return reply.code(204).send();
+      },
+    });
+  }
+
   // One section's dialogue for recording a scene partner by partner: each line with its current
   // take, where its audio comes from, and its cue (the previous line by another character).
   app.get("/api/productions/:id/sections/:sectionId/lines", async (req) => {
@@ -51,7 +78,7 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!section) throw notFound("Section not found.");
     const lines = await linesOf(sql, p.id);
     const items = lines.flatMap((line, i) =>
-      line.kind === "dialogue" && line.sectionId === section.id ? [{ line, cue: previousCue(lines, i, (c) => c === line.characterId) }] : [],
+      line.kind === "dialogue" && line.sectionId === section.id ? [{ line, cue: previousCue(lines, i, (prev) => prev.characterId === line.characterId) }] : [],
     );
     const takeIds = items.flatMap((it) => (it.line.currentTakeId ? [it.line.currentTakeId] : []));
     const takes = new Map(

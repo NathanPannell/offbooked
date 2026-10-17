@@ -4,7 +4,8 @@ import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
 import { classifyFlagReason, FLAG_CODES, isFlagCode, type FlagCode } from "../parse/flags.ts";
-import { body, idOf, idParam, optionalString, requiredString } from "../input.ts";
+import { body, idOf, idParam, optionalString, requiredString, uuidList } from "../input.ts";
+import { afterCastChange } from "../shared.ts";
 import { charactersOf, characterView, lineView, sectionsOf, sectionView, type CharacterRow, type LineRow, type SectionRow } from "../views.ts";
 
 const MAX_LINE_CHARS = 10_000;
@@ -12,7 +13,7 @@ const KINDS = ["dialogue", "stage_direction", "heading"] as const;
 
 async function ownedLine(sql: Sql, user: Director, lineId: string): Promise<LineRow & { productionId: string }> {
   const [line] = await sql<(LineRow & { productionId: string })[]>`
-    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_code, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.production_id
+    select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_code, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.voice_ids, l.production_id
     from lines l join productions p on p.id = l.production_id
     where l.id = ${lineId} and p.owner_id = ${user.id}`;
   if (!line) throw notFound("Line not found.");
@@ -21,7 +22,7 @@ async function ownedLine(sql: Sql, user: Director, lineId: string): Promise<Line
 
 async function ownedCharacter(sql: Sql, user: Director, characterId: string): Promise<CharacterRow & { productionId: string }> {
   const [c] = await sql<(CharacterRow & { productionId: string })[]>`
-    select c.id, c.name, c.aliases, c.production_id, 0 as line_count
+    select c.id, c.name, c.aliases, c.production_id, c.is_group, c.everyone, c.member_ids, 0 as line_count
     from characters c join productions p on p.id = c.production_id
     where c.id = ${characterId} and p.owner_id = ${user.id}`;
   if (!c) throw notFound("Character not found.");
@@ -29,7 +30,7 @@ async function ownedCharacter(sql: Sql, user: Director, characterId: string): Pr
 }
 
 const selectLine = (sql: Sql, id: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page from lines where id = ${id}`.then((r) => lineView(r[0]!));
+  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page, voice_ids from lines where id = ${id}`.then((r) => lineView(r[0]!));
 
 // Drops sections left empty by an edit and renumbers the rest in script order.
 async function tidySections(sql: Tx, productionId: string): Promise<void> {
@@ -72,6 +73,24 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       }
     }
     if (kind !== "dialogue") characterId = null;
+    // Several people say it: `voiceIds` lists them. Names make a group character ("ANGELO, ESCALUS");
+    // on an ALL line the pick replaces Claude's guess of who is on stage (null puts the guess back).
+    let voices: { ids: string[] | null; source: "director" | null } | null = null;
+    const voiceIds = b.voiceIds === null ? null : uuidList(b, "voiceIds", false);
+    if (kind === "dialogue" && b.voiceIds !== undefined) {
+      const picked = voiceIds ? [...new Set(voiceIds.map((id) => id.toLowerCase()))] : null;
+      const known = picked?.length
+        ? await sql<{ id: string; name: string; isGroup: boolean }[]>`
+            select id, name, is_group from characters where production_id = ${line.productionId} and id = any(${picked}::uuid[])`
+        : [];
+      if (picked && (known.length !== picked.length || known.some((c) => c.isGroup))) throw badRequest("Pick characters from this production.");
+      const [current] = characterId ? await sql<{ everyone: boolean }[]>`select everyone from characters where id = ${characterId}` : [];
+      if (current?.everyone) voices = picked && picked.length ? { ids: picked, source: "director" } : { ids: null, source: null };
+      else if (picked?.length === 1) characterId = picked[0]!;
+      else if (picked && picked.length > 1) {
+        characterId = await groupCharacter(sql, line.productionId, picked.map((id) => known.find((c) => c.id === id)!.name).join(", "));
+      }
+    }
     let text = b.text === undefined ? line.text : requiredString(b, "text", MAX_LINE_CHARS);
     if (kind === "dialogue" && !characterId) {
       // Turning a direction or heading into dialogue in one tap: take the speaker from a cue at
@@ -85,6 +104,8 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     const flag = b.flagged === undefined ? { flagged: false, flagCode: null, flagReason: null } : flagFrom(b, kind);
     await sql`update lines set kind = ${kind}, character_id = ${characterId}, text = ${text}, flagged = ${flag.flagged}, flag_code = ${flag.flagCode},
               flag_reason = ${flag.flagReason}, updated_at = now() where id = ${line.id}`;
+    if (voices) await sql`update lines set voice_ids = ${voices.ids}::uuid[], voices_source = ${voices.source} where id = ${line.id}`;
+    await afterCastChange(ctx, line.productionId);
     return { line: await selectLine(sql, line.id) };
   });
 
@@ -118,6 +139,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
         values (${line.productionId}, ${line.sectionId}, ${line.seq + 1}, ${kind}, ${characterId}, ${second}, ${flagged}, ${flagCode}, ${flagReason}, ${sourceLine}, ${sourcePage}) returning id`;
       return row!.id;
     });
+    await afterCastChange(ctx, line.productionId);
     return { lines: [await selectLine(sql, line.id), await selectLine(sql, newId)] };
   });
 
@@ -141,14 +163,18 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post("/api/lines/:id/merge-next", async (req) => {
     const user = await requireDirector(ctx, req);
     const line = await ownedLine(sql, user, idOf(req.params));
-    return { line: await selectLine(sql, await join(line.productionId, line.seq)) };
+    const id = await join(line.productionId, line.seq);
+    await afterCastChange(ctx, line.productionId);
+    return { line: await selectLine(sql, id) };
   });
 
   app.post("/api/lines/:id/merge-previous", async (req) => {
     const user = await requireDirector(ctx, req);
     const line = await ownedLine(sql, user, idOf(req.params));
     if (line.seq <= 1) throw badRequest("This is the first line, so there is nothing above to join with.");
-    return { line: await selectLine(sql, await join(line.productionId, line.seq - 1)) };
+    const id = await join(line.productionId, line.seq - 1);
+    await afterCastChange(ctx, line.productionId);
+    return { line: await selectLine(sql, id) };
   });
 
   app.post("/api/lines/:id/section-break", async (req) => {
@@ -170,6 +196,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
         insert into sections (production_id, seq, act, scene, title) values (${line.productionId}, ${section!.seq + 1}, ${act}, ${scene}, ${title}) returning id`;
       await tx`update lines set section_id = ${created!.id} where section_id = ${section!.id} and seq >= ${line.seq}`;
     });
+    await afterCastChange(ctx, line.productionId);
     return { sections: (await sectionsOf(sql, line.productionId)).map(sectionView) };
   });
 
@@ -178,7 +205,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
   app.delete("/api/lines/:id", async (req) => {
     const user = await requireDirector(ctx, req);
     const line = await ownedLine(sql, user, idOf(req.params));
-    return sql.begin(async (tx) => {
+    const result = await sql.begin(async (tx) => {
       const [locked] = await tx`select 1 from lines where id = ${line.id} for update`;
       if (!locked) throw notFound("Line not found.");
       const [recorded] = await tx`select 1 from takes where line_id = ${line.id} limit 1`;
@@ -195,6 +222,8 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
         removedSection: still ? null : sectionView(section!),
       };
     });
+    await afterCastChange(ctx, line.productionId);
+    return result;
   });
 
   // Puts a line back after `afterLineId` (null: at the very start), in `sectionId`, or in a new
@@ -268,6 +297,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       await tidySections(tx, p.id);
       return row!.id;
     });
+    await afterCastChange(ctx, p.id);
     return { line: await selectLine(sql, newId) };
   });
 
@@ -294,8 +324,9 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     const p = await ownedProduction(ctx, user, idOf(req.params));
     const name = requiredString(body(req.body), "name", 80);
     try {
-      const [c] = await sql<CharacterRow[]>`insert into characters (production_id, name) values (${p.id}, ${name}) returning id, name, aliases, 0 as line_count`;
-      return { character: characterView(c!) };
+      const [c] = await sql<{ id: string }[]>`insert into characters (production_id, name) values (${p.id}, ${name}) returning id`;
+      await afterCastChange(ctx, p.id);
+      return { character: characterView((await charactersOf(sql, p.id)).find((x) => x.id === c!.id)!) };
     } catch (err) {
       if (isUniqueViolation(err)) throw conflict("name_taken", `There is already a character called ${name}.`);
       throw err;
@@ -313,6 +344,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       if (isUniqueViolation(err)) throw conflict("name_taken", `There is already a character called ${name}. Merge them instead.`);
       throw err;
     }
+    await afterCastChange(ctx, c.productionId);
     const all = await charactersOf(sql, c.productionId);
     return { character: characterView(all.find((x) => x.id === c.id)!) };
   });
@@ -327,14 +359,30 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     await sql.begin(async (tx) => {
       const aliases = [...new Set([...into.aliases, from.name, ...from.aliases])].filter((a) => a.toLowerCase() !== into.name.toLowerCase());
       await tx`update lines set character_id = ${into.id}, updated_at = now() where character_id = ${from.id}`;
+      // Shared lines and takes that named the merged character now name the one kept.
+      await tx`
+        update lines set voice_ids = array(
+          select v from (select v, min(o) as o from unnest(array_replace(voice_ids, ${from.id}::uuid, ${into.id}::uuid)) with ordinality as x(v, o) group by v) d order by o)
+        where production_id = ${from.productionId} and ${from.id}::uuid = any(voice_ids)`;
+      await tx`update takes set character_id = ${into.id} where character_id = ${from.id}`;
       await tx`update characters set aliases = ${aliases} where id = ${into.id}`;
       const [intoCast] = await tx`select 1 from actor_characters where character_id = ${into.id}`;
       if (intoCast) await tx`delete from actor_characters where character_id = ${from.id}`;
       else await tx`update actor_characters set character_id = ${into.id} where character_id = ${from.id}`;
       await tx`delete from characters where id = ${from.id}`;
     });
+    await afterCastChange(ctx, from.productionId);
     return { characters: (await charactersOf(sql, from.productionId)).map(characterView) };
   });
+}
+
+// The group character for several speakers, by name ("ANGELO, ESCALUS"), made when it's new. Its
+// members and its lines' voices come from sync_shared_lines.
+async function groupCharacter(sql: Sql, productionId: string, name: string): Promise<string> {
+  const [row] = await sql<{ id: string }[]>`
+    insert into characters (production_id, name, is_group) values (${productionId}, ${name}, true)
+    on conflict (production_id, lower(name)) do update set name = characters.name returning id`;
+  return row!.id;
 }
 
 // A speaker for a line being turned into dialogue: a character whose name or alias opens the text
