@@ -247,52 +247,63 @@ export function rmsDb(samples: Float32Array, start = 0, end = samples.length): n
 }
 
 // ---------------------------------------------------------------------------------------------
-// When to stop a take by itself.
+// When to stop a take by itself. A take with real speech always ends after a pause and moves on;
+// the transcript only decides how long that pause is, because recognition misses words.
 
-/** Silence after the last word before moving on. */
-export const DONE_SILENCE_MS = 700;
-/** Share of the line's words heard that counts as finished, even if the last words were misheard. */
-export const DONE_FRACTION = 0.85;
-/** Under this share heard, a take that has stopped is treated as failed: stop, but don't move on. */
-export const FAILED_FRACTION = 0.5;
-/** A long pause near the end of a line that was only partly heard: probably finished, heard badly. */
-export const LONG_SILENCE_MS = 2500;
-/** A pause this long anywhere means the actor has stopped. */
-export const GIVE_UP_SILENCE_MS = 4000;
-/** Without a transcript, the pause that ends a take. Generous: actors pause inside lines. */
-export const ENERGY_SILENCE_MS = 1800;
+/** The last share of the line: once the cursor is in it, a short pause ends the take. */
+export const END_ZONE = 0.7;
+/** Pause that ends a take once the cursor is near the end of the line. */
+export const END_SILENCE_MS = 700;
+/** Voiced time per word in an average reading of a line (the VAD leaves out the gaps between words). */
+export const SPEECH_MS_PER_WORD = 300;
+/** Share of the line's expected speech time that counts as having said the line, heard or not. */
+export const SPOKEN_SHARE = 0.6;
+/** Pause that ends a take whose words weren't heard (or not yet) after enough speech. */
+export const PAUSE_SILENCE_MS = 1500;
+/** Pause that ends a take whose cursor is clearly mid-line: the actor may be pausing for effect. */
+export const MID_LINE_SILENCE_MS = 3000;
+/** Without a transcript: the pause after enough speech for the line, and after less. */
+export const ENERGY_SILENCE_MS = 1500;
+export const ENERGY_LONG_SILENCE_MS = 2500;
 const MIN_SPEECH_MS = 300;
 const ENERGY_MIN_SPEECH_MS = 400;
+/** Heard words account for the speech when it is at most this much voiced time per word up to the cursor. */
+const TRACKED_MS_PER_WORD = SPEECH_MS_PER_WORD * 1.5;
 
 export interface AdvanceInput {
   /** `live` while transcription runs; `energy` when only the mic level is known. */
   mode: "live" | "energy";
   totalTokens: number;
   cursor: number;
-  matched: number;
   speechMs: number;
   silenceMs: number;
   /** The newest finished transcription covers the audio up to the end of the last speech. */
   caughtUp: boolean;
 }
 
-/** wait: keep recording. advance: stop, keep the take, go to the next line. hold: stop and keep it, but stay so they can retry. */
-export type AdvanceDecision = "wait" | "advance" | "hold";
+/** wait: keep recording. advance: stop, keep the take, go to the next line. */
+export type AdvanceDecision = "wait" | "advance";
+
+/** The pause that ends this take now, or null before any real speech. */
+export function endPauseMs(input: AdvanceInput): number | null {
+  const { mode, totalTokens, cursor, speechMs, caughtUp } = input;
+  const spokeEnough = speechMs >= SPOKEN_SHARE * totalTokens * SPEECH_MS_PER_WORD;
+  if (mode === "energy") {
+    if (speechMs < ENERGY_MIN_SPEECH_MS) return null;
+    return spokeEnough ? ENERGY_SILENCE_MS : ENERGY_LONG_SILENCE_MS;
+  }
+  if (speechMs < MIN_SPEECH_MS) return null;
+  if (totalTokens === 0 || cursor >= totalTokens * END_ZONE) return END_SILENCE_MS;
+  // Clearly mid-line: the transcript is current, the words heard explain the speech so far, and
+  // more than a word is left. Otherwise the words were missed (or the transcript lags) and speech
+  // time decides.
+  const midLine = caughtUp && totalTokens - cursor >= 2 && speechMs <= cursor * TRACKED_MS_PER_WORD;
+  return spokeEnough && !midLine ? PAUSE_SILENCE_MS : MID_LINE_SILENCE_MS;
+}
 
 export function decideAdvance(input: AdvanceInput): AdvanceDecision {
-  const { mode, totalTokens, cursor, matched, speechMs, silenceMs, caughtUp } = input;
-  if (mode === "energy") {
-    return speechMs >= ENERGY_MIN_SPEECH_MS && silenceMs >= ENERGY_SILENCE_MS ? "advance" : "wait";
-  }
-  if (speechMs < MIN_SPEECH_MS) return "wait";
-  if (totalTokens === 0) return silenceMs >= DONE_SILENCE_MS ? "advance" : "wait";
-  const fraction = matched / totalTokens;
-  const done = fraction >= DONE_FRACTION || (cursor >= totalTokens && fraction >= FAILED_FRACTION);
-  if (done && silenceMs >= DONE_SILENCE_MS) return "advance";
-  if (!caughtUp) return "wait";
-  if (silenceMs >= LONG_SILENCE_MS && fraction >= FAILED_FRACTION && cursor >= totalTokens * 0.7) return "advance";
-  if (silenceMs >= GIVE_UP_SILENCE_MS) return fraction >= FAILED_FRACTION && cursor >= totalTokens * 0.7 ? "advance" : "hold";
-  return "wait";
+  const pause = endPauseMs(input);
+  return pause !== null && input.silenceMs >= pause ? "advance" : "wait";
 }
 
 // ---------------------------------------------------------------------------------------------

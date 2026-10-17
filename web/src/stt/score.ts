@@ -3,12 +3,12 @@ import type { SttResult, WordOp } from "../api/types";
 // Scoring follows docs/on-device-stt.md: unbiased recognition, tolerant comparison.
 
 /**
- * Verdict thresholds. Placeholders until we calibrate on pilot data: even a perfect
- * take shows a few percent of ASR errors on phone audio.
+ * Verdicts judge whether the line was said, not how exactly: a misheard word counts as attempted,
+ * because phone audio and a tiny model mishear even a perfect take. Share of the line's words
+ * attempted (matched or misheard) that counts as the whole line.
  */
-export const GOOD_ACCURACY = 0.9;
-export const CHECK_ACCURACY = 0.75;
-/** Lines with this many words or fewer are judged by error count, not percentage. */
+export const COMPLETE_COVERAGE = 0.7;
+/** Lines with this many words or fewer are judged by missing-word count: one missing word is still complete. */
 export const SHORT_LINE_WORDS = 3;
 
 const ONES = [
@@ -299,34 +299,68 @@ export function noSpeechResult(expectedText: string): SttResult {
   return { transcript: "", accuracy: 0, ops: normalizeWords(expectedText).map((w) => ({ op: "del", expected: w })) };
 }
 
-export type Verdict = "good" | "check" | "rerecord";
+/** complete: the line was said. partial: a real chunk is missing. unattempted: nothing of it was heard. */
+export type Verdict = "complete" | "partial" | "unattempted";
 
-export function verdict(result: Pick<SttResult, "accuracy" | "ops">): Verdict {
-  const expectedCount = result.ops.filter((o) => o.op !== "ins").length;
-  if (expectedCount > 0 && expectedCount <= SHORT_LINE_WORDS) {
-    const errors = errorCount(result.ops);
-    return errors === 0 ? "good" : errors === 1 ? "check" : "rerecord";
+/** Expected words in the ops, and how many of them were attempted (matched or misheard). */
+export function coverage(ops: WordOp[]): { expected: number; attempted: number; matched: number } {
+  let expected = 0;
+  let attempted = 0;
+  let matched = 0;
+  for (const o of ops) {
+    if (o.op === "ins") continue;
+    expected++;
+    if (o.op === "ok") matched++;
+    if (o.op !== "del") attempted++;
   }
-  if (result.accuracy >= GOOD_ACCURACY) return "good";
-  if (result.accuracy >= CHECK_ACCURACY) return "check";
-  return "rerecord";
+  return { expected, attempted, matched };
 }
 
-export const VERDICT_MESSAGE: Record<Verdict, string> = {
-  good: "Spot on",
-  check: "Close, check the highlighted words",
-  rerecord: "Want to re-record?",
+export function verdict(result: Pick<SttResult, "ops" | "transcript">): Verdict {
+  const { expected, attempted, matched } = coverage(result.ops);
+  if (!result.transcript) return "unattempted";
+  if (expected === 0) return "complete";
+  if (attempted === 0) return "unattempted";
+  if (expected <= SHORT_LINE_WORDS) return attempted >= expected - 1 ? "complete" : "partial";
+  // Words heard but none of them the line's: something else was said.
+  if (matched === 0) return "unattempted";
+  return attempted >= COMPLETE_COVERAGE * expected ? "complete" : "partial";
+}
+
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  complete: "Complete",
+  partial: "Partial",
+  unattempted: "Not attempted",
 };
 
-/** Short chip label: a percentage, or an error count for short lines. */
-export function scoreLabel(result: Pick<SttResult, "accuracy" | "ops" | "transcript">): string {
-  const expectedCount = result.ops.filter((o) => o.op !== "ins").length;
-  if (!result.transcript) return "No speech heard";
-  if (expectedCount > 0 && expectedCount <= SHORT_LINE_WORDS) {
-    const errors = errorCount(result.ops);
-    return errors === 0 ? "Spot on" : `${errors} word${errors === 1 ? "" : "s"} off`;
-  }
-  return formatAccuracy(result.accuracy);
+export const VERDICT_MESSAGE: Record<Verdict, string> = {
+  complete: "Sounds like the whole line.",
+  partial: "Part of the line seems missing. Listen back or record again.",
+  unattempted: "We couldn't hear this line. Listen back or record again.",
+};
+
+/** Short chip label: Complete, Partial or Not attempted. */
+export function scoreLabel(result: Pick<SttResult, "ops" | "transcript">): string {
+  return VERDICT_LABEL[verdict(result)];
+}
+
+/** Sort order for review lists: the lines most worth another take first. */
+export const VERDICT_RANK: Record<Verdict, number> = { unattempted: 0, partial: 1, complete: 2 };
+
+export type VerdictCounts = Record<Verdict, number>;
+
+export function verdictCounts(results: Pick<SttResult, "ops" | "transcript">[]): VerdictCounts {
+  const counts: VerdictCounts = { complete: 0, partial: 0, unattempted: 0 };
+  for (const r of results) counts[verdict(r)]++;
+  return counts;
+}
+
+/** "12 complete · 2 partial · 1 not attempted", leaving out zeros. */
+export function formatVerdictCounts(counts: VerdictCounts): string {
+  return (["complete", "partial", "unattempted"] as Verdict[])
+    .filter((v) => counts[v] > 0)
+    .map((v) => `${counts[v]} ${VERDICT_LABEL[v].toLowerCase()}`)
+    .join(" · ");
 }
 
 /** Micro-averaged accuracy over several lines: 1 − ΣE / ΣN. */

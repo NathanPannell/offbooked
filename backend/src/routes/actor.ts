@@ -4,13 +4,13 @@ import type { Ctx } from "../context.ts";
 import { notifyActorDone } from "../email/notify.ts";
 import { badRequest, notFound } from "../errors.ts";
 import { body, idOf, idParam, requiredEmail, requiredString } from "../input.ts";
-import { cueViews, previousCue, warmCues } from "../lineaudio.ts";
+import { cueViews, previousCue, saysLine, warmCues } from "../lineaudio.ts";
 import { scheduleRender } from "../render/queue.ts";
 import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
 import { runThrough } from "../runthrough.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
-import { acceptTake, MAX_TAKE_BYTES } from "../takes.ts";
-import { castRows, linesOf, lineView, sectionsOf, sectionView, takeColumns, takeView, type LineRow, type TakeRow } from "../views.ts";
+import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
+import { castRows, linesOf, lineView, sectionsOf, sectionView, takeColumns, takeView, voicesOf, type LineRow, type TakeRow } from "../views.ts";
 
 const WORD_OPS = new Set(["ok", "sub", "del", "ins"]);
 
@@ -62,6 +62,14 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     };
   });
 
+  // An actor fixes their name (a typo when joining). It shows on the call sheet.
+  app.patch("/api/invite/me", async (req) => {
+    const s = await requireActor(ctx, req);
+    const name = requiredString(body(req.body), "name", 60);
+    await sql`update actors set name = ${name}, first_name = ${name.split(/\s+/)[0]!} where id = ${s.actor.id}`;
+    return { actor: { id: s.actor.id, name, firstName: name.split(/\s+/)[0]! } };
+  });
+
   app.post("/api/invite/start", async (req, reply) => {
     const s = await requireActor(ctx, req);
     const firstName = requiredString(body(req.body), "firstName", 60);
@@ -71,16 +79,22 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // Own lines only, each with the single previous line by someone else as its cue. `take` is the
   // actor's own latest take: a director's stand-in fills the run-through but isn't the actor's take.
+  // A shared line lists the other people who say it in `together`, with their current takes, so
+  // the actor can hear them while recording.
   app.get("/api/invite/lines", async (req) => {
     const s = await requireActor(ctx, req);
     const [lines, sections] = await Promise.all([linesOf(sql, s.production.id), sectionsOf(sql, s.production.id)]);
     const items = actorItems(lines, s.characterIds);
     const ids = items.map((it) => it.line.id);
+    const shared = items.filter((it) => it.line.voiceIds).map((it) => it.line.id);
     const own = ids.length
       ? await sql<TakeRow[]>`
           select distinct on (line_id) ${takeColumns(sql)} from takes
-          where line_id = any(${ids}::uuid[]) and recorded_by = 'actor' order by line_id, created_at desc`
+          where line_id = any(${ids}::uuid[]) and recorded_by = 'actor' and deleted_at is null
+            and (actor_id = ${s.actor.id} or not (line_id = any(${shared}::uuid[])))
+          order by line_id, created_at desc`
       : [];
+    const together = await togetherViews(ctx, s.production.id, items.map((it) => it.line), new Set(s.characterIds));
     const takeByLine = new Map(own.map((t) => [t.lineId, t]));
     const cues = await cueViews(ctx, s.production.id, items.map((it) => it.cue));
     const sectionTitles = new Map(sections.map((sec) => [sec.id, sec.title]));
@@ -96,6 +110,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
             cue: cues[i] ?? null,
             directions,
             take: take ? await takeView(storage, take) : null,
+            together: together.get(line.id) ?? [],
           };
         }),
       ),
@@ -112,7 +127,12 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
       lineAllowed: async () =>
         (await sql`
           select 1 from lines where id = ${lineId} and production_id = ${s.production.id} and kind = 'dialogue'
-            and character_id = any(${s.characterIds}::uuid[])`).length > 0,
+            and (character_id = any(${s.characterIds}::uuid[]) or voice_ids && ${s.characterIds}::uuid[])`).length > 0,
+      // On a shared line the take is for the first of the actor's characters who says it.
+      voiceId: async () => {
+        const [row] = await sql<{ voiceIds: string[] | null }[]>`select voice_ids from lines where id = ${lineId}`;
+        return row?.voiceIds?.find((id) => s.characterIds.includes(id)) ?? null;
+      },
       counts: () => counts(ctx, s),
     });
     if (!created) return result;
@@ -124,6 +144,26 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     await scheduleRender(ctx, s.production.id);
     return result;
   });
+
+  // Deletes one of the actor's own takes (Undo puts it back with `restore`). Answers with progress.
+  for (const [method, url, deleted] of [
+    ["DELETE", "/api/invite/takes/:takeId", true],
+    ["POST", "/api/invite/takes/:takeId/restore", false],
+  ] as const) {
+    app.route({
+      method,
+      url,
+      handler: async (req) => {
+        const s = await requireActor(ctx, req);
+        const takeId = idOf(req.params, "takeId");
+        const [own] = await sql`select 1 from takes where id = ${takeId} and actor_id = ${s.actor.id} and production_id = ${s.production.id}`;
+        if (!own) throw notFound("Take not found.");
+        await setTakeDeleted(ctx, takeId, deleted);
+        const c = await counts(ctx, s);
+        return { linesRecorded: c.linesRecorded, linesTotal: c.linesTotal };
+      },
+    });
+  }
 
   app.post("/api/invite/takes/:takeId/stt", async (req, reply) => {
     const s = await requireActor(ctx, req);
@@ -168,7 +208,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     const ids = [...new Set(results.map((r) => r.lineId))];
     const [owned] = await sql<{ n: number }[]>`
       select count(*)::int as n from lines where id = any(${ids}::uuid[]) and production_id = ${s.production.id}
-        and kind = 'dialogue' and character_id = any(${s.characterIds}::uuid[])`;
+        and kind = 'dialogue' and (character_id = any(${s.characterIds}::uuid[]) or voice_ids && ${s.characterIds}::uuid[])`;
     if (owned!.n !== ids.length) throw badRequest("Practice results can only cover your own lines.");
     const avg = results.reduce((n, r) => n + r.accuracy, 0) / results.length;
     const [practice] = await sql<{ id: string; avgAccuracy: number; createdAt: Date }[]>`
@@ -179,16 +219,52 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 }
 
-// The actor's dialogue lines, each with its cue (the previous line by someone else) and the stage
-// directions just before it.
+// The actor's dialogue lines (shared ones included), each with its cue (the previous line by
+// someone else) and the stage directions just before it.
 function actorItems(lines: LineRow[], characterIds: string[]) {
   const mine = new Set(characterIds);
   const items: { line: LineRow; cue: LineRow | null; directions: string[] }[] = [];
   lines.forEach((line, i) => {
-    if (line.kind !== "dialogue" || !mine.has(line.characterId!)) return;
+    if (line.kind !== "dialogue" || !saysLine(line, mine)) return;
     const directions: string[] = [];
     for (let j = i - 1; j >= 0 && lines[j]!.kind !== "dialogue"; j--) if (lines[j]!.kind === "stage_direction") directions.unshift(lines[j]!.text);
-    items.push({ line, cue: previousCue(lines, i, (c) => mine.has(c)), directions });
+    items.push({ line, cue: previousCue(lines, i, (prev) => saysLine(prev, mine)), directions });
   });
   return items;
+}
+
+export interface TogetherView {
+  characterId: string;
+  characterName: string;
+  audioUrl: string | null; // their current take (actor or stand-in), null until someone records it
+  audioSource: "actor" | "standin" | "none";
+}
+
+// For each shared line, the other voices (not `mine`) and their current takes.
+export async function togetherViews(ctx: Ctx, productionId: string, lines: LineRow[], mine: ReadonlySet<string>): Promise<Map<string, TogetherView[]>> {
+  const out = new Map<string, TogetherView[]>();
+  const shared = lines.filter((l) => l.voiceIds);
+  if (!shared.length) return out;
+  const rows = await ctx.sql<{ lineId: string; characterId: string; name: string; storageKey: string | null; recordedBy: "actor" | "standin" | null }[]>`
+    select lv.line_id, lv.character_id, c.name, t.storage_key, t.recorded_by
+    from line_voices lv join characters c on c.id = lv.character_id
+      left join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id, false)
+    where lv.production_id = ${productionId} and lv.line_id = any(${shared.map((l) => l.id)}::uuid[])
+    order by lv.line_id, lv.ord`;
+  for (const line of shared) {
+    const views: TogetherView[] = [];
+    for (const id of voicesOf(line)) {
+      if (mine.has(id)) continue;
+      const r = rows.find((x) => x.lineId === line.id && x.characterId === id);
+      if (!r) continue;
+      views.push({
+        characterId: id,
+        characterName: r.name,
+        audioUrl: r.storageKey ? await ctx.storage.signedUrl(r.storageKey) : null,
+        audioSource: r.recordedBy ?? "none",
+      });
+    }
+    out.set(line.id, views);
+  }
+  return out;
 }

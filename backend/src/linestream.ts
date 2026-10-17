@@ -2,6 +2,7 @@ import type { Ctx } from "./context.ts";
 import { badRequest, notFound } from "./errors.ts";
 import { body, uuidList } from "./input.ts";
 import { placeholderMs, RENDER_SETTINGS, type AudioSource } from "./render/plan.ts";
+import { mixedClip, voiceTakes, type VoiceTake } from "./render/mix.ts";
 import { isCurrentNormalized, normalizedTake, type TakeAudioRow } from "./render/takeaudio.ts";
 import { TTS_PRIORITY, type SpokenSegment, type TtsClip, type TtsPriority, type TtsRequest, type TtsService } from "./tts/service.ts";
 import type { Voice } from "./tts/voices.ts";
@@ -33,6 +34,7 @@ interface LineAudioRow {
   normalizedKey: string | null;
   normalizedSamples: number | null;
   streamKey: string | null;
+  shared: boolean; // said by several characters: their takes play mixed (render/mix.ts)
 }
 
 // How long a GET waits for a clip still being made: the line someone is waiting on holds on longer
@@ -47,7 +49,7 @@ async function rowsFor(ctx: Ctx, productionId: string, lineIds: string[]): Promi
   if (!lineIds.length) return [];
   return ctx.sql<LineAudioRow[]>`
     select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id,
-      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key
+      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, l.voice_ids is not null as shared
     from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'
     where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') and l.id = any(${lineIds}::uuid[])`;
 }
@@ -79,11 +81,39 @@ export async function lineAudio(
     return Promise.race([p.then(() => undefined, () => undefined), new Promise<void>((r) => (timer = setTimeout(r, waitMs)))]).finally(() => clearTimeout(timer));
   };
 
+  // Shared lines: one voice's take plays as it is, two or more play mixed. Without voice takes
+  // (only takes from before the line was shared) the current take plays, else TTS.
+  const sharedIds = ordered.filter((r) => r.shared).map((r) => r.id);
+  const byVoice = sharedIds.length ? await voiceTakes(ctx.sql, productionId, sharedIds) : new Map<string, VoiceTake[]>();
+  const mixes = new Map<string, VoiceTake[]>();
+  for (const r of ordered) {
+    const takes = byVoice.get(r.id);
+    if (!takes?.length) continue;
+    const t = takes[0]!;
+    Object.assign(r, { takeId: t.id, recordedBy: t.recordedBy, storageKey: t.storageKey, normalizedKey: t.normalizedKey, normalizedSamples: t.normalizedSamples, streamKey: t.streamKey });
+    if (takes.length > 1) mixes.set(r.id, takes);
+  }
+
   // Takes: the normalized .m4a, made on first use.
   const takeViews = new Map<string, LineAudioView>();
   const takeJobs: Promise<unknown>[] = [];
+  for (const [lineId, takes] of mixes) {
+    const r = rows.get(lineId)!;
+    const source = takes.some((t) => t.recordedBy === "actor") ? "actor" : "standin";
+    const job = mixedClip(ctx, productionId, takes).then(
+      async (m) => {
+        takeViews.set(lineId, { lineId, audioUrl: await ctx.storage.signedUrl(m.streamKey), durationMs: samplesToMs(m.samples), source, ready: true });
+      },
+      (err) => {
+        ctx.log.warn({ err, lineId }, "mixing a shared line failed");
+        takeViews.set(lineId, { lineId, audioUrl: null, durationMs: placeholderMs(r.text), source, ready: true });
+      },
+    );
+    ctx.jobs.run("mix shared line for playback", () => job);
+    takeJobs.push(job);
+  }
   for (const r of ordered) {
-    if (!r.takeId || !r.storageKey) continue;
+    if (!r.takeId || !r.storageKey || mixes.has(r.id)) continue;
     const source = r.recordedBy ?? "actor";
     const row: TakeAudioRow = { id: r.takeId, storageKey: r.storageKey, normalizedKey: r.normalizedKey, normalizedSamples: r.normalizedSamples, streamKey: r.streamKey };
     if (r.streamKey && r.normalizedSamples && isCurrentNormalized(r.normalizedKey)) {

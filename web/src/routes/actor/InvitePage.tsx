@@ -43,7 +43,14 @@ export default function InvitePage() {
     await api.start(firstName);
     setStarted(true);
   }} />;
-  return <RecordSession token={token} api={api} invite={data} />;
+  return (
+    <RecordSession
+      token={token}
+      api={api}
+      invite={data}
+      onRenamed={(actor) => invite.setData({ ...data, actor: { ...data.actor, name: actor.name, firstName: actor.firstName } })}
+    />
+  );
 }
 
 function Welcome({ invite, onStart }: { invite: Invite; onStart: (firstName: string) => Promise<void> }) {

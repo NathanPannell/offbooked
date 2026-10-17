@@ -164,6 +164,17 @@ export async function concatToM4a(files: string[], workDir: string, output: stri
   await ffmpeg(["-f", "concat", "-safe", "0", "-i", list, "-c:a", "aac", "-b:a", "128k", "-ar", String(RATE), "-ac", "1", "-movflags", "+faststart", output]);
 }
 
+// Several normalized clips said together: overlaid from their starts (each is already cut to its
+// first word), as long as the longest, then levelled like any clip. Returns the FLAC's samples.
+export async function mixClips(inputs: string[], wav: string, output: string, m4a: string): Promise<number> {
+  await ffmpeg([
+    ...inputs.flatMap((f) => ["-i", f]),
+    "-filter_complex", `amix=inputs=${inputs.length}:duration=longest:dropout_transition=0:normalize=0`,
+    "-ar", String(RATE), "-ac", "1", "-c:a", "pcm_s16le", wav,
+  ]);
+  return normalizeClip(wav, output, m4a);
+}
+
 // A synthesized cue line as a small AAC file that every browser's <audio> plays.
 export async function encodeCue(input: string, output: string): Promise<void> {
   await ffmpeg(["-i", input, "-vn", "-c:a", "aac", "-b:a", "96k", "-ar", String(RATE), "-ac", "1", "-movflags", "+faststart", output]);

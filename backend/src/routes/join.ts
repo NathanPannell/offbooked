@@ -38,9 +38,9 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
   const characters = (productionId: string) =>
     sql<{ id: string; name: string; lineCount: number; takenBy: string | null }[]>`
       select c.id, c.name,
-        (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue') as line_count,
+        (select count(*)::int from line_voices lv where lv.character_id = c.id) as line_count,
         (select coalesce(a.first_name, split_part(a.name, ' ', 1)) from actor_characters ac join actors a on a.id = ac.actor_id where ac.character_id = c.id limit 1) as taken_by
-      from characters c where c.production_id = ${productionId}
+      from characters c where c.production_id = ${productionId} and not c.is_group
       order by line_count desc, lower(c.name)`;
 
   app.get("/api/join/:token", async (req) => {
@@ -61,7 +61,7 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     const actorId = await sql.begin(async (tx) => {
       const rows = await tx<{ id: string; taken: boolean }[]>`
         select c.id, exists(select 1 from actor_characters ac where ac.character_id = c.id) as taken
-        from characters c where c.production_id = ${p.id} and c.id = any(${characterIds}::uuid[]) for update`;
+        from characters c where c.production_id = ${p.id} and not c.is_group and c.id = any(${characterIds}::uuid[]) for update`;
       if (rows.length !== characterIds.length) throw badRequest("Some of those characters aren't in this production.");
       if (rows.some((r) => r.taken)) throw conflict("character_taken", "Someone has just picked one of those characters. Choose again.");
       const [actor] = await tx<{ id: string }[]>`

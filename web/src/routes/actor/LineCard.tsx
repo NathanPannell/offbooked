@@ -1,4 +1,4 @@
-import { AlertCircle, Check, CloudUpload, Pause, Play, RotateCcw } from "lucide-react";
+import { AlertCircle, Check, CloudUpload, Pause, Play, RotateCcw, Trash2, Users } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import type { ActorLine } from "../../api/types";
 import { AccuracyChip } from "../../components/AccuracyChip";
@@ -6,6 +6,7 @@ import { CharacterName } from "../../components/CharacterName";
 import { WordDiff } from "../../components/WordDiff";
 import { pieceStates, segmentLine } from "../../stt/live";
 import { verdict, VERDICT_MESSAGE } from "../../stt/score";
+import { joinNames, titleCase } from "../../lib/format";
 import type { UploadItem } from "../../upload/queue";
 import type { Score } from "./RecordSession";
 
@@ -34,10 +35,13 @@ export function LineCard({
   noCueLabel = "You open the scene",
   liveCursor = null,
   liveHint,
-  notice,
+  progress = 0,
+  takeLabel = "Your take",
   onPlay,
+  onPlayTogether,
   onSelect,
   onRerecord,
+  onDelete,
   onRetry,
 }: {
   actorLine: ActorLine;
@@ -58,11 +62,17 @@ export function LineCard({
   liveCursor?: number | null;
   /** A short note under the line while it records, e.g. how the take will end. */
   liveHint?: string;
-  /** Shown under the line, e.g. after a take that stopped itself without moving on. */
-  notice?: ReactNode;
+  /** How far the playing preview has got, 0 to 1. */
+  progress?: number;
+  /** What the take is called on its play button ("Your take", "Cast take"). */
+  takeLabel?: string;
   onPlay: (key: string, url: string) => void;
+  /** Plays several clips at once: a shared line's take with the others'. */
+  onPlayTogether?: (key: string, urls: string[]) => void;
   onSelect: () => void;
   onRerecord: () => void;
+  /** Deletes the take (the caller offers Undo). Left out while the take is still saving. */
+  onDelete?: () => void;
   onRetry: (takeId: string) => void;
 }) {
   const [showDiff, setShowDiff] = useState(false);
@@ -71,6 +81,10 @@ export function LineCard({
   const recorded = !!takeUrl || !!upload;
   const takeKey = `take:${line.id}`;
   const cueKey = `cue:${line.id}`;
+  const togetherKey = `together:${line.id}`;
+  const together = actorLine.together ?? [];
+  const othersAudio = together.flatMap((t) => (t.audioUrl ? [t.audioUrl] : []));
+  const durationMs = localTake?.durationMs ?? take?.durationMs ?? null;
   const v = score ? verdict(score.result) : null;
 
   const state = recording ? "is-recording" : current ? "is-current" : recorded ? "is-recorded" : "";
@@ -114,31 +128,71 @@ export function LineCard({
       {directions.length > 0 && <p className="directions">{directions.map((d) => d.replace(/^\(|\)$/g, "")).join(" ")}</p>}
 
       <button type="button" className="my-line" onClick={onSelect} aria-label={`Line ${number}: ${line.text}`}>
-        <CharacterName name={speaker} />
+        <span className="my-line-who">
+          <CharacterName name={speaker} />
+          {together.length > 0 && (
+            <span className="together-with">
+              <Users size={13} aria-hidden="true" /> with {joinNames(together.map((t) => titleCase(t.characterName)))}
+            </span>
+          )}
+        </span>
         <LineText text={line.text} cursor={recording ? liveCursor : null} />
       </button>
       {recording && liveHint && <p className="live-hint">{liveHint}</p>}
-      {notice}
 
       {recorded && !recording && (
-        <div className="line-actions">
-          {takeUrl && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPlay(takeKey, takeUrl)}>
-              {playing === takeKey ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}
-              {playing === takeKey ? "Pause" : "Play take"}
+        <div className="take-bar">
+          {takeUrl ? (
+            <button
+              type="button"
+              className={`take-play${playing === takeKey ? " is-playing" : ""}`}
+              onClick={() => onPlay(takeKey, takeUrl)}
+              aria-label={`${playing === takeKey ? "Pause" : "Play"} ${takeLabel.toLowerCase()}`}
+            >
+              {playing === takeKey ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
+              <span>{takeLabel}</span>
+              {durationMs !== null && <span className="take-time nums">{formatSeconds(durationMs)}</span>}
+              <span className="take-progress" aria-hidden="true" style={{ transform: `scaleX(${playing === takeKey ? progress : 0})` }} />
+            </button>
+          ) : (
+            <span className="take-play is-pending">
+              <CloudUpload size={16} aria-hidden="true" /> Saving your take…
+            </span>
+          )}
+          {takeUrl && othersAudio.length > 0 && onPlayTogether && (
+            <button
+              type="button"
+              className={`btn btn-ghost btn-sm take-together${playing === togetherKey ? " is-playing" : ""}`}
+              onClick={() => onPlayTogether(togetherKey, [takeUrl, ...othersAudio])}
+            >
+              {playing === togetherKey ? <Pause size={15} aria-hidden="true" /> : <Users size={15} aria-hidden="true" />}
+              {playing === togetherKey ? "Pause" : "Play together"}
             </button>
           )}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onRerecord}>
-            <RotateCcw size={15} aria-hidden="true" /> Record again
-          </button>
           {score && <AccuracyChip result={score.result} expanded={showDiff} onToggle={() => setShowDiff((s) => !s)} />}
+          <span className="take-tools">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onRerecord} aria-label="Record this line again">
+              <RotateCcw size={15} aria-hidden="true" /> Redo
+            </button>
+            {onDelete && (
+              <button type="button" className="btn btn-ghost btn-sm take-delete" onClick={onDelete} aria-label="Delete this take">
+                <Trash2 size={15} aria-hidden="true" /> Delete
+              </button>
+            )}
+          </span>
         </div>
       )}
-      {score && v !== "good" && !showDiff && !recording && <p className={`verdict-hint verdict-${v}`}>{VERDICT_MESSAGE[v!]}</p>}
+      {score && v !== "complete" && !showDiff && !recording && <p className={`verdict-hint verdict-${v}`}>{VERDICT_MESSAGE[v!]}</p>}
       {score && showDiff && <WordDiff text={line.text} ops={score.result.ops} transcript={score.result.transcript} />}
     </article>
   );
 }
+
+const formatSeconds = (ms: number) => {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
 
 /**
  * The line as written, with [directions] muted. While a take records with live transcription, words

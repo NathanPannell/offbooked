@@ -16,6 +16,7 @@ const KINDS: { kind: LineKind; label: string }[] = [
 ];
 const NEW_CHARACTER = "__new";
 const MANAGE_CHARACTERS = "__manage";
+const SEVERAL = "__several";
 
 /** A line's text as the script shows it: [bracketed] directions in spoken lines set as directions. */
 export function LineText({ text, kind }: { text: string; kind: LineKind }) {
@@ -107,6 +108,8 @@ export function LineEditor({
   const [saving, setSaving] = useState<string | null>(null);
   const [splitting, setSplitting] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+  /** Picking several people who say the line together (or, on an ALL line, who is on stage). */
+  const [together, setTogether] = useState<Set<string> | null>(null);
   const editing = useRef(false);
   const caret = useRef<number | null>(null);
 
@@ -258,6 +261,18 @@ export function LineEditor({
     }
   };
 
+  const saveTogether = async (ids: string[]) => {
+    const was = { characterId: restore.characterId, kind: restore.kind, ...flagBack, ...(speaker?.everyone ? { voiceIds: line.voiceIds ?? null } : {}) };
+    const ok = await run(() => api.updateLine(line.id, { kind: "dialogue", voiceIds: ids }), {
+      label: speaker?.everyone ? "Updated who says it" : "Shared line",
+      run: () => api.updateLine(line.id, was),
+    });
+    if (ok) {
+      setTogether(null);
+      onFixed();
+    }
+  };
+
   const nearbyIds = new Set(nearby.map((c) => c.id));
   const everyone = [...characters].filter((c) => !nearbyIds.has(c.id)).sort((a, b) => a.name.localeCompare(b.name));
   const speaker = characters.find((c) => c.id === line.characterId) ?? null;
@@ -365,6 +380,10 @@ export function LineEditor({
                 onChange={(e) => {
                   const value = e.target.value;
                   if (value === NEW_CHARACTER) return setAdding("");
+                  if (value === SEVERAL) {
+                    e.target.value = line.characterId ?? "";
+                    return setTogether(new Set(line.voiceIds ?? (line.characterId && !speaker?.group ? [line.characterId] : [])));
+                  }
                   if (value === MANAGE_CHARACTERS) {
                     e.target.value = line.characterId ?? "";
                     return onManageCharacters();
@@ -394,6 +413,7 @@ export function LineEditor({
                     </option>
                   ))}
                 </optgroup>
+                <option value={SEVERAL}>{speaker?.everyone ? `Who says ${speaker.name}…` : "Several together…"}</option>
                 <option value={NEW_CHARACTER}>New character…</option>
                 <option value={MANAGE_CHARACTERS}>Rename or merge characters…</option>
               </select>
@@ -442,6 +462,19 @@ export function LineEditor({
           </span>
         </div>
 
+        {together && (
+          <TogetherPicker
+            characters={[...nearby, ...everyone].filter((c) => !c.group)}
+            nearbyIds={nearbyIds}
+            chosen={together}
+            everyone={speaker?.everyone ? speaker.name : null}
+            busy={busy}
+            onChange={setTogether}
+            onCancel={() => setTogether(null)}
+            onSave={(ids) => void saveTogether(ids)}
+          />
+        )}
+
         {splitting ? (
           <div className="split-mode">
             <p className="split-hint" id={`split-hint-${line.id}`}>
@@ -488,6 +521,64 @@ export function LineEditor({
           <Check size={18} strokeWidth={3} />
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * Who says a line together: tick two or more characters (a group like "ANGELO, ESCALUS" is made from
+ * their names), or, on an ALL line, the characters on stage, replacing Claude's guess.
+ */
+function TogetherPicker({
+  characters,
+  nearbyIds,
+  chosen,
+  everyone,
+  busy,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  characters: Character[];
+  nearbyIds: Set<string>;
+  chosen: Set<string>;
+  /** The ALL-style name being filled in, or null for a plain group. */
+  everyone: string | null;
+  busy: boolean;
+  onChange: (next: Set<string>) => void;
+  onCancel: () => void;
+  onSave: (ids: string[]) => void;
+}) {
+  const toggle = (id: string) => {
+    const next = new Set(chosen);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange(next);
+  };
+  // Keep the script's order of the ticked names: nearby first, as listed.
+  const ids = characters.filter((c) => chosen.has(c.id)).map((c) => c.id);
+  const enough = everyone ? ids.length >= 1 : ids.length >= 2;
+  return (
+    <div className="together-picker" role="group" aria-label={everyone ? `Who says ${everyone}` : "Who says this together"} onKeyDown={(e) => e.stopPropagation()}>
+      <p className="small muted">
+        {everyone ? `Who says ${everyone} here? Each of them records it, and the takes play together.` : "Pick everyone who says this line. Each of them records it, and the takes play together."}
+      </p>
+      <div className="together-options">
+        {characters.map((c) => (
+          <label key={c.id} className={`checkbox together-option${nearbyIds.has(c.id) ? " is-nearby" : ""}`}>
+            <input type="checkbox" checked={chosen.has(c.id)} onChange={() => toggle(c.id)} />
+            {c.name}
+          </label>
+        ))}
+      </div>
+      <div className="row">
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !enough} onClick={() => onSave(ids)}>
+          {everyone ? "Save" : ids.length >= 2 ? `Said by ${ids.length} together` : "Pick at least two"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

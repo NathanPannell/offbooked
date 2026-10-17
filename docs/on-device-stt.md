@@ -1,14 +1,14 @@
 # On-device speech-to-text for take scoring
 
-Status: research and recommendation, 2026-10-13, now implemented in `web/src/stt/`. Changed 2026-10-15 for load time: the model is self-hosted, uses an fp16 encoder, and starts loading when an actor page opens (see "Load time").
+Status: research and recommendation, 2026-10-13, now implemented in `web/src/stt/`. Changed 2026-10-15 for load time: the model is self-hosted, uses an fp16 encoder, and starts loading when an actor page opens (see "Load time"). Changed 2026-10-17: takes are judged Complete, Partial or Not attempted instead of by percentage (see "Accuracy and verdict"), and live auto-advance always moves on after a pause (see the "Web" section of `AGENTS.md`).
 
 ## Goal
 
 After each take, transcribe the recording on the actor's own device and compare it with the known script line. From that comparison we show:
 
-- per-line word accuracy, with missed, substituted and extra words highlighted
-- a "drifted from the script" flag that suggests a re-record
-- an accuracy summary at the end of recording and after a "my part" run-through practice
+- per line, whether it was said (Complete, Partial or Not attempted), with missed, substituted and extra words highlighted on tap
+- a gentle "part of the line seems missing" hint that suggests listening back or recording again
+- a summary of those counts at the end of recording and after a "my part" run-through practice
 
 Constraints:
 
@@ -302,7 +302,7 @@ function toMono(buf: AudioBuffer): Float32Array {
 
 Then, still on the main thread, prepare the audio:
 
-- **Silence check**: compute RMS over 30 ms frames. If no frame is above about −45 dBFS, or less than 0.3 s of frames is above the noise floor plus 10 dB, skip ASR. Report the take as `noSpeech`, with the verdict "re-record: we couldn't hear you". This also avoids Moonshine and Whisper inventing text on silence.
+- **Silence check**: compute RMS over 30 ms frames. If no frame is above about −45 dBFS, or less than 0.3 s of frames is above the noise floor plus 10 dB, skip ASR. Report the take as `noSpeech`, with the verdict "Not attempted". This also avoids Moonshine and Whisper inventing text on silence.
 - **Trim** leading and trailing non-speech, keeping 250 ms of padding on each side. This cuts compute and the risk of hallucination.
 - **Normalize** the peak to about 0.9 when the peak is below 0.5. Moonshine reads the raw waveform (it has no log-mel front end), so very quiet takes hurt more than they would with Whisper.
 
@@ -349,7 +349,7 @@ type TakeScore = {
   n: number;            // reference word count after normalization
   s: number; d: number; i: number;
   accuracy: number;     // max(0, 1 - (s + d + i) / n)
-  verdict: 'good' | 'check' | 'rerecord';
+  verdict: 'complete' | 'partial' | 'unattempted';
   ops: WordOp[];
   transcript: string;
   noSpeech?: boolean;
@@ -362,13 +362,18 @@ A display word is highlighted if any normalized token from it is `sub` or `del`.
 **4. Accuracy and verdict**
 
 - Word accuracy = 1 − (S + D + I) / N, clamped to [0, 1]. Insertions can push the raw value below 0.
-- N ≥ 4: **≥ 90% good**, **75–90% check**, **< 75% re-record**.
-- N ≤ 3 (for example "Yes, my lord."): one error would already be a 33–100% swing, so use error counts instead. 0 errors is good, 1 error is check, 2 or more errors (or `noSpeech`) is re-record.
-- Calibrate before launch. Even a perfect take will show 3–8% "errors" from ASR mistakes on phone audio. Record a pilot set (about 100 takes from 5 voices, read correctly and then deliberately with mistakes), then tune the near-match rules and thresholds so that correct takes stay at or above 90%. The thresholds live in one constant, so tuning is cheap.
+- Accuracy is still computed and posted with the take, but not shown (changed 2026-10-17). Phone audio and a tiny model mishear too many words of a perfect take for a percentage to mean much to an actor.
+- The verdict asks whether the line was said, from attempted coverage: expected words that came out `ok` or `sub` (a mishearing counts as attempted), over N.
+- **Not attempted**: no speech (`noSpeech` or an empty transcript), nothing attempted, or (N ≥ 4) words heard but none matching the line.
+- N ≥ 4: coverage **≥ 70% is Complete**, less is **Partial** (a real chunk is missing, for example the actor stopped half way).
+- N ≤ 3 (for example "Yes, my lord."): at most one missing word is Complete, more is Partial.
+- The chip shows the verdict; tapping it shows the word-by-word diff. A Partial or Not attempted line gets a gentle hint under it ("Part of the line seems missing. Listen back or record again.").
+- `COMPLETE_COVERAGE` and `SHORT_LINE_WORDS` in `score.ts` are the knobs; check them against pilot takes.
+- Live auto-advance (`stt/live.ts`) doesn't judge the take either: after real speech a pause always ends it and moves on, and the live cursor only sets how long that pause is (0.7 s near the end of the line, 1.5 s when the words weren't heard but enough was said, 3 s clearly mid-line).
 
 **5. Summaries**
 
-- End of recording: micro-averaged accuracy = 1 − ΣE / ΣN over the scored takes, a count of good / check / re-record, and a tappable list of the lines to re-record. Takes still in the queue show as "still checking (n)". Wait up to about 10 s for them, then show the partial summary and update it live. Unscored takes show as "accuracy unavailable" and are left out of the average.
+- End of recording and after practice: the verdict counts ("12 complete · 2 partial") over the scored takes, and a tappable list of the Not attempted, then Partial, lines to review. Takes still in the queue show as "still checking (n)". Wait up to about 10 s for them, then show the partial summary and update it live. Unscored takes show as "accuracy unavailable" and are left out of the counts.
 - "My part" practice: record each of the actor's gaps as its own clip, or one continuous recording cut at the known gap boundaries, and run the same pipeline. Use `getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })` and cut strictly to the gap windows. Otherwise the run-through playback leaking into the microphone shows up as insertions. Suggest headphones in the practice screen copy.
 - Optionally send `{ accuracy, verdict, transcript, model }` with the take to the API so directors can see it later. The audio is uploaded anyway, so this adds no new privacy exposure. That is a separate backend change and not required for the MVP.
 

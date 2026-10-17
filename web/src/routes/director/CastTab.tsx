@@ -1,8 +1,8 @@
-import { Check, ChevronDown, Copy, Headphones, Mic, Share2 } from "lucide-react";
+import { Check, ChevronDown, Copy, Headphones, Merge, Mic, MoreHorizontal, Share2, Users } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { errorMessage } from "../../api/client";
-import { cast as castApi, joinLink } from "../../api/director";
+import { cast as castApi, joinLink, script as scriptApi } from "../../api/director";
 import type { CallSheetCharacter, Production } from "../../api/types";
 import { CharacterName } from "../../components/CharacterName";
 import { Confetti } from "../../components/Confetti";
@@ -10,10 +10,11 @@ import { EmptyStage } from "../../components/Illustrations";
 import { Loading } from "../../components/Loading";
 import { ProgressBar } from "../../components/ProgressBar";
 import { useToast } from "../../components/Toast";
-import { plural } from "../../lib/format";
+import { plural, titleCase } from "../../lib/format";
 import { copyText, shareOrCopy } from "../../lib/share";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useInterval, useResource, type Resource } from "../../lib/useResource";
+import { suggestMerges } from "./duplicateCharacters";
 
 /**
  * The director's cast page. Two actions: share the cast link (the main one), and record some lines
@@ -78,6 +79,10 @@ export function CastTab({
   const linesRecorded = parts.reduce((n, c) => n + c.linesRecorded, 0);
   const taken = parts.filter((c) => c.takenBy).length;
   const wrapped = parts.every((c) => c.linesRecorded >= c.lineCount);
+  // Likely duplicates ("ISABEL" and "ISABELLA (ASIDE)"), offered first when merging.
+  const suggested = new Map(
+    suggestMerges(parts.map((c) => ({ id: c.id, name: c.name, aliases: [], lineCount: c.lineCount }))).map((m) => [m.from.id, m.into.id]),
+  );
 
   return (
     <div className="cast">
@@ -106,46 +111,183 @@ export function CastTab({
         )}
         <ul className="sheet-list" aria-label="Parts">
           {parts.map((c) => (
-            <SheetRow key={c.id} part={c} busy={opening === c.id} onRecord={() => void recordAs(c.id)} />
+            <SheetRow
+              key={c.id}
+              productionId={production.id}
+              part={c}
+              parts={parts}
+              suggestion={suggested.get(c.id) ?? null}
+              busy={opening === c.id}
+              onRecord={() => void recordAs(c.id)}
+              onMerged={() => void sheet.reload()}
+            />
           ))}
         </ul>
-        <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />
       </details>
     </div>
   );
 }
 
-function SheetRow({ part, busy, onRecord }: { part: CallSheetCharacter; busy: boolean; onRecord: () => void }) {
+/**
+ * One part on the call sheet. The name opens the part's studio (their lines and takes; your own
+ * recorder for a part you took). The menu merges a duplicate into another part.
+ */
+function SheetRow({
+  productionId,
+  part,
+  parts,
+  suggestion,
+  busy,
+  onRecord,
+  onMerged,
+}: {
+  productionId: string;
+  part: CallSheetCharacter;
+  parts: CallSheetCharacter[];
+  suggestion: string | null;
+  busy: boolean;
+  onRecord: () => void;
+  onMerged: () => void;
+}) {
+  const [merging, setMerging] = useState(false);
   const done = part.linesRecorded >= part.lineCount;
   const state = done ? "is-done" : part.takenBy ? "is-taken" : "is-open";
+  const shared = part.sharedLines ?? 0;
   return (
-    <li className={`sheet-row ${state}`}>
-      <div className="sheet-part">
-        <CharacterName name={part.name} className="sheet-name" />
-        <span className={`sheet-who small ${part.takenBy ? "" : "muted"}`}>
-          {part.mine ? "You" : (part.takenBy ?? "Not taken yet")}
-        </span>
-      </div>
-      <div className="sheet-progress">
-        {done ? (
-          <span className="sheet-done small">
-            <Check size={14} strokeWidth={2.5} aria-hidden="true" /> All {part.lineCount} in
+    <li className={`sheet-row ${state}${merging ? " is-merging" : ""}`}>
+      <div className="sheet-main">
+        <div className="sheet-part">
+          {part.mine ? (
+            <button type="button" className="sheet-name-link" onClick={onRecord} disabled={busy} aria-label={`Open ${part.name}'s studio`}>
+              <CharacterName name={part.name} className="sheet-name" />
+            </button>
+          ) : (
+            <Link className="sheet-name-link" to={`/app/p/${productionId}/record?character=${part.id}`} aria-label={`Open ${part.name}'s studio`}>
+              <CharacterName name={part.name} className="sheet-name" />
+            </Link>
+          )}
+          <span className={`sheet-who small ${part.takenBy ? "" : "muted"}`}>
+            {part.mine ? "You" : (part.takenBy ?? "Not taken yet")}
+            {shared > 0 && (
+              <span className="sheet-shared" title={`${plural(shared, "line")} said with others`}>
+                {" "}
+                · <Users size={12} aria-hidden="true" /> {shared} shared
+              </span>
+            )}
           </span>
-        ) : (
-          <>
-            <span className="mono nums" aria-label={`${part.linesRecorded} of ${part.lineCount} lines recorded`}>
-              {part.linesRecorded}/{part.lineCount}
+        </div>
+        <div className="sheet-progress">
+          {done ? (
+            <span className="sheet-done small">
+              <Check size={14} strokeWidth={2.5} aria-hidden="true" /> All {part.lineCount} in
             </span>
-            <ProgressBar value={part.linesRecorded} max={part.lineCount} label={`${part.name} lines recorded`} className="sheet-bar" />
-          </>
+          ) : (
+            <>
+              <span className="mono nums" aria-label={`${part.linesRecorded} of ${part.lineCount} lines recorded`}>
+                {part.linesRecorded}/{part.lineCount}
+              </span>
+              <ProgressBar value={part.linesRecorded} max={part.lineCount} label={`${part.name} lines recorded`} className="sheet-bar" />
+            </>
+          )}
+        </div>
+        {part.mine && (
+          <button type="button" className="btn btn-ghost btn-sm sheet-record" onClick={onRecord} disabled={busy} aria-label={`Record ${part.name}`}>
+            <Mic size={15} aria-hidden="true" /> <span className="hide-sm">{done ? "Re-record" : "Record"}</span>
+          </button>
         )}
-      </div>
-      {part.mine && (
-        <button type="button" className="btn btn-ghost btn-sm sheet-record" onClick={onRecord} disabled={busy} aria-label={`Record ${part.name}`}>
-          <Mic size={15} aria-hidden="true" /> <span className="hide-sm">{done ? "Re-record" : "Record"}</span>
+        <button
+          type="button"
+          className="icon-btn sheet-more"
+          aria-label={`More for ${part.name}`}
+          aria-expanded={merging}
+          onClick={() => setMerging((m) => !m)}
+        >
+          <MoreHorizontal size={18} />
         </button>
+      </div>
+      {merging && (
+        <MergeForm
+          part={part}
+          choices={parts.filter((c) => c.id !== part.id)}
+          suggestion={suggestion}
+          onCancel={() => setMerging(false)}
+          onMerged={() => {
+            setMerging(false);
+            onMerged();
+          }}
+        />
       )}
     </li>
+  );
+}
+
+/** Merges a duplicate part into another: its lines (and their recordings) move to the one kept. */
+function MergeForm({
+  part,
+  choices,
+  suggestion,
+  onCancel,
+  onMerged,
+}: {
+  part: CallSheetCharacter;
+  choices: CallSheetCharacter[];
+  suggestion: string | null;
+  onCancel: () => void;
+  onMerged: () => void;
+}) {
+  const toast = useToast();
+  const [into, setInto] = useState(suggestion ?? "");
+  const [busy, setBusy] = useState(false);
+  const target = choices.find((c) => c.id === into);
+  const ordered = suggestion ? [...choices].sort((a, b) => Number(b.id === suggestion) - Number(a.id === suggestion)) : choices;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!target) return;
+    setBusy(true);
+    try {
+      await scriptApi.mergeCharacter(part.id, target.id);
+      toast(`${titleCase(part.name)} merged into ${titleCase(target.name)}`);
+      onMerged();
+    } catch (err) {
+      toast(errorMessage(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="sheet-merge" onSubmit={submit}>
+      <label className="field">
+        <span>
+          Merge <strong>{part.name}</strong> into
+        </span>
+        <select className="input" value={into} onChange={(e) => setInto(e.target.value)} autoFocus>
+          <option value="" disabled>
+            Pick the part to keep…
+          </option>
+          {ordered.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.id === suggestion ? " (looks like the same part)" : ""}
+              {c.takenBy ? ` · ${c.mine ? "you" : c.takenBy}` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="small muted">
+        {plural(part.lineCount, "line")} and {part.lineCount === 1 ? "its recording" : "their recordings"} move to {target ? titleCase(target.name) : "the part you keep"}.
+        {part.takenBy && target?.takenBy && part.actorId !== target.actorId ? ` ${part.takenBy} won't have this part any more; ${target.takenBy} keeps ${titleCase(target.name)}.` : ""}
+        {part.takenBy && target && !target.takenBy ? ` ${part.takenBy} takes ${titleCase(target.name)}.` : ""}
+      </p>
+      <div className="row">
+        <button className="btn btn-secondary btn-sm" disabled={!target || busy}>
+          <Merge size={15} aria-hidden="true" /> {busy ? "Merging…" : "Merge"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -256,6 +398,7 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
           <button type="button" className="btn btn-primary btn-lg cast-link-share" onClick={share} disabled={!link.data}>
             <Share2 size={18} aria-hidden="true" /> Share the cast link
           </button>
+          {link.data && <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />}
         </>
       )}
     </section>

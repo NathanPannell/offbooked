@@ -5,7 +5,8 @@ import type { ActorApi } from "../../api/actor";
 import { errorMessage } from "../../api/client";
 import type { ActorLine, Invite } from "../../api/types";
 import { plural } from "../../lib/format";
-import { formatAccuracy, overallAccuracy, scoreLabel, verdict } from "../../stt/score";
+import { VERDICT_CHIP } from "../../components/AccuracyChip";
+import { formatVerdictCounts, scoreLabel, verdict, VERDICT_RANK, verdictCounts } from "../../stt/score";
 import type { SttState } from "../../stt/session";
 import type { UploadItem } from "../../upload/queue";
 import type { Score } from "./RecordSession";
@@ -40,11 +41,12 @@ export function Wrapped({
   const saving = unsaved.filter((i) => i.status !== "failed");
   const failed = unsaved.filter((i) => i.status === "failed");
   const results = lines.map((l) => scores.get(l.line.id)?.result).filter((r) => !!r);
-  const overall = overallAccuracy(results);
+  const counts = verdictCounts(results);
+  // Not attempted first, then partial, each in script order.
   const toReview = lines
     .map((l) => ({ line: l, score: scores.get(l.line.id) }))
-    .filter((x) => x.score && verdict(x.score.result) !== "good")
-    .sort((a, b) => a.score!.result.accuracy - b.score!.result.accuracy);
+    .filter((x) => x.score && verdict(x.score.result) !== "complete")
+    .sort((a, b) => VERDICT_RANK[verdict(a.score!.result)] - VERDICT_RANK[verdict(b.score!.result)]);
   const scoring = pendingScores > 0;
   const showSummary = results.length > 0 || scoring;
 
@@ -138,14 +140,13 @@ export function Wrapped({
           <p className="muted">
             {sttState.status === "unavailable"
               ? "Accuracy check isn't available on this device. Listen back to any line to check it."
-              : "No accuracy scores yet. Listen back to any line to check it."}
+              : "No lines checked yet. Listen back to any line to check it."}
           </p>
         ) : (
           <>
-            {overall !== null && (
+            {results.length > 0 && (
               <p className="summary-score">
-                <span className="display">{formatAccuracy(overall)}</span> of your words matched the script, across{" "}
-                {plural(results.length, "line")}
+                <span className="display summary-counts">{formatVerdictCounts(counts)}</span> across {plural(results.length, "line")} checked
               </p>
             )}
             {scoring && (
@@ -162,16 +163,14 @@ export function Wrapped({
                     <li key={line.line.id}>
                       <button type="button" className="summary-line" onClick={() => onReview(line.line.id)}>
                         <span className="grow">{line.line.text}</span>
-                        <span className={`chip chip-${verdict(score!.result) === "check" ? "check" : "bad"}`}>
-                          {scoreLabel(score!.result)}
-                        </span>
+                        <span className={`chip ${VERDICT_CHIP[verdict(score!.result)]}`}>{scoreLabel(score!.result)}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
               </>
             ) : (
-              !scoring && results.length > 0 && <p>Every line was spot on.</p>
+              !scoring && results.length > 0 && <p>Every line sounded complete.</p>
             )}
           </>
         )}

@@ -11,6 +11,8 @@ export interface NewTake {
   /** The invite token, or the production ID for a director stand-in take. */
   token: string;
   lineId: string;
+  /** A director's stand-in on a shared line: the character it voices. */
+  characterId?: string | null;
   audio: Blob;
   durationMs: number;
 }
@@ -69,6 +71,7 @@ export class Uploader {
       kind: take.kind ?? "invite",
       token: take.token,
       lineId: take.lineId,
+      characterId: take.characterId ?? null,
       mime: take.audio.type,
       durationMs: take.durationMs,
       createdAt: Date.now(),
@@ -128,7 +131,7 @@ export class Uploader {
       const blob = new Blob([audio], { type: item.mime });
       const result =
         item.kind === "director"
-          ? await standins.putTake(item.lineId, blob, item.takeId, item.durationMs)
+          ? await standins.putTake(item.lineId, blob, item.takeId, item.durationMs, undefined, item.characterId)
           : await actorApi(item.token).putTake(item.lineId, blob, item.takeId, item.durationMs);
       const saved = this.apply(item.takeId, { type: "succeeded" });
       if (saved) this.savedListeners.forEach((l) => l(saved, result));

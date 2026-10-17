@@ -2,6 +2,10 @@ export function plural(n: number, one: string, many = one + "s"): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+/** "FIRST WITCH" → "First Witch". Names already in mixed case are left as written. */
+export const titleCase = (name: string): string =>
+  name === name.toUpperCase() ? name.toLowerCase().replace(/(^|[\s\-'’.(])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase()) : name;
+
 /** "HAMLET", "HAMLET & GHOST", "HAMLET, GHOST & PLAYER". */
 export function joinNames(names: string[]): string {
   if (names.length <= 1) return names[0] ?? "";

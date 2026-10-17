@@ -91,35 +91,117 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
   };
 }
 
-/** One shared <audio> for previews (takes and cues), so only one thing plays at a time. */
+/**
+ * One shared player for previews (takes and cues), so only one thing plays at a time. `playTogether`
+ * plays several clips at once (a shared line: your take with the others'). `progress` is how far the
+ * playing clip has got, 0 to 1.
+ */
 export function usePlayback(onError?: () => void) {
-  const player = useRef<HTMLAudioElement | null>(null);
+  const players = useRef<HTMLAudioElement[]>([]);
   const [playing, setPlaying] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
-  useEffect(() => () => player.current?.pause(), []);
+  const stopAll = useCallback(() => {
+    for (const a of players.current) {
+      a.onpause = null;
+      a.onended = null;
+      a.ontimeupdate = null;
+      a.pause();
+    }
+  }, []);
 
-  const play = useCallback(
-    (key: string, url: string) => {
-      const audio = (player.current ??= new Audio());
-      if (playing === key) {
-        audio.pause();
+  useEffect(() => () => stopAll(), [stopAll]);
+
+  const playTogether = useCallback(
+    (key: string, urls: string[]) => {
+      stopAll();
+      if (playing === key || urls.length === 0) {
         setPlaying(null);
         return;
       }
-      audio.src = url;
-      audio.onended = () => setPlaying(null);
-      audio.onpause = () => setPlaying((p) => (p === key ? null : p));
-      audio.play().then(
+      while (players.current.length < urls.length) players.current.push(new Audio());
+      const used = players.current.slice(0, urls.length);
+      let left = used.length;
+      setProgress(0);
+      used.forEach((audio, i) => {
+        audio.src = urls[i]!;
+        audio.currentTime = 0;
+        audio.onended = () => {
+          if (--left === 0) setPlaying((p) => (p === key ? null : p));
+        };
+        audio.onpause = () => {
+          if (!audio.ended) {
+            stopAll();
+            setPlaying((p) => (p === key ? null : p));
+          }
+        };
+        // The longest clip drives the progress.
+        audio.ontimeupdate = () => {
+          const longest = used.reduce((a, b) => ((b.duration || 0) > (a.duration || 0) ? b : a));
+          if (audio === longest && longest.duration) setProgress(Math.min(1, audio.currentTime / longest.duration));
+        };
+      });
+      Promise.all(used.map((a) => a.play())).then(
         () => setPlaying(key),
-        () => onErrorRef.current?.(),
+        () => {
+          stopAll();
+          setPlaying(null);
+          onErrorRef.current?.();
+        },
       );
     },
-    [playing],
+    [playing, stopAll],
   );
 
-  const pause = useCallback(() => player.current?.pause(), []);
+  const play = useCallback((key: string, url: string) => playTogether(key, [url]), [playTogether]);
 
-  return { playing, play, pause };
+  const pause = useCallback(() => {
+    stopAll();
+    setPlaying(null);
+  }, [stopAll]);
+
+  return { playing, progress, play, playTogether, pause };
+}
+
+/**
+ * Other people's takes playing along while you record a shared line (headphones on, or the mic hears
+ * them). Separate from the preview player so a preview never cuts it off.
+ */
+export function useAccompaniment() {
+  const players = useRef<HTMLAudioElement[]>([]);
+  const stop = useCallback(() => {
+    for (const a of players.current) a.pause();
+  }, []);
+  useEffect(() => () => stop(), [stop]);
+  const start = useCallback(
+    (urls: string[]) => {
+      stop();
+      while (players.current.length < urls.length) players.current.push(new Audio());
+      urls.forEach((url, i) => {
+        const a = players.current[i]!;
+        a.src = url;
+        a.currentTime = 0;
+        void a.play().catch(() => {});
+      });
+    },
+    [stop],
+  );
+  /** Plays one clip and resolves when it ends (or fails), e.g. a cue before recording. */
+  const playThrough = useCallback(
+    (url: string) =>
+      new Promise<void>((resolve) => {
+        stop();
+        const a = (players.current[0] ??= new Audio());
+        a.src = url;
+        a.currentTime = 0;
+        a.onended = () => resolve();
+        a.onerror = () => resolve();
+        a.onpause = () => resolve();
+        void a.play().catch(() => resolve());
+      }),
+    [stop],
+  );
+  return { start, stop, playThrough };
 }

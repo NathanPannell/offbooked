@@ -13,6 +13,12 @@ export function actorApi(token: string) {
   return {
     invite: () => request<Invite>("/invite", { auth }),
     start: (firstName: string) => request<void>("/invite/start", { auth, json: { firstName } }),
+    /** Fixes the actor's name (it shows on the call sheet). */
+    rename: (name: string) =>
+      request<{ actor: { id: string; name: string; firstName: string } }>("/invite/me", { method: "PATCH", auth, json: { name } }),
+    /** Deletes one of the actor's own takes; `restoreTake` is its Undo. */
+    deleteTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}`, { method: "DELETE", auth }),
+    restoreTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}/restore`, { method: "POST", auth }),
     lines: () => request<{ sections: Section[]; lines: ActorLine[] }>("/invite/lines", { auth }),
     putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal) =>
       request<TakeUploadResult>(`/invite/lines/${lineId}/take`, {

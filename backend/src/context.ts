@@ -4,6 +4,7 @@ import { createMailer, type Mailer } from "./email/mailer.ts";
 import { Jobs } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { createClaudeLabeler, type Labeler } from "./parse/label.ts";
+import { createClaudeEnsembleInferrer, type EnsembleInferrer } from "./shared.ts";
 import { createStorage } from "./storage/index.ts";
 import type { Storage } from "./storage/storage.ts";
 import { PiperSynthesizer, pooledProcs, type Synthesizer } from "./tts/piper.ts";
@@ -18,6 +19,7 @@ export interface Ctx {
   log: Log;
   jobs: Jobs;
   labeler: Labeler | null;
+  ensemble: EnsembleInferrer | null; // reads scenes for who says each ALL line (Claude Haiku)
   renderWorker: { kick(): void }; // wakes the in-process render worker when a render is queued
   tts: TtsService | null; // null when TTS_DRIVER=off; otherwise it may still report itself unavailable
 }
@@ -39,6 +41,7 @@ export function createCtx(config: Config, sql: Sql, log: Log, overrides: Partial
     mailer: overrides.mailer ?? createMailer(config, log),
     jobs: overrides.jobs ?? new Jobs(log),
     labeler: overrides.labeler !== undefined ? overrides.labeler : config.anthropicApiKey ? createClaudeLabeler(config.anthropicApiKey) : null,
+    ensemble: overrides.ensemble !== undefined ? overrides.ensemble : config.anthropicApiKey ? createClaudeEnsembleInferrer(config.anthropicApiKey) : null,
     renderWorker: overrides.renderWorker ?? { kick() {} },
     tts: synthesizer ? new TtsService({ sql, storage, log, synthesizer, concurrency: config.tts.concurrency }) : null,
   };

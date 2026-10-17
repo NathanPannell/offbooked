@@ -7,11 +7,13 @@ import {
   isNearMatch,
   noSpeechResult,
   normalizeWords,
+  formatVerdictCounts,
   numberToWords,
   overallAccuracy,
   scoreLabel,
   scoreLine,
   verdict,
+  verdictCounts,
 } from "./score";
 
 describe("normalizeWords", () => {
@@ -146,7 +148,7 @@ describe("accuracy", () => {
   it("scores a contraction-only difference as spot on", () => {
     const result = scoreLine("I will not go, my lord.", "I won't go my lord");
     expect(result.accuracy).toBe(1);
-    expect(verdict(result)).toBe("good");
+    expect(verdict(result)).toBe("complete");
   });
 
   it("ignores fillers unless the line has them", () => {
@@ -154,30 +156,63 @@ describe("accuracy", () => {
     expect(scoreLine("Um, what?", "um what").accuracy).toBe(1);
   });
 
-  it("gives verdicts at 0.9 and 0.75 for longer lines", () => {
-    const ops = (errors: number, words: number) => [
-      ...Array.from({ length: words - errors }, () => ({ op: "ok" as const, expected: "a", heard: "a" })),
-      ...Array.from({ length: errors }, () => ({ op: "del" as const, expected: "b" })),
-    ];
-    expect(verdict({ accuracy: 0.9, ops: ops(1, 10) })).toBe("good");
-    expect(verdict({ accuracy: 0.8, ops: ops(2, 10) })).toBe("check");
-    expect(verdict({ accuracy: 0.75, ops: ops(1, 4) })).toBe("check");
-    expect(verdict({ accuracy: 0.7, ops: ops(3, 10) })).toBe("rerecord");
+  const ops = (ok: number, sub: number, del: number, ins = 0) => [
+    ...Array.from({ length: ok }, () => ({ op: "ok" as const, expected: "a", heard: "a" })),
+    ...Array.from({ length: sub }, () => ({ op: "sub" as const, expected: "b", heard: "x" })),
+    ...Array.from({ length: del }, () => ({ op: "del" as const, expected: "c" })),
+    ...Array.from({ length: ins }, () => ({ op: "ins" as const, heard: "y" })),
+  ];
+  const take = (o: ReturnType<typeof ops>) => ({ transcript: "heard", ops: o });
+
+  it("counts misheard words as said: a line read through is complete", () => {
+    expect(verdict(take(ops(10, 0, 0)))).toBe("complete");
+    expect(verdict(take(ops(4, 6, 0)))).toBe("complete");
+    expect(verdict(take(ops(5, 2, 3)))).toBe("complete");
+    expect(verdict(take(ops(7, 0, 3, 4)))).toBe("complete");
+    expect(verdict(scoreLine("Get thee to a nunnery, go, farewell.", "get the to a bakery go farewell"))).toBe("complete");
   });
 
-  it("judges short lines by error count", () => {
-    const one = scoreLine("Yes, my lord.", "Yes my lady");
-    expect(verdict(one)).toBe("check");
-    expect(scoreLabel(one)).toBe("1 word off");
-    expect(verdict(scoreLine("Yes, my lord.", "no"))).toBe("rerecord");
-    expect(scoreLabel(scoreLine("Yes, my lord.", "yes my lord"))).toBe("Spot on");
+  it("calls a line partial when a real chunk is missing", () => {
+    expect(verdict(take(ops(6, 0, 4)))).toBe("partial");
+    expect(verdict(take(ops(1, 0, 9)))).toBe("partial");
+    expect(verdict(scoreLine("To be, or not to be, that is the question.", "to be or not to be"))).toBe("partial");
+  });
+
+  it("calls a line not attempted when nothing of it was heard", () => {
+    expect(verdict(take(ops(0, 0, 10)))).toBe("unattempted");
+    expect(verdict(take(ops(0, 0, 10, 3)))).toBe("unattempted");
+    // Words heard, but none of the line's: something else was said.
+    expect(verdict(take(ops(0, 10, 0)))).toBe("unattempted");
+    expect(verdict(scoreLine("Hail to your lordship.", "um uh"))).toBe("unattempted");
+  });
+
+  it("is generous with short lines: one missing word is still complete", () => {
+    expect(verdict(scoreLine("Yes, my lord.", "Yes my lady"))).toBe("complete");
+    expect(verdict(scoreLine("Yes, my lord.", "yes my"))).toBe("complete");
+    expect(verdict(scoreLine("Yes, my lord.", "yes"))).toBe("partial");
+    expect(verdict(scoreLine("Aye.", "I"))).toBe("complete");
+    expect(verdict(scoreLine("Yes, my lord.", ""))).toBe("unattempted");
+    expect(scoreLabel(scoreLine("Yes, my lord.", "yes my lord"))).toBe("Complete");
+    expect(scoreLabel(scoreLine("Yes, my lord.", "yes"))).toBe("Partial");
   });
 
   it("labels silent takes", () => {
     const silent = noSpeechResult("Hail to your lordship.");
     expect(silent.accuracy).toBe(0);
-    expect(scoreLabel(silent)).toBe("No speech heard");
-    expect(verdict(silent)).toBe("rerecord");
+    expect(scoreLabel(silent)).toBe("Not attempted");
+    expect(verdict(silent)).toBe("unattempted");
+  });
+
+  it("counts verdicts for a summary, leaving out zeros", () => {
+    const results = [
+      scoreLine("one two three four", "one two three four"),
+      scoreLine("five six seven eight", "five six seven"),
+      scoreLine("To be, or not to be, that is the question.", "to be"),
+    ];
+    const counts = verdictCounts(results);
+    expect(counts).toEqual({ complete: 2, partial: 1, unattempted: 0 });
+    expect(formatVerdictCounts(counts)).toBe("2 complete · 1 partial");
+    expect(formatVerdictCounts({ complete: 0, partial: 0, unattempted: 2 })).toBe("2 not attempted");
   });
 
   it("micro-averages several lines", () => {

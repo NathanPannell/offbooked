@@ -23,21 +23,23 @@ export interface ProductionRow {
   actorsDone: number;
 }
 
-// Progress counts a line as recorded once the cast actor has a take for it. Stand-in takes and
-// TTS fill the run-through but never count.
-const actorRecorded = (sql: Sql) => sql`exists (select 1 from takes t where t.line_id = l.id and t.recorded_by = 'actor')`;
+// Progress counts a line as recorded once the cast has a take for each of its voices (one voice,
+// or every character who says a shared line). Stand-in takes and TTS fill the run-through but never
+// count. line_voices and voice_take are in migrations/011_shared_lines.sql.
+const lineRecorded = (sql: Sql) => sql`not exists (select 1 from line_voices v where v.line_id = l.id and voice_take(v.line_id, v.shared, v.character_id, true) is null)`;
+const voiceRecorded = (sql: Sql) => sql`voice_take(lv.line_id, lv.shared, lv.character_id, true) is not null`;
 
 export async function productionRows(sql: Sql, where: { ownerId: string; id?: string; includeArchived?: boolean }): Promise<ProductionRow[]> {
   return sql<ProductionRow[]>`
     select p.id, p.owner_id, p.title, p.performance_date::text as performance_date, p.script_status, p.script_error,
       p.archived_at, p.created_at,
       (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue') as lines_total,
-      (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue' and ${actorRecorded(sql)}) as lines_recorded,
+      (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue' and ${lineRecorded(sql)}) as lines_recorded,
       (select count(*)::int from actors a where a.production_id = p.id) as actors_total,
       (select count(*)::int from actors a where a.production_id = p.id
-        and exists (select 1 from actor_characters ac join lines l on l.character_id = ac.character_id and l.kind = 'dialogue' where ac.actor_id = a.id)
-        and not exists (select 1 from actor_characters ac join lines l on l.character_id = ac.character_id and l.kind = 'dialogue'
-                        where ac.actor_id = a.id and not ${actorRecorded(sql)})) as actors_done
+        and exists (select 1 from actor_characters ac join line_voices lv on lv.character_id = ac.character_id where ac.actor_id = a.id)
+        and not exists (select 1 from actor_characters ac join line_voices lv on lv.character_id = ac.character_id
+                        where ac.actor_id = a.id and not ${voiceRecorded(sql)})) as actors_done
     from productions p
     where p.owner_id = ${where.ownerId}
       ${where.id ? sql`and p.id = ${where.id}` : sql``}
@@ -72,9 +74,22 @@ export interface CharacterRow {
   name: string;
   aliases: string[];
   lineCount: number;
+  isGroup: boolean;
+  everyone: boolean;
+  memberIds: string[] | null;
 }
 
-export const characterView = (c: CharacterRow) => ({ id: c.id, name: c.name, aliases: c.aliases, lineCount: c.lineCount });
+// A group ("ANGELO, ESCALUS", "ALL") is a label for shared lines, never a part to take. lineCount
+// counts the lines a character says, shared ones included; a group's counts the lines it labels.
+export const characterView = (c: CharacterRow) => ({
+  id: c.id,
+  name: c.name,
+  aliases: c.aliases,
+  lineCount: c.lineCount,
+  group: c.isGroup,
+  everyone: c.everyone,
+  memberIds: c.memberIds ?? [],
+});
 
 export interface LineRow {
   id: string;
@@ -89,7 +104,10 @@ export interface LineRow {
   currentTakeId: string | null;
   sourceLine: number | null;
   sourcePage: number | null;
+  voiceIds: string[] | null; // a shared line's voices; null for one voice (the character)
 }
+
+export const voicesOf = (l: Pick<LineRow, "voiceIds" | "characterId">): string[] => l.voiceIds ?? (l.characterId ? [l.characterId] : []);
 
 export const lineView = (l: LineRow) => ({
   id: l.id,
@@ -103,19 +121,21 @@ export const lineView = (l: LineRow) => ({
   flagReason: l.flagged ? l.flagReason : null,
   sourceLine: l.sourceLine,
   page: l.sourcePage,
+  voiceIds: l.voiceIds, // who says a shared line, in order; null when only characterId does
 });
 
 export const sectionsOf = (sql: Sql, productionId: string) =>
   sql<SectionRow[]>`select id, seq, act, scene, title from sections where production_id = ${productionId} order by seq`;
 
 export const linesOf = (sql: Sql, productionId: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page
+  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page, voice_ids
                  from lines where production_id = ${productionId} order by seq`;
 
 export const charactersOf = (sql: Sql, productionId: string) =>
   sql<CharacterRow[]>`
-    select c.id, c.name, c.aliases,
-      (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue') as line_count
+    select c.id, c.name, c.aliases, c.is_group, c.everyone, c.member_ids,
+      case when c.is_group then (select count(*)::int from lines l where l.character_id = c.id and l.kind = 'dialogue')
+           else (select count(*)::int from line_voices lv where lv.character_id = c.id) end as line_count
     from characters c where c.production_id = ${productionId} order by lower(c.name)`;
 
 export interface TakeRow {
@@ -167,14 +187,13 @@ export async function castRows(sql: Sql, where: { productionId: string; actorId?
     select a.id, a.production_id, a.name, a.email, a.phone, a.token_version, a.first_name, a.opened_at, a.last_active_at, a.nudged_at, a.created_at,
       array(select ac.character_id from actor_characters ac join characters c on c.id = ac.character_id
             where ac.actor_id = a.id order by lower(c.name)) as character_ids,
-      (select count(*)::int from lines l join actor_characters ac on ac.character_id = l.character_id
-        where ac.actor_id = a.id and l.kind = 'dialogue') as lines_total,
-      (select count(*)::int from lines l join actor_characters ac on ac.character_id = l.character_id
-        where ac.actor_id = a.id and l.kind = 'dialogue' and ${actorRecorded(sql)}) as lines_recorded,
-      (select avg(t.stt_accuracy)::float8 from lines l join actor_characters ac on ac.character_id = l.character_id
-        cross join lateral (select stt_accuracy from takes x where x.line_id = l.id and x.recorded_by = 'actor'
-                            order by x.created_at desc limit 1) t
-        where ac.actor_id = a.id and l.kind = 'dialogue' and t.stt_accuracy is not null) as avg_accuracy
+      (select count(distinct lv.line_id)::int from line_voices lv join actor_characters ac on ac.character_id = lv.character_id
+        where ac.actor_id = a.id) as lines_total,
+      (select count(distinct lv.line_id)::int from line_voices lv join actor_characters ac on ac.character_id = lv.character_id
+        where ac.actor_id = a.id and ${voiceRecorded(sql)}) as lines_recorded,
+      (select avg(t.stt_accuracy)::float8 from line_voices lv join actor_characters ac on ac.character_id = lv.character_id
+        join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id, true)
+        where ac.actor_id = a.id and t.stt_accuracy is not null) as avg_accuracy
     from actors a
     where a.production_id = ${where.productionId} ${where.actorId ? sql`and a.id = ${where.actorId}` : sql``}
     order by a.created_at, a.id`;

@@ -12,7 +12,8 @@ import { useToast } from "../components/Toast";
 import { WordDiff } from "../components/WordDiff";
 import { plural } from "../lib/format";
 import { useResource } from "../lib/useResource";
-import { formatAccuracy, overallAccuracy, scoreLabel, verdict } from "../stt/score";
+import { saysLine, speakerLabel, voicesOf } from "../lib/voices";
+import { formatVerdictCounts, scoreLabel, verdict, VERDICT_RANK, verdictCounts } from "../stt/score";
 import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
 import { keepInView } from "./follow";
@@ -60,6 +61,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   const lineById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
   const characters = useMemo(() => [...(data?.characters ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [data]);
   const characterName = useMemo(() => new Map(characters.map((c) => [c.id, c.name])), [characters]);
+  const characterById = useMemo(() => new Map(characters.map((c) => [c.id, c])), [characters]);
   const myCharacterIds = useMemo(() => data?.myCharacterIds ?? [], [data]);
   const isActor = myCharacterIds.length > 0;
 
@@ -86,7 +88,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     for (const l of lines) {
       if (l.kind !== "dialogue" || !l.characterId) continue;
       const list = out.get(l.sectionId) ?? [];
-      if (!list.includes(l.characterId)) list.push(l.characterId);
+      for (const id of voicesOf(l)) if (!list.includes(id)) list.push(id);
       out.set(l.sectionId, list);
     }
     return out;
@@ -94,7 +96,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
 
   const mine = useMemo(() => {
     const ids = roleIds;
-    return new Set(lines.filter((l) => l.kind === "dialogue" && l.characterId && ids.has(l.characterId)).map((l) => l.id));
+    return new Set(lines.filter((l) => l.kind === "dialogue" && saysLine(l, ids)).map((l) => l.id));
   }, [roleIds, lines]);
   const hasRole = settings.role !== "";
   const part = useMemo<Part>(() => (hasRole ? { mine, mode: settings.mode } : NO_PART), [hasRole, mine, settings.mode]);
@@ -159,12 +161,15 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
   const currentSeq = currentLine?.seq ?? -Infinity;
 
-  // Keep the current line in view between the pinned row and the player bar, unless the listener
-  // has scrolled away. While it plays, LiveText keeps its current word in view the same way.
+  // Hold the current line at the follow height between the pinned row and the player bar, unless
+  // the listener has scrolled away. While it plays, LiveText holds the row being read there, so a
+  // long speech glides up a row at a time. Coming back to it ("Back to current line", or after a
+  // scroll by hand) picks up at the word being read, not the top of a long speech.
   useEffect(() => {
     if (!following || !currentSegment) return;
     const el = lineRefs.current.get(currentSegment.lineId);
-    if (el) keepInView(el, rootRef.current);
+    const target = el?.querySelector(".rw.is-now") ?? el?.querySelector(".lyric-text") ?? el;
+    if (target) keepInView(target, rootRef.current);
   }, [currentSegment, following]);
 
   const playingRef = useRef(false);
@@ -274,6 +279,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
           {isActor && <option value={MY_PART}>{ownNames ? `Me (${ownNames})` : "My part"}</option>}
           <option value="">Just listening</option>
           {characters
+            .filter((c) => !c.group)
             .filter((c) => !(isActor && myCharacterIds.length === 1 && c.id === myCharacterIds[0]))
             .map((c) => (
               <option key={c.id} value={c.id}>
@@ -355,7 +361,8 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                   const isMine = mine.has(line.id);
                   const skipped = isMine && settings.mode === "skip";
                   const inGap = isCurrent && state.gap !== null;
-                  const who = line.characterId ? characterName.get(line.characterId) : undefined;
+                  const label = speakerLabel(line, characterById);
+                  const who = label.name || undefined;
                   const result = practice.results.get(line.id);
                   const classes = [
                     "lyric",
@@ -388,6 +395,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                         {line.kind === "dialogue" && (
                           <span className="lyric-who">
                             {who && <CharacterName name={who} />}
+                            {label.voices && <span className="lyric-voices">{label.voices}</span>}
                             {isMine && <span className="sr-only">{skipped ? "(your line, silent)" : "(your line)"}</span>}
                             {result && (
                               <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>
@@ -551,7 +559,7 @@ function BarSelect({
 }
 
 function verdictClass(v: ReturnType<typeof verdict>): string {
-  return v === "good" ? "good" : v === "check" ? "check" : "bad";
+  return v === "complete" ? "good" : v === "partial" ? "check" : "bad";
 }
 
 function PracticeSummary({
@@ -569,14 +577,13 @@ function PracticeSummary({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const overall = overallAccuracy(results);
-  const sorted = [...results].sort((a, b) => a.accuracy - b.accuracy);
+  const counts = verdictCounts(results);
+  const sorted = [...results].sort((a, b) => VERDICT_RANK[verdict(a)] - VERDICT_RANK[verdict(b)]);
   return (
     <div className="stack practice-summary">
-      {overall !== null && (
+      {results.length > 0 && (
         <p className="summary-score">
-          <span className="display">{formatAccuracy(overall)}</span> of your words matched the script, across{" "}
-          {plural(results.length, "line")}
+          <span className="display summary-counts">{formatVerdictCounts(counts)}</span> across {plural(results.length, "line")}
         </p>
       )}
       {pending > 0 && <p className="small muted">Still checking {pending} more…</p>}

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { inferInBackground } from "../shared.ts";
 import type { Ctx } from "../context.ts";
 import type { Tx } from "../db.ts";
 import { ScriptInputError } from "./pdf.ts";
@@ -58,10 +59,12 @@ export async function runScriptParse(ctx: Ctx, scriptId: string): Promise<void> 
       const [latest] = await tx`select id from scripts where production_id = ${script.productionId} order by created_at desc limit 1 for update`;
       if (latest?.id !== scriptId) return false;
       await saveStructure(tx, script.productionId, structure);
+      await tx`select sync_shared_lines(${script.productionId})`;
       await tx`update scripts set status = 'ready', parser = ${usage.parser}, usage = ${JSON.stringify(usage)}::jsonb, completed_at = now() where id = ${scriptId}`;
       await tx`update productions set script_status = 'ready', script_error = null where id = ${script.productionId}`;
       return true;
     });
+    if (current) inferInBackground(ctx, script.productionId);
     if (!current) await ctx.sql`update scripts set status = 'failed', error = 'Replaced by a newer upload', completed_at = now() where id = ${scriptId}`;
   } catch (err) {
     const message = err instanceof ScriptInputError ? err.message : "Something went wrong while reading the script. Try again, or paste the text instead.";

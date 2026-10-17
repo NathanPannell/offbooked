@@ -3,7 +3,6 @@ import { CAPTURE_RATE, type LiveCapture } from "../audio/liveCapture";
 import {
   applyPass,
   decideAdvance,
-  matchedCount,
   nextPassInterval,
   passWindowSeconds,
   rmsDb,
@@ -11,7 +10,6 @@ import {
   startProgress,
   startVad,
   vadStep,
-  type AdvanceDecision,
 } from "./live";
 import { prepareForAsr } from "./prepare";
 import type { SttSession } from "./session";
@@ -44,20 +42,22 @@ interface Options {
   text: string;
   /** When false, words still light up but the take never stops by itself. */
   autoAdvance: boolean;
-  onDecision: (decision: Exclude<AdvanceDecision, "wait">, lineId: string, mode: LiveTakeView["mode"]) => void;
+  /** The actor has finished: stop, keep the take and move on. */
+  onAdvance: (lineId: string, mode: LiveTakeView["mode"]) => void;
 }
 
 /**
  * Follows the take that is recording: re-transcribes the growing audio every few hundred ms in the
  * speech worker, aligns it with the line to light up spoken words, and watches the mic level to
- * stop the take when the actor has finished. Without the model it only watches the level.
+ * end the take after a pause once the actor has spoken; the transcript only sets how long that
+ * pause is. Without the model it only watches the level.
  */
-export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvance, onDecision }: Options): LiveTakeView | null {
+export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvance, onAdvance }: Options): LiveTakeView | null {
   const [view, setView] = useState<LiveTakeView | null>(null);
   const autoRef = useRef(autoAdvance);
   autoRef.current = autoAdvance;
-  const decideRef = useRef(onDecision);
-  decideRef.current = onDecision;
+  const advanceRef = useRef(onAdvance);
+  advanceRef.current = onAdvance;
   const textRef = useRef(text);
   textRef.current = text;
 
@@ -89,14 +89,13 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
         mode,
         totalTokens: tokens.length,
         cursor: progress.cursor,
-        matched: matchedCount(progress),
         speechMs: vad.speechMs,
         silenceMs: vad.silenceMs,
         caughtUp: covered >= (vad.lastSpeechAtMs / 1000) * CAPTURE_RATE,
       });
       if (decision === "wait") return;
       decided = true;
-      decideRef.current(decision, lineId, mode);
+      advanceRef.current(lineId, mode);
     };
 
     // Mic level: from the captured samples, or by polling the level meter where AudioWorklet is missing.
