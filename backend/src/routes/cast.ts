@@ -142,6 +142,18 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
     };
   });
 
+  // Takes a part away from whoever has it. Their takes stay and keep playing; the part is free again
+  // for someone else to pick up and record the rest (or record over).
+  app.post("/api/productions/:id/characters/:characterId/unassign", async (req, reply) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const characterId = idOf(req.params, "characterId");
+    const [c] = await sql`select 1 from characters where id = ${characterId} and production_id = ${p.id}`;
+    if (!c) throw notFound("Character not found.");
+    await sql`delete from actor_characters where character_id = ${characterId}`;
+    return reply.code(204).send();
+  });
+
   app.post("/api/cast/:actorId/nudged", async (req) => {
     const user = await requireDirector(ctx, req);
     const actor = await ownedActor(sql, user, idOf(req.params, "actorId"));

@@ -20,12 +20,7 @@ describe("nextStep", () => {
     expect(nextStep(production({ scriptStatus: "failed" }))).toMatchObject({ action: "Try the script again" });
   });
 
-  it("asks for a check while lines are flagged, until recording starts", () => {
-    expect(nextStep(production(), 3)).toMatchObject({ status: "3 lines to check", tab: "script" });
-    expect(nextStep(production({}, { actorsTotal: 2, linesRecorded: 4 }), 3)).toMatchObject({ tab: "cast" });
-  });
-
-  it("then the cast link, then progress, then listening", () => {
+  it("once the script is read, the cast link, then progress, then listening", () => {
     expect(nextStep(production())).toMatchObject({ action: "Share the cast link", tab: "cast", step: 1 });
     expect(nextStep(production({}, { actorsTotal: 2 }))).toMatchObject({ status: "100 lines to go", action: "Check who's joined" });
     expect(nextStep(production({}, { actorsTotal: 2, linesRecorded: 99 }))).toMatchObject({ status: "1 line to go", action: "See who's recorded" });

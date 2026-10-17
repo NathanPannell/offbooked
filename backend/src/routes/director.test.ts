@@ -41,7 +41,12 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     const full = (await get(`/api/productions/${pid}/script`)).json();
     assert.equal(full.status, "ready");
     assert.equal(full.error, null);
-    assert.equal(full.flaggedCount, full.lines.filter((l: { flagged: boolean }) => l.flagged).length);
+    // No script review: the parse is taken as read, so nothing is flagged.
+    assert.equal(full.flaggedCount, 0);
+    assert.ok(
+      full.lines.every((l: { flagged: boolean; flagCode: string | null; flagReason: string | null }) => !l.flagged && l.flagCode === null && l.flagReason === null),
+      "parsed lines are never flagged",
+    );
     assert.deepEqual(full.lines.map((l: { seq: number }) => l.seq), full.lines.map((_: unknown, i: number) => i + 1));
     const [stored] = await t.ctx.sql`select storage_key, parser from scripts where production_id = ${pid}`;
     assert.equal(stored!.parser, "heuristic");
@@ -121,9 +126,9 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     await reload();
     assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
 
-    const flagged = script.lines.find((l) => l.flagged)!;
-    assert.ok(["speaker", "missed_cue", "direction", "text", "heading", "backup"].includes((flagged as { flagCode?: string }).flagCode!), "flagged lines carry a standard code");
-    const resolved = (await send("POST", `/api/lines/${flagged.id}/resolve`)).json().line;
+    // Resolve stays for compatibility; on an unflagged line it changes nothing.
+    const plain = script.lines.find((l) => l.kind === "dialogue")!;
+    const resolved = (await send("POST", `/api/lines/${plain.id}/resolve`)).json().line;
     assert.deepEqual([resolved.flagged, resolved.flagCode, resolved.flagReason], [false, null, null]);
   });
 

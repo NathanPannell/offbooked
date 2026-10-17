@@ -1,5 +1,5 @@
 import { request, type Auth } from "./client";
-import type { ActorLine, Invite, LineAudio, LineAudioApi, PracticeResult, RunThrough, Section, SttResult, Take } from "./types";
+import type { ActorLine, FreePart, Invite, LineAudio, LineAudioApi, PracticeResult, RunThrough, Section, SttResult, Take } from "./types";
 
 export interface TakeUploadResult {
   take: Take;
@@ -13,6 +13,10 @@ export function actorApi(token: string) {
   return {
     invite: () => request<Invite>("/invite", { auth }),
     start: (firstName: string) => request<void>("/invite/start", { auth, json: { firstName } }),
+    /** Free parts to pick up, and picking them up. */
+    parts: () => request<{ parts: FreePart[] }>("/invite/parts", { auth }),
+    pickUp: (characterIds: string[]) =>
+      request<{ characters: { id: string; name: string }[] }>("/invite/parts", { auth, json: { characterIds } }),
     /** Fixes the actor's name (it shows on the call sheet). */
     rename: (name: string) =>
       request<{ actor: { id: string; name: string; firstName: string } }>("/invite/me", { method: "PATCH", auth, json: { name } }),

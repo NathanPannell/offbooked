@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Copy, Headphones, Merge, Mic, MoreHorizontal, Share2, Users } from "lucide-react";
+import { Check, ChevronDown, Copy, Headphones, Merge, Mic, MoreHorizontal, Share2, UserMinus, Users } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { errorMessage } from "../../api/client";
@@ -149,7 +149,9 @@ function SheetRow({
   onRecord: () => void;
   onMerged: () => void;
 }) {
-  const [merging, setMerging] = useState(false);
+  /** The row's ⋯ menu, or one of its forms. */
+  const [panel, setPanel] = useState<null | "menu" | "merge" | "unassign">(null);
+  const merging = panel !== null;
   const done = part.linesRecorded >= part.lineCount;
   const state = done ? "is-done" : part.takenBy ? "is-taken" : "is-open";
   const shared = part.sharedLines ?? 0;
@@ -200,24 +202,99 @@ function SheetRow({
           className="icon-btn sheet-more"
           aria-label={`More for ${part.name}`}
           aria-expanded={merging}
-          onClick={() => setMerging((m) => !m)}
+          onClick={() => setPanel((p) => (p ? null : "menu"))}
         >
           <MoreHorizontal size={18} />
         </button>
       </div>
-      {merging && (
+      {panel === "menu" && (
+        <div className="sheet-menu" role="menu" aria-label={`${part.name} options`}>
+          <button type="button" role="menuitem" className="sheet-menu-item" onClick={() => setPanel("merge")}>
+            <Merge size={16} aria-hidden="true" /> Merge into another part…
+          </button>
+          {part.takenBy && (
+            <button type="button" role="menuitem" className="sheet-menu-item" onClick={() => setPanel("unassign")}>
+              <UserMinus size={16} aria-hidden="true" /> Unassign {part.mine ? "yourself" : part.takenBy}…
+            </button>
+          )}
+        </div>
+      )}
+      {panel === "unassign" && (
+        <UnassignForm
+          productionId={productionId}
+          part={part}
+          onCancel={() => setPanel(null)}
+          onDone={() => {
+            setPanel(null);
+            onMerged();
+          }}
+        />
+      )}
+      {panel === "merge" && (
         <MergeForm
           part={part}
           choices={parts.filter((c) => c.id !== part.id)}
           suggestion={suggestion}
-          onCancel={() => setMerging(false)}
+          onCancel={() => setPanel(null)}
           onMerged={() => {
-            setMerging(false);
+            setPanel(null);
             onMerged();
           }}
         />
       )}
     </li>
+  );
+}
+
+/**
+ * Takes a part away from whoever has it, so someone else can pick it up. What they recorded stays
+ * and keeps playing; the new person records the rest, or over it.
+ */
+function UnassignForm({
+  productionId,
+  part,
+  onCancel,
+  onDone,
+}: {
+  productionId: string;
+  part: CallSheetCharacter;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const who = part.mine ? "You" : part.takenBy;
+  const name = titleCase(part.name);
+  const unassign = async () => {
+    setBusy(true);
+    try {
+      await castApi.unassign(productionId, part.id);
+      toast(`${name} is free for someone else to pick up`);
+      onDone();
+    } catch (err) {
+      toast(errorMessage(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="sheet-merge">
+      <p className="small">
+        <strong>
+          {who} {part.mine ? "stop" : "stops"} playing {name}.
+        </strong>{" "}
+        {part.linesRecorded > 0
+          ? `The ${plural(part.linesRecorded, "line")} already recorded keep playing. Whoever picks up ${name} from the cast link records the other ${plural(Math.max(0, part.lineCount - part.linesRecorded), "line")} and can record over ${part.mine ? "yours" : `${part.takenBy}'s`}.`
+          : `Whoever picks up ${name} from the cast link records its ${plural(part.lineCount, "line")}.`}
+      </p>
+      <div className="row">
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void unassign()}>
+          <UserMinus size={15} aria-hidden="true" /> {busy ? "Unassigning…" : `Unassign ${part.mine ? "me" : part.takenBy}`}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

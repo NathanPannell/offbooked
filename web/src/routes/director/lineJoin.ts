@@ -1,4 +1,4 @@
-import type { FlagCode, Line, LineKind } from "../../api/types";
+import type { Line, LineKind } from "../../api/types";
 
 // Joining two neighbouring lines and splitting one, as the review shows and undoes them.
 // The server joins the lower line into the upper one with a newline; the upper line keeps its id,
@@ -61,9 +61,6 @@ export function canJoinAtSeam(upper: Line | undefined, lower: Line | undefined):
 export interface SplitSecond {
   kind: LineKind;
   characterId: string | null;
-  flagged: boolean;
-  flagCode?: FlagCode | null;
-  flagReason: string | null;
   sourceLine?: number | null;
   sourcePage?: number | null;
 }
@@ -71,7 +68,7 @@ export interface SplitSecond {
 export interface UndoJoin {
   /** Split the joined line here (the end of the upper line's text). */
   at: number;
-  /** What the lower line was, so the split brings it back exactly (speaker, flag, place in the source). */
+  /** What the lower line was, so the split brings it back exactly (speaker and place in the source). */
   second: SplitSecond;
 }
 
@@ -81,9 +78,6 @@ export function undoJoin(upper: Line, lower: Line): UndoJoin {
     second: {
       kind: lower.kind,
       characterId: lower.kind === "dialogue" ? lower.characterId : null,
-      flagged: lower.flagged,
-      flagCode: lower.flagCode ?? null,
-      flagReason: lower.flagReason,
       sourceLine: lower.sourceLine ?? null,
       sourcePage: lower.page ?? null,
     },

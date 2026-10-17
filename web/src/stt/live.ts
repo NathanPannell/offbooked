@@ -20,18 +20,30 @@ export interface LineWords {
 
 /** Splits a line into renderable pieces and the words to listen for. An unclosed "[" runs to the end. */
 export function segmentLine(text: string): LineWords {
-  const pieces: LinePiece[] = [];
-  const tokens: string[] = [];
+  const raw: { kind: LinePiece["kind"]; text: string }[] = [];
   const pattern = /\[[^\]]*\]?|\s+|[^\s[]+/g;
   for (const match of text.matchAll(pattern)) {
     const part = match[0];
+    raw.push({ kind: part.startsWith("[") ? "direction" : /^\s+$/.test(part) ? "space" : "word", text: part });
+  }
+  // A (parenthesised) direction that opens or closes the line isn't said either.
+  const words = raw.flatMap((p, i) => (p.kind === "word" ? [i] : []));
+  if (words.length && raw[words[0]!]!.text.startsWith("(")) {
+    const end = words.findIndex((i) => raw[i]!.text.includes(")"));
+    if (end >= 0) for (const i of words.slice(0, end + 1)) raw[i]!.kind = "direction";
+  }
+  const lastWord = words[words.length - 1];
+  if (lastWord !== undefined && raw[lastWord]!.kind === "word" && raw[lastWord]!.text.endsWith(")")) {
+    let k = words.length - 1;
+    while (k > 0 && !raw[words[k]!]!.text.startsWith("(")) k--;
+    if (raw[words[k]!]!.text.startsWith("(")) for (const i of words.slice(k)) raw[i]!.kind = "direction";
+  }
+  const pieces: LinePiece[] = [];
+  const tokens: string[] = [];
+  for (const p of raw) {
     const at = tokens.length;
-    if (part.startsWith("[")) pieces.push({ kind: "direction", text: part, tokenStart: at, tokenEnd: at });
-    else if (/^\s+$/.test(part)) pieces.push({ kind: "space", text: part, tokenStart: at, tokenEnd: at });
-    else {
-      for (const w of displayWords(part)) tokens.push(...normalizeDisplayWord(w));
-      pieces.push({ kind: "word", text: part, tokenStart: at, tokenEnd: tokens.length });
-    }
+    if (p.kind === "word") for (const w of displayWords(p.text)) tokens.push(...normalizeDisplayWord(w));
+    pieces.push({ kind: p.kind, text: p.text, tokenStart: at, tokenEnd: tokens.length });
   }
   return { pieces, tokens };
 }

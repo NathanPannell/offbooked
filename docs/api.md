@@ -333,3 +333,19 @@ A line several characters say together ("ANGELO, ESCALUS", "ALL", "BOTH") is a *
 | GET | `/api/productions/:id/characters/:characterId/lines` | director (own production) | `{ character: { id, name }, sections, lines: SectionLine[] }`: a character's studio, every line they say (shared ones too), each like a scene's stand-in line plus `together` and `voiceId` (set on shared lines). |
 
 - Deleting a take only hides it (`takes.deleted_at`). Like every recording, its audio is kept, and restore brings it back.
+
+### No script review (2026-10-17)
+
+The parse is taken as read: there is no review step. Lines are saved unflagged, so `flagged` is always `false`, `flagCode` and `flagReason` are always `null` and `flaggedCount` is `0`. The fields, `POST /api/lines/:id/resolve` and the `flagged`/`flagCode`/`flagReason` inputs stay for compatibility. Migration `012_no_review.sql` cleared existing flags. The parser still works out flags internally (`flags.ts`); they are not stored.
+
+### Taking over a part, picking up more, recording over placeholders (2026-10-17)
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| POST | `/api/productions/:id/characters/:characterId/unassign` | director (own production) | 204. Takes the part away from whoever has it. Their takes stay and keep playing (and still count for the part); the part is free on the cast link and for picking up. |
+| GET | `/api/invite/parts` | invite | `{ parts: { id, name, lineCount, linesNeeded }[] }`: free parts (no group, nobody has it), most lines needing a voice first. `linesNeeded` counts lines no cast member has recorded. |
+| POST | `/api/invite/parts` | invite | `{ characterIds }` → `{ characters: { id, name }[] }` (all the actor's parts now). 409 `character_taken` if one was taken meanwhile. |
+
+- `GET /api/invite/lines` items gain `current: { source: "actor" | "standin", by: string | null, audioUrl } | null`: what plays now on the line when it isn't the actor's own take (a stand-in, or a take by whoever had the part before; `by` is their first name). `take` is now only the actor's own take, on every line.
+- The recorder counts a line as done once it has the actor's own take or an earlier cast member's (which they can record over); a stand-in or the computer voice still needs them.
+- Scoring leaves stage directions out of the words to say: anything in `[brackets]`, and a `(parenthesised)` direction that opens or closes the line.

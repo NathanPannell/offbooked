@@ -11,6 +11,7 @@ import { firstWord, joinNames, plural } from "../../lib/format";
 import { forgetJoin, joinTokenForInvite } from "../../lib/joinMemory";
 import { useResource } from "../../lib/useResource";
 import { usePrewarmStt } from "../../stt/useStt";
+import { Onboarding, onboardingSeen } from "./Onboarding";
 import { RecordSession } from "./RecordSession";
 
 export default function InvitePage() {
@@ -18,6 +19,7 @@ export default function InvitePage() {
   const api = useMemo(() => actorApi(token), [token]);
   const invite = useResource(() => api.invite(), token);
   const [started, setStarted] = useState(false);
+  const [intro, setIntro] = useState(() => !onboardingSeen());
   // Load the speech model while they read the welcome and type a name.
   usePrewarmStt(!!invite.data);
 
@@ -39,6 +41,16 @@ export default function InvitePage() {
 
   const data = invite.data;
   const alreadyStarted = started || data.actor.firstName !== null || data.linesRecorded > 0;
+  if (!alreadyStarted && intro) {
+    return (
+      <Onboarding
+        productionTitle={data.production.title}
+        directorName={data.production.directorName}
+        finishLabel="Get started"
+        onDone={() => setIntro(false)}
+      />
+    );
+  }
   if (!alreadyStarted) return <Welcome invite={data} onStart={async (firstName) => {
     await api.start(firstName);
     setStarted(true);
@@ -49,6 +61,7 @@ export default function InvitePage() {
       api={api}
       invite={data}
       onRenamed={(actor) => invite.setData({ ...data, actor: { ...data.actor, name: actor.name, firstName: actor.firstName } })}
+      onPartsChanged={(characters) => invite.setData({ ...data, characters })}
     />
   );
 }

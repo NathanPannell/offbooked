@@ -45,9 +45,9 @@ describe("joining lines", () => {
 
   it("undoes a join by splitting where the upper text ended and restoring the lower line as it was", () => {
     const upper = line(1, { text: "Hail" });
-    expect(undoJoin(upper, line(2, { characterId: "m", flagged: true, flagReason: "who?", sourceLine: 7, page: 2 }))).toEqual({
+    expect(undoJoin(upper, line(2, { characterId: "m", sourceLine: 7, page: 2 }))).toEqual({
       at: 4,
-      second: { kind: "dialogue", characterId: "m", flagged: true, flagCode: null, flagReason: "who?", sourceLine: 7, sourcePage: 2 },
+      second: { kind: "dialogue", characterId: "m", sourceLine: 7, sourcePage: 2 },
     });
     expect(undoJoin(upper, line(2, { kind: "stage_direction", characterId: "m" })).second.characterId).toBeNull();
   });
