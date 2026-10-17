@@ -140,6 +140,27 @@ export function LineCard({
       </button>
       {recording && liveHint && <p className="live-hint">{liveHint}</p>}
 
+      {!recorded && !recording && actorLine.current && (
+        <div className="take-bar placeholder-bar">
+          <button
+            type="button"
+            className={`take-play is-placeholder${playing === `now:${line.id}` ? " is-playing" : ""}`}
+            onClick={() => onPlay(`now:${line.id}`, actorLine.current!.audioUrl)}
+            aria-label={`${playing === `now:${line.id}` ? "Pause" : "Play"} what plays now`}
+          >
+            {playing === `now:${line.id}` ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
+            <span>{actorLine.current.source === "actor" ? `${actorLine.current.by ?? "Earlier"}'s take` : "Stand-in"}</span>
+          </button>
+          <span className="small muted grow placeholder-note">
+            {actorLine.current.source === "actor" ? "Plays for now. Record over it any time." : "Plays until you record yours."}
+          </span>
+          {actorLine.current.source === "actor" && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onRerecord}>
+              <RotateCcw size={15} aria-hidden="true" /> Record over
+            </button>
+          )}
+        </div>
+      )}
       {recorded && !recording && (
         <div className="take-bar">
           {takeUrl ? (

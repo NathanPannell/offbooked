@@ -131,9 +131,10 @@ async function saveStructure(tx: Tx, productionId: string, s: StructuredScript):
     kind: l.kind,
     characterId: l.character ? characterIds.get(l.character)! : null,
     text: l.text,
-    flagged: l.flagCode !== null,
-    flagCode: l.flagCode,
-    flagReason: l.flagReason,
+    // No script review: the parser's flags are not stored, the parse is taken as read.
+    flagged: false,
+    flagCode: null,
+    flagReason: null,
     sourceLine: l.sourceLine,
     sourcePage: l.page,
   }));

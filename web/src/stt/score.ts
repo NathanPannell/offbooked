@@ -130,9 +130,40 @@ export function normalizeDisplayWord(word: string): string[] {
   return cleaned.split(/\s+/).filter(Boolean).flatMap(expandToken);
 }
 
-/** Normalized comparison words, each tagged with the index of the written word it came from. */
+/**
+ * Which written words are stage directions, never said: anything in [brackets] (an unclosed "["
+ * runs to the end), and a (parenthesised) direction that opens or closes the line.
+ */
+export function directionWords(words: readonly string[]): boolean[] {
+  const out = words.map(() => false);
+  let inBracket = false;
+  words.forEach((w, i) => {
+    if (w.includes("[")) inBracket = true;
+    if (inBracket) out[i] = true;
+    if (inBracket && w.lastIndexOf("]") > w.lastIndexOf("[")) inBracket = false;
+  });
+  // A leading "(to Escalus)" and a trailing "(Exit.)".
+  if (words[0]?.startsWith("(")) {
+    const end = words.findIndex((w) => w.includes(")"));
+    if (end >= 0) for (let i = 0; i <= end; i++) out[i] = true;
+  }
+  const last = words.length - 1;
+  if (last >= 0 && words[last]!.endsWith(")")) {
+    let start = last;
+    while (start > 0 && !words[start]!.startsWith("(")) start--;
+    if (words[start]!.startsWith("(")) for (let i = start; i <= last; i++) out[i] = true;
+  }
+  return out;
+}
+
+/**
+ * Normalized comparison words, each tagged with the index of the written word it came from. Stage
+ * directions are left out, so a take that skips "[He sits.]" still counts as the whole line.
+ */
 export function tokenize(text: string): { word: string; display: number }[] {
-  return displayWords(text).flatMap((w, display) => normalizeDisplayWord(w).map((word) => ({ word, display })));
+  const words = displayWords(text);
+  const skip = directionWords(words);
+  return words.flatMap((w, display) => (skip[display] ? [] : normalizeDisplayWord(w).map((word) => ({ word, display }))));
 }
 
 export function normalizeWords(text: string): string[] {

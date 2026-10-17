@@ -1,9 +1,8 @@
-import { AlertTriangle, Check, FileText, Scissors, Trash2, X } from "lucide-react";
+import { Check, FileText, Scissors, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { script as api } from "../../api/director";
 import type { Character, Line, LineKind } from "../../api/types";
 import { characterHue } from "../../lib/format";
-import { flagLabel } from "./flagNav";
 import { splitTokens } from "./lineJoin";
 import { caretOffsetAt, splitAtCaret, textRuns } from "./lineText";
 import { keepFieldInView } from "./reviewScroll";
@@ -36,20 +35,6 @@ export function LineText({ text, kind }: { text: string; kind: LineKind }) {
   );
 }
 
-/** What to check on a flagged line: a chip with the reason, and the parser's note when it left one. */
-export function FlagNote({ line, id }: { line: Line; id: string }) {
-  const label = flagLabel(line);
-  const note = line.flagReason && line.flagReason !== label ? line.flagReason : null;
-  return (
-    <span className="flag-note" id={id}>
-      <span className="flag-chip">
-        <AlertTriangle size={12} aria-hidden="true" /> {label}
-      </span>
-      {note && <span className="flag-detail">{note}</span>}
-    </span>
-  );
-}
-
 /** Where a click on a line's text landed, so editing can start with the caret there. */
 export const caretFromClick = (e: MouseEvent<HTMLElement>): number | null => {
   const text = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".script-text") ?? e.currentTarget;
@@ -68,8 +53,6 @@ export function LineEditor({
   actions,
   startText,
   onKey,
-  onApprove,
-  onFixed,
   onClose,
   onDelete,
   onSplit,
@@ -85,11 +68,8 @@ export function LineEditor({
   actions: ReviewActions;
   /** Start editing the text with the caret here when the line opens ("end" for the end). */
   startText: number | "end" | null;
-  /** Keys on the line itself (approve, move between flags). */
+  /** Keys on the line itself (move between lines). */
   onKey: (e: KeyboardEvent, line: Line) => void;
-  onApprove: () => void;
-  /** A change fixed the line: the review moves on if it was flagged. */
-  onFixed: () => void;
   onClose: () => void;
   onDelete: () => void;
   /** The line was split: carry on with the new second part. */
@@ -128,7 +108,7 @@ export function LineEditor({
   // Grow with the text, and put the caret where the click was.
   useLayoutEffect(() => {
     if (draft === null && refocus.current) {
-      // Back from typing: keys go to the line again (Enter approves, J and K move).
+      // Back from typing: keys go to the line again (E edits, the arrows move).
       refocus.current = false;
       rowRef.current?.focus({ preventScroll: true });
     }
@@ -179,12 +159,11 @@ export function LineEditor({
     if (how === "enter") focusRow();
     if (next === line.text || !next.trim()) return;
     setSaving(next);
-    const ok = await run(() => api.updateLine(line.id, { text: next }), {
+    await run(() => api.updateLine(line.id, { text: next }), {
       label: "Text changed",
-      run: () => api.updateLine(line.id, { text: line.text, ...flagBack }),
+      run: () => api.updateLine(line.id, { text: line.text }),
     });
     setSaving(null);
-    if (ok && how === "enter") onFixed();
   };
 
   const cancel = () => {
@@ -220,27 +199,23 @@ export function LineEditor({
 
   // ---- type and speaker ----
 
-  // Undo puts the content back and the flag with it (an edit clears the flag).
-  const flagBack = { flagged: line.flagged, flagCode: line.flagCode ?? null, flagReason: line.flagReason };
-  const restore = { characterId: line.characterId, kind: line.kind, text: line.text, ...flagBack };
+  // Undo puts the content back.
+  const restore = { characterId: line.characterId, kind: line.kind, text: line.text };
 
   const setKind = async (kind: LineKind) => {
     if (kind === line.kind) return;
-    const ok = await run(() => api.updateLine(line.id, { kind }), {
+    await run(() => api.updateLine(line.id, { kind }), {
       label: `Marked as ${KINDS.find((k) => k.kind === kind)!.label.toLowerCase()}`,
       run: () => api.updateLine(line.id, restore),
     });
-    // A new spoken line gets a guessed speaker: leave it open to check the guess.
-    if (ok && kind !== "dialogue") onFixed();
   };
 
   const pick = async (character: Character) => {
     if (character.id === line.characterId) return;
-    const ok = await run(() => api.updateLine(line.id, { characterId: character.id, kind: "dialogue" }), {
+    await run(() => api.updateLine(line.id, { characterId: character.id, kind: "dialogue" }), {
       label: `Speaker set to ${character.name}`,
-      run: () => api.updateLine(line.id, { characterId: restore.characterId, kind: restore.kind, ...flagBack }),
+      run: () => api.updateLine(line.id, { characterId: restore.characterId, kind: restore.kind }),
     });
-    if (ok) onFixed();
   };
 
   const createAndPick = async (raw: string) => {
@@ -255,22 +230,16 @@ export function LineEditor({
       const { character } = await api.createCharacter(productionId, name);
       await api.updateLine(line.id, { characterId: character.id, kind: "dialogue" });
     });
-    if (ok) {
-      setAdding(null);
-      onFixed();
-    }
+    if (ok) setAdding(null);
   };
 
   const saveTogether = async (ids: string[]) => {
-    const was = { characterId: restore.characterId, kind: restore.kind, ...flagBack, ...(speaker?.everyone ? { voiceIds: line.voiceIds ?? null } : {}) };
+    const was = { characterId: restore.characterId, kind: restore.kind, ...(speaker?.everyone ? { voiceIds: line.voiceIds ?? null } : {}) };
     const ok = await run(() => api.updateLine(line.id, { kind: "dialogue", voiceIds: ids }), {
       label: speaker?.everyone ? "Updated who says it" : "Shared line",
       run: () => api.updateLine(line.id, was),
     });
-    if (ok) {
-      setTogether(null);
-      onFixed();
-    }
+    if (ok) setTogether(null);
   };
 
   const nearbyIds = new Set(nearby.map((c) => c.id));
@@ -316,8 +285,7 @@ export function LineEditor({
   const keepFocus = (e: MouseEvent) => e.preventDefault();
   const typing = draft !== null && draft !== line.text;
 
-  const classes = ["script-row", `kind-${line.kind}`, line.flagged && "is-flagged", "is-selected", "is-open"].filter(Boolean).join(" ");
-  const reasonId = `reason-${line.id}`;
+  const classes = ["script-row", `kind-${line.kind}`, "is-selected", "is-open"].join(" ");
 
   return (
     <div className={classes}>
@@ -327,7 +295,6 @@ export function LineEditor({
         tabIndex={0}
         role="group"
         aria-label="Line being edited"
-        aria-describedby={line.flagged ? reasonId : undefined}
         onKeyDown={onRowKey}
       >
         <div className="line-controls">
@@ -513,14 +480,7 @@ export function LineEditor({
             <LineText text={saving ?? line.text} kind={line.kind} />
           </span>
         )}
-
-        {line.flagged && <FlagNote line={line} id={reasonId} />}
       </div>
-      {line.flagged && (
-        <button type="button" className="approve-btn" onClick={onApprove} aria-label="Looks right" title="Looks right (Enter)">
-          <Check size={18} strokeWidth={3} />
-        </button>
-      )}
     </div>
   );
 }

@@ -1439,7 +1439,7 @@
   gap: var(--s-4);
 }
 
-/* The script page pins one row under the tabs: Next on the left, scenes on the right. */
+/* The script page pins one row under the tabs: sharing with the cast on the left, scenes on the right. */
 .review-bar {
   position: sticky;
   top: var(--steps-pin, 0px);
@@ -1455,68 +1455,9 @@
   border-bottom: 1px solid var(--line);
 }
 
-.flag-nav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px 3px 3px 14px;
-  border: 1px solid var(--flag-line);
-  border-radius: var(--radius);
-  background: var(--flag-soft);
-}
-
-.flag-nav.is-clear {
-  border-color: #cfe3d6;
-  background: var(--good-soft);
-  gap: var(--s-3);
-}
-
-.flag-nav .icon-btn {
-  width: 38px;
-  height: 38px;
-  color: var(--ink);
-}
-
-.flag-nav .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.7);
-}
-
-.flag-nav .btn {
-  margin-left: 4px;
-}
-
-.flag-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-right: 6px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.flag-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--sun);
-}
-
 .review-next {
   flex: none;
   gap: 10px;
-}
-
-.review-next .flag-dot {
-  background: #fff;
-  opacity: 0.85;
-}
-
-.review-next-count {
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.2);
-  font-size: var(--text-sm);
-  font-weight: 600;
 }
 
 .review-bar .section-nav {
@@ -1739,23 +1680,8 @@
   color: var(--muted);
 }
 
-.script-row.is-flagged {
-  background: var(--flag-soft);
-  box-shadow: inset 3px 0 0 var(--sun);
-}
-
-.script-row.is-flagged:hover {
-  background: #f9efd7;
-}
-
 .script-row.is-selected {
   box-shadow: inset 0 0 0 1px var(--edge-strong);
-}
-
-.script-row.is-flagged.is-selected {
-  box-shadow:
-    inset 3px 0 0 var(--sun),
-    inset 0 0 0 1px var(--edge-strong);
 }
 
 /* Room above and below the open line for the join controls on the breaks around it. */
@@ -1765,41 +1691,6 @@
   box-shadow:
     inset 0 0 0 1px var(--edge-strong),
     var(--shadow);
-}
-
-.script-row.is-flagged.is-open {
-  background: #fff;
-  box-shadow:
-    inset 3px 0 0 var(--sun),
-    inset 0 0 0 1px var(--edge-strong),
-    var(--shadow);
-}
-
-/* What to check on a flagged line: a chip, and the parser's note when it left one. */
-.flag-note {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 8px;
-  margin-top: 4px;
-}
-
-.flag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 22px;
-  padding: 0 9px;
-  border: 1px solid var(--flag-line);
-  border-radius: var(--radius-pill);
-  background: #fff;
-  font: 600 12px/1.2 var(--font-sans);
-  color: var(--flag);
-}
-
-.flag-detail {
-  font: 500 12.5px/1.4 var(--font-sans);
-  color: var(--muted);
 }
 
 /* [Bracketed] directions inside a spoken line. */
@@ -1962,84 +1853,6 @@
   box-shadow:
     0 0 0 4px #fff,
     0 0 0 5px var(--accent);
-}
-
-/* The counts of each reason in the review bar; one picks what J and K walk. */
-.flag-filters {
-  order: 3;
-  flex-basis: 100%;
-  display: flex;
-  gap: 6px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.flag-filter {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-pill);
-  background: #fff;
-  font: 600 12.5px/1 var(--font-sans);
-  color: var(--ink-soft);
-  cursor: pointer;
-  transition:
-    background var(--fast) var(--ease),
-    border-color var(--fast) var(--ease);
-}
-
-.flag-filter .nums {
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.flag-filter:hover {
-  border-color: var(--edge-strong);
-}
-
-.flag-filter[aria-pressed="true"] {
-  border-color: var(--flag-line);
-  background: var(--flag-soft);
-  color: var(--flag);
-  box-shadow: inset 0 0 0 1px var(--flag-line);
-}
-
-.flag-filter[aria-pressed="true"] .nums {
-  color: var(--flag);
-}
-
-.approve-btn {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: var(--tap);
-  height: var(--tap);
-  margin: 4px 4px 4px 0;
-  border: 1px solid var(--edge);
-  border-radius: 50%;
-  background: #fff;
-  color: var(--ink-soft);
-  box-shadow: var(--shadow-sm);
-  cursor: pointer;
-  transition:
-    background var(--fast) var(--ease),
-    border-color var(--fast) var(--ease),
-    color var(--fast) var(--ease);
-}
-
-.approve-btn:hover {
-  border-color: #b8d6c3;
-  background: var(--good-soft);
-  color: var(--good);
-}
-
-.approve-btn:active {
-  transform: translateY(1px);
 }
 
 /* The break between two lines: hover or focus shows "Join" right where the break is. */
@@ -2721,6 +2534,85 @@
 
 .studio-scene {
   margin: var(--s-5) 0 var(--s-2);
+}
+
+/* A call-sheet row's ⋯ menu. */
+.sheet-menu {
+  display: flex;
+  flex-direction: column;
+  margin: var(--s-2) 0 var(--s-1) auto;
+  width: max-content;
+  max-width: 100%;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.sheet-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 44px;
+  padding: 0 var(--s-3);
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheet-menu-item:hover,
+.sheet-menu-item:focus-visible {
+  background: var(--paper);
+}
+
+/* What plays now on a line the actor hasn't recorded: a stand-in, or an earlier cast member's take. */
+.placeholder-bar {
+  border-top-style: dashed;
+}
+
+.take-play.is-placeholder {
+  border-style: dashed;
+  color: var(--ink-soft);
+}
+
+.placeholder-note {
+  min-width: 10em;
+}
+
+/* Picking up more parts (recorder dialog, wrapped screen, no lines left). */
+.pick-up {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.pick-up-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.pick-up-list li {
+  border-bottom: 1px solid var(--line);
+}
+
+.pick-up-part {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 52px;
+  padding: 6px 2px;
+}
+
+.pick-up .btn {
+  align-self: flex-start;
 }
 
 .sheet-part {

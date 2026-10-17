@@ -259,6 +259,20 @@ export interface ActorLine {
   take: Take | null;
   /** A shared line: the others who say it. Empty (or missing) for a line of one's own. */
   together?: Together[];
+  /**
+   * What plays now when it isn't the actor's own take: a director's stand-in, or a take by whoever
+   * had the part before. Null when the actor has a take, or the line is still the computer voice.
+   */
+  current?: { source: "actor" | "standin"; by: string | null; audioUrl: string } | null;
+}
+
+/** A part nobody has, that an actor can pick up. */
+export interface FreePart {
+  id: string;
+  name: string;
+  lineCount: number;
+  /** Lines no one from the cast has recorded yet. */
+  linesNeeded: number;
 }
 
 export interface PracticeResult extends SttResult {

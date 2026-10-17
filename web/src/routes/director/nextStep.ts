@@ -15,8 +15,8 @@ export interface NextStep {
 
 const lines = (n: number) => `${n.toLocaleString()} ${n === 1 ? "line" : "lines"}`;
 
-/** The one thing to do next for a production. `flaggedCount` is known only once the script is loaded. */
-export function nextStep(p: Production, flaggedCount?: number): NextStep {
+/** The one thing to do next for a production. Once the script is read, that is sharing the cast link. */
+export function nextStep(p: Production): NextStep {
   const { linesTotal, linesRecorded, actorsTotal } = p.progress;
   switch (p.scriptStatus) {
     case "none":
@@ -25,9 +25,6 @@ export function nextStep(p: Production, flaggedCount?: number): NextStep {
       return { status: "Reading the script", action: "See how it's going", tab: "script", step: 0, done: false };
     case "failed":
       return { status: "The script didn't read", action: "Try the script again", tab: "script", step: 0, done: false };
-  }
-  if (flaggedCount && flaggedCount > 0 && linesRecorded === 0) {
-    return { status: `${lines(flaggedCount)} to check`, action: "Check the script", tab: "script", step: 0, done: false };
   }
   if (actorsTotal === 0) return { status: "Script ready", action: "Share the cast link", tab: "cast", step: 1, done: false };
   if (linesTotal > 0 && linesRecorded >= linesTotal) {

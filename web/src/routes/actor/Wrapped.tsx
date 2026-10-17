@@ -1,4 +1,4 @@
-import { Headphones, ListChecks, Mail, Mic } from "lucide-react";
+import { Headphones, ListChecks, Mail, Mic, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
@@ -9,6 +9,7 @@ import { VERDICT_CHIP } from "../../components/AccuracyChip";
 import { formatVerdictCounts, scoreLabel, verdict, VERDICT_RANK, verdictCounts } from "../../stt/score";
 import type { SttState } from "../../stt/session";
 import type { UploadItem } from "../../upload/queue";
+import { PickUpParts } from "./PickUpParts";
 import type { Score } from "./RecordSession";
 
 export function Wrapped({
@@ -21,6 +22,7 @@ export function Wrapped({
   unsaved,
   pendingScores,
   onRetry,
+  onPickedUp,
   onReview,
 }: {
   token: string;
@@ -32,6 +34,7 @@ export function Wrapped({
   unsaved: UploadItem[];
   pendingScores: number;
   onRetry: (takeId: string) => void;
+  onPickedUp: (characters: { id: string; name: string }[]) => void;
   onReview: (lineId: string) => void;
 }) {
   const [email, setEmail] = useState("");
@@ -174,6 +177,13 @@ export function Wrapped({
             )}
           </>
         )}
+      </section>
+
+      <section className="card stack pick-up-card">
+        <h2 className="row" style={{ gap: 8 }}>
+          <Plus size={20} aria-hidden="true" /> Pick up more lines
+        </h2>
+        <PickUpParts api={api} onPicked={onPickedUp} intro="Got time for more? These parts are free. Lines nobody has recorded yet play in the computer voice." />
       </section>
 
       <div className="stack wrapped-actions">

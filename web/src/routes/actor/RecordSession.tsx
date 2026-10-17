@@ -1,4 +1,4 @@
-import { Headphones } from "lucide-react";
+import { Headphones, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
@@ -6,6 +6,7 @@ import { errorMessage } from "../../api/client";
 import type { ActorLine, Invite, SttResult } from "../../api/types";
 import { useAccompaniment, usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { Brand } from "../../components/Brand";
+import { Dialog } from "../../components/Dialog";
 import { InAppBanner } from "../../components/InAppBanner";
 import { Loading } from "../../components/Loading";
 import { ProgressBar } from "../../components/ProgressBar";
@@ -20,6 +21,7 @@ import { latestForLine } from "../../upload/queue";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
 import { NameEditor } from "./NameEditor";
+import { PickUpParts } from "./PickUpParts";
 import { Wrapped } from "./Wrapped";
 
 const ADVANCE_DELAY_MS = 700;
@@ -54,11 +56,14 @@ export function RecordSession({
   api,
   invite,
   onRenamed,
+  onPartsChanged,
 }: {
   token: string;
   api: ActorApi;
   invite: Invite;
   onRenamed: (actor: { name: string; firstName: string }) => void;
+  /** The actor picked up more parts: their parts now. */
+  onPartsChanged: (characters: { id: string; name: string }[]) => void;
 }) {
   const toast = useToast();
   const lines = useResource(() => api.lines(), token);
@@ -91,6 +96,7 @@ export function RecordSession({
   const [cueing, setCueing] = useState<string | null>(null);
   /** Client take ids deleted on this screen, so their upload no longer counts as the line's take. */
   const [deleted, setDeleted] = useState(new Set<string>());
+  const [pickingUp, setPickingUp] = useState(false);
 
   const recorder = useTakeRecorder({
     onLimit: () => {
@@ -119,8 +125,13 @@ export function RecordSession({
     },
     [myItems, token, deleted],
   );
+  // A line is done once it has the actor's own take, or a take by whoever had the part before
+  // (it keeps playing; the actor can record over it). A stand-in or the computer voice still needs them.
   const isRecorded = useCallback(
-    (lineId: string) => !!actorLines.find((l) => l.line.id === lineId)?.take || !!uploadFor(lineId),
+    (lineId: string) => {
+      const l = actorLines.find((x) => x.line.id === lineId);
+      return !!l?.take || l?.current?.source === "actor" || !!uploadFor(lineId);
+    },
     [actorLines, uploadFor],
   );
   const recordedCount = actorLines.filter((l) => isRecorded(l.line.id)).length;
@@ -135,10 +146,11 @@ export function RecordSession({
   // Resume at the first unrecorded line.
   useEffect(() => {
     if (currentId || actorLines.length === 0) return;
-    const first = actorLines.find((l) => !l.take) ?? actorLines[0]!;
+    const done = (l: ActorLine) => !!l.take || l.current?.source === "actor";
+    const first = actorLines.find((l) => !done(l)) ?? actorLines[0]!;
     setCurrentId(first.line.id);
     if (first !== actorLines[0]) setTimeout(() => scrollToLine(first.line.id), 100);
-    if (actorLines.every((l) => l.take)) setView("wrapped");
+    if (actorLines.every(done)) setView("wrapped");
     setScores((s) => {
       const next = new Map(s);
       for (const l of actorLines) if (l.take?.stt && !next.has(l.line.id)) next.set(l.line.id, { takeKey: l.take.id, result: l.take.stt });
@@ -322,6 +334,18 @@ export function RecordSession({
     }, ADVANCE_DELAY_MS);
   };
 
+  /** After picking up parts: reload the lines and start at the first new line that needs a voice. */
+  const afterPickUp = async (characters: { id: string; name: string }[]) => {
+    setPickingUp(false);
+    onPartsChanged(characters);
+    const fresh = await api.lines().catch(() => null);
+    if (!fresh) return void lines.reload();
+    setLinesData(fresh);
+    setView("lines");
+    setCurrentId(null);
+    toast("Picked up. Your new lines are in the list.");
+  };
+
   if (lines.loading) return <Loading />;
   if (lines.error || !lines.data) {
     return (
@@ -367,6 +391,7 @@ export function RecordSession({
           unsaved={unsaved}
           pendingScores={sttState.status === "unavailable" ? 0 : [...localTakes.values()].filter((t) => !scored.has(t.clientTakeId)).length}
           onRetry={(id) => uploader.retry(id)}
+          onPickedUp={(characters) => void afterPickUp(characters)}
           onReview={(lineId) => {
             setView("lines");
             setCurrentId(lineId);
@@ -395,6 +420,9 @@ export function RecordSession({
             </p>
           </div>
           <SttChip state={sttState} onEnable={() => stt.enable()} />
+          <button type="button" className="icon-btn" onClick={() => setPickingUp(true)} aria-label="Pick up more lines" title="Pick up more lines">
+            <Plus size={22} />
+          </button>
           {recordedCount > 0 && (
             <Link className="icon-btn" to={`/i/${token}/play`} aria-label="Listen to the run-through">
               <Headphones size={22} />
@@ -420,6 +448,12 @@ export function RecordSession({
               Retry
             </button>
           </div>
+        )}
+        {total === 0 && (
+          <section className="card stack empty-parts">
+            <h2 className="display">No lines right now</h2>
+            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Your director has moved your part on. Pick up a free part to keep recording." />
+          </section>
         )}
         <SectionNav sections={sections} idPrefix="rec-section-" />
 
@@ -509,6 +543,9 @@ export function RecordSession({
           </label>
         </div>
       </RecordDock>
+      <Dialog open={pickingUp} onClose={() => setPickingUp(false)} title="Pick up more lines">
+        {pickingUp && <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} />}
+      </Dialog>
       <p className="sr-only" aria-live="assertive">
         {announcement}
       </p>

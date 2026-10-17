@@ -151,6 +151,9 @@ export const script = {
 export const cast = {
   callSheet: (productionId: string) =>
     request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
+  /** Takes a part away from whoever has it; their takes stay and keep playing. */
+  unassign: (productionId: string, characterId: string) =>
+    request<void>(`/productions/${productionId}/characters/${characterId}/unassign`, { method: "POST", auth: director }),
   /** Takes a free part (or one already theirs) for the director's own cast member; open `/i/<inviteToken>` to record. */
   recordAs: (productionId: string, characterId: string) =>
     request<{ inviteToken: string; inviteUrl: string }>(`/productions/${productionId}/record-as`, {

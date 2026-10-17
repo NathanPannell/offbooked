@@ -67,7 +67,6 @@ export function ScriptTab({
       production={production}
       script={data}
       reload={script.reload}
-      setScript={script.setData}
       onReplace={() => setReplacing(true)}
       onDone={onDone}
     />

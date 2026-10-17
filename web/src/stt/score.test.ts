@@ -251,3 +251,18 @@ describe("annotateLine", () => {
     expect(annotateLine("Completely different", result.ops)).toBeNull();
   });
 });
+
+describe("stage directions in a line", () => {
+  it("a take that skips a direction at the start or end is still complete", () => {
+    expect(verdict(scoreLine("[His phone pings] This is his Lordship's man.", "this is his lordship's man"))).toBe("complete");
+    expect(verdict(scoreLine("(to ESCALUS) Fellow, why dost thou show me thus to th' world?", "fellow why dost thou show me thus to the world"))).toBe("complete");
+    expect(verdict(scoreLine("Bear me to prison, where I am committed. (Exit.)", "bear me to prison where i am committed"))).toBe("complete");
+    expect(verdict(scoreLine("Come, [he rises] bring them away.", "come bring them away"))).toBe("complete");
+  });
+
+  it("directions aren't words to say, and the line's own words still are", () => {
+    expect(normalizeWords("[Aside.] Yes, my lord.")).toEqual(["yes", "my", "lord"]);
+    expect(normalizeWords("I (think) so")).toEqual(["i", "think", "so"]);
+    expect(verdict(scoreLine("[His phone pings] This is his Lordship's man.", "this is"))).toBe("partial");
+  });
+});
