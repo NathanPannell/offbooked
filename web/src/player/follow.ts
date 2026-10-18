@@ -1,7 +1,9 @@
-// Keeping the words being read in view: the visible band is the space between the pinned top row
-// and the bottom player bar. While the play runs, the row of text being read is held at one height
-// in that band (FOLLOW_ANCHOR): each time a new row starts, the page glides up by about one row, so
-// a long speech scrolls steadily instead of jumping. Words within a row never move the page.
+// Keeping the words being read (or recorded) in view, karaoke style: the visible band is the space
+// between a pinned top row and a bottom bar (the run-through's player bar, the recorder's dock). The
+// row of text being read is held near the middle of that band (FOLLOW_ANCHOR), but never so low that
+// fewer than LOOKAHEAD_ROWS rows show beneath it. Each time a new row starts, the page glides up by
+// about one row, so a long speech scrolls steadily instead of jumping. Words within a row never move
+// the page.
 // With reduced motion the page instead stays put while the word is in the band's comfortable middle
 // and jumps once when it leaves it.
 
@@ -10,8 +12,10 @@ export interface Band {
   bottom: number;
 }
 
-/** Where the current row's top is held, as a share of the band from its top. */
-export const FOLLOW_ANCHOR = 0.36;
+/** Where the current row's top is held, as a share of the band from its top: about the middle. */
+export const FOLLOW_ANCHOR = 0.42;
+/** Rows of text that always stay visible below the current one. */
+export const LOOKAHEAD_ROWS = 3;
 /** Closer to the anchor than this (px) and the page stays put: less than one row of script text. */
 export const ROW_SLACK = 12;
 
@@ -22,13 +26,24 @@ export const COMFORT_TOP = 0.12;
 export const COMFORT_BOTTOM = 0.3;
 
 /**
- * How far to scroll (positive: down the page) so `rect`'s top sits at the anchor of `band`, or 0
- * when it is already within a row's slack of it.
+ * Where the current row's top is held in `band`: the anchor, raised when needed so the row and the
+ * LOOKAHEAD_ROWS rows after it (each `rowHeight` tall) fit above the band's bottom.
  */
-export function anchorDelta(rect: { top: number }, band: Band): number {
+export function anchorTop(band: Band, rowHeight: number): number {
+  const h = band.bottom - band.top;
+  const lowest = band.bottom - rowHeight * (LOOKAHEAD_ROWS + 1);
+  return Math.max(band.top, Math.min(band.top + h * FOLLOW_ANCHOR, lowest));
+}
+
+/**
+ * How far to scroll (positive: down the page) so `rect`'s top sits at the anchor of `band`, or 0
+ * when it is already within a row's slack of it. `rect`'s height is taken as one row.
+ */
+export function anchorDelta(rect: { top: number; bottom?: number }, band: Band): number {
   const h = band.bottom - band.top;
   if (h <= 0) return 0;
-  const delta = rect.top - (band.top + h * FOLLOW_ANCHOR);
+  const row = rect.bottom !== undefined && rect.bottom > rect.top ? Math.min(rect.bottom - rect.top, 80) : 32;
+  const delta = rect.top - anchorTop(band, row);
   return Math.abs(delta) < ROW_SLACK ? 0 : delta;
 }
 
@@ -66,23 +81,33 @@ export function followTarget(
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
+/** The band between whatever is pinned at the top (`topSelector`) and at the bottom (`bottomSelector`). */
+function bandBetween(root: ParentNode | null, topSelector: string, bottomSelector: string): Band {
+  const bar = root?.querySelector(topSelector)?.getBoundingClientRect();
+  const foot = root?.querySelector(bottomSelector)?.getBoundingClientRect();
+  const top = bar && bar.bottom > 0 ? bar.bottom : 0;
+  const bottom = foot && foot.top < window.innerHeight ? foot.top : window.innerHeight;
+  return { top, bottom };
+}
+
 /** The band inside `root`'s page: below the pinned run-through row, above the player bar. */
 export function visibleBand(root: HTMLElement | null): Band {
-  const bar = root?.querySelector(".runthrough-bar")?.getBoundingClientRect();
-  const controls = root?.querySelector(".player-controls")?.getBoundingClientRect();
-  const top = bar && bar.bottom > 0 ? bar.bottom : 0;
-  const bottom = controls && controls.top < window.innerHeight ? controls.top : window.innerHeight;
-  return { top, bottom };
+  return bandBetween(root, ".runthrough-bar", ".player-controls");
+}
+
+/** The recorder's band: below its pinned header, above the record dock. */
+export function recorderBand(root: HTMLElement | null): Band {
+  return bandBetween(root ?? document, ".record-header", ".record-dock");
 }
 
 /** The last smooth scroll asked for, so asking again mid-glide doesn't restart it. */
 let gliding: { top: number; at: number } | null = null;
 
 /** Scrolls the page so `el` is followed in the band, smoothly unless reduced motion is asked for. */
-export function keepInView(el: Element, root: HTMLElement | null) {
+export function keepInView(el: Element, root: HTMLElement | null, band: (root: HTMLElement | null) => Band = visibleBand) {
   const reduced = reducedMotion();
   const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-  const top = followTarget(el.getBoundingClientRect(), visibleBand(root), { scrollY: window.scrollY, maxScroll }, reduced);
+  const top = followTarget(el.getBoundingClientRect(), band(root), { scrollY: window.scrollY, maxScroll }, reduced);
   if (top === null) return;
   const now = performance.now();
   // An absolute target: asked again mid-glide (the line, then its word), it names the same spot

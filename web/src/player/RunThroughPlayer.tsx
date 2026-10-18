@@ -43,9 +43,11 @@ interface Props {
   onPracticeDone?: (results: PracticeResult[]) => Promise<unknown>;
   /** "mine" opens with the listener's lines on "Pause, then read". */
   initialMode?: "full" | "mine";
+  /** One of the actor's parts to open as "your part" (from the recorder of an actor with several). */
+  initialRole?: string | null;
 }
 
-export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "full" }: Props) {
+export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "full", initialRole = null }: Props) {
   const toast = useToast();
   const rt = useResource(load, "runthrough");
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -71,7 +73,9 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     if (!productionId) return;
     const roles = new Set([...(isActor ? [MY_PART] : []), ...characters.map((c) => c.id)]);
     const loaded = loadSettings(productionId, defaultSettings(isActor, initialMode), roles);
-    setStored(initialMode === "mine" ? { ...loaded, role: loaded.role || (isActor ? MY_PART : ""), mode: "pause" } : loaded);
+    const withMode = initialMode === "mine" ? { ...loaded, role: loaded.role || (isActor ? MY_PART : ""), mode: "pause" as const } : loaded;
+    // Opened for one part: only its lines are yours, and the scene list keeps only its scenes.
+    setStored(initialRole && roles.has(initialRole) ? { ...withMode, role: initialRole } : withMode);
     // Only when the production changes: later reloads of the same run-through keep the settings.
   }, [productionId]);
   const settings = stored ?? defaultSettings(isActor, initialMode);

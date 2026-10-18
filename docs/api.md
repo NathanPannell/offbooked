@@ -349,3 +349,7 @@ The parse is taken as read: there is no review step. Lines are saved unflagged, 
 - `GET /api/invite/lines` items gain `current: { source: "actor" | "standin", by: string | null, audioUrl } | null`: what plays now on the line when it isn't the actor's own take (a stand-in, or a take by whoever had the part before; `by` is their first name). `take` is now only the actor's own take, on every line.
 - The recorder counts a line as done once it has the actor's own take or an earlier cast member's (which they can record over); a stand-in or the computer voice still needs them.
 - Scoring leaves stage directions out of the words to say: anything in `[brackets]`, and a `(parenthesised)` direction that opens or closes the line.
+
+### Long takes in parts (2026-10-18)
+
+Takes have no practical length limit (the server refuses only past 65 minutes; the app stops a take left running for an hour). A take bigger than one request (8 MB) is sent as byte ranges of the same file: each request carries `X-Take-Parts: n` (2–12) and `X-Take-Part: i` (0-based), with the same `X-Take-Id`, `Content-Type` and `X-Duration-Ms`. Until every part is in, the answer is `{ partial: true, parts, missing: number[] }`; the request that completes it answers like a one-request upload. Parts wait in the server's temp folder (not storage) and are joined into the exact recorded file. A part sent after the take is saved returns the take. The web app sends takes over 6 MB in parts and resends any part reported missing.

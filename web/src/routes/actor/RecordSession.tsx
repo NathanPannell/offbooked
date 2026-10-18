@@ -6,6 +6,7 @@ import { errorMessage } from "../../api/client";
 import type { ActorLine, Invite, SttResult } from "../../api/types";
 import { useAccompaniment, usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { Brand } from "../../components/Brand";
+import { CharacterName } from "../../components/CharacterName";
 import { Dialog } from "../../components/Dialog";
 import { InAppBanner } from "../../components/InAppBanner";
 import { Loading } from "../../components/Loading";
@@ -15,6 +16,7 @@ import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useResource } from "../../lib/useResource";
+import { keepInView, recorderBand } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
 import { latestForLine } from "../../upload/queue";
@@ -100,12 +102,30 @@ export function RecordSession({
 
   const recorder = useTakeRecorder({
     onLimit: () => {
-      toast("That's the 2 minute limit, so we stopped there.");
+      toast("That take ran for an hour, so we stopped and kept it.");
       stopRef.current();
     },
   });
 
-  const actorLines: ActorLine[] = useMemo(() => lines.data?.lines ?? [], [lines.data]);
+  const allLines: ActorLine[] = useMemo(() => lines.data?.lines ?? [], [lines.data]);
+  // An actor with several parts records one at a time: only the chosen part's lines show, and
+  // moving on stays within them. Remembered per invite.
+  const parts = invite.characters;
+  const partKey = `offbooked.part.${token}`;
+  const [chosenPart, setChosenPart] = useState<string | null>(() => readStorage(partKey));
+  const activePart = useMemo(() => {
+    if (parts.length <= 1) return null;
+    if (chosenPart && parts.some((p) => p.id === chosenPart)) return chosenPart;
+    return (parts.find((p) => allLines.some((l) => saysPart(l, p.id) && !lineDone(l))) ?? parts[0]!).id;
+  }, [parts, chosenPart, allLines]);
+  const actorLines: ActorLine[] = useMemo(
+    () => (activePart ? allLines.filter((l) => saysPart(l, activePart)) : allLines),
+    [allLines, activePart],
+  );
+  /** Parts other than the one in view that still have lines needing a voice. */
+  const otherParts = parts
+    .filter((p) => p.id !== activePart)
+    .map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineDone(l)).length }));
 
   const live = useLiveTake({
     recording: recorder.recording,
@@ -129,10 +149,10 @@ export function RecordSession({
   // (it keeps playing; the actor can record over it). A stand-in or the computer voice still needs them.
   const isRecorded = useCallback(
     (lineId: string) => {
-      const l = actorLines.find((x) => x.line.id === lineId);
+      const l = allLines.find((x) => x.line.id === lineId);
       return !!l?.take || l?.current?.source === "actor" || !!uploadFor(lineId);
     },
-    [actorLines, uploadFor],
+    [allLines, uploadFor],
   );
   const recordedCount = actorLines.filter((l) => isRecorded(l.line.id)).length;
   const total = actorLines.length;
@@ -143,20 +163,52 @@ export function RecordSession({
     cardRefs.current.get(lineId)?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
   };
 
+  /** Shows another of the actor's parts, at its first line that needs a voice. */
+  const switchPart = (id: string) => {
+    if (recorder.recording) return;
+    playback.pause();
+    setChosenPart(id);
+    writeStorage(partKey, id);
+    setCurrentId(null);
+    setView("lines");
+    window.scrollTo({ top: 0 });
+  };
+
   // Resume at the first unrecorded line.
   useEffect(() => {
     if (currentId || actorLines.length === 0) return;
-    const done = (l: ActorLine) => !!l.take || l.current?.source === "actor";
-    const first = actorLines.find((l) => !done(l)) ?? actorLines[0]!;
+    const first = actorLines.find((l) => !lineDone(l)) ?? actorLines[0]!;
     setCurrentId(first.line.id);
     if (first !== actorLines[0]) setTimeout(() => scrollToLine(first.line.id), 100);
-    if (actorLines.every(done)) setView("wrapped");
+    if (actorLines.every(lineDone)) setView("wrapped");
     setScores((s) => {
       const next = new Map(s);
       for (const l of actorLines) if (l.take?.stt && !next.has(l.line.id)) next.set(l.line.id, { takeKey: l.take.id, result: l.take.stt });
       return next;
     });
   }, [actorLines, currentId]);
+
+  // Karaoke-style follow while a take records: the next word to say stays near the middle of the
+  // screen, with a few rows of what's coming below it. A scroll by hand pauses it for a moment.
+  const scrolledAt = useRef(0);
+  useEffect(() => {
+    const mark = () => (scrolledAt.current = performance.now());
+    window.addEventListener("touchmove", mark, { passive: true });
+    window.addEventListener("wheel", mark, { passive: true });
+    return () => {
+      window.removeEventListener("touchmove", mark);
+      window.removeEventListener("wheel", mark);
+    };
+  }, []);
+  const liveLine = live?.lineId;
+  const liveCursor = live?.mode === "live" ? live.cursor : null;
+  useEffect(() => {
+    if (!recorder.recording || !liveLine || liveCursor === null) return;
+    if (performance.now() - scrolledAt.current < 2500) return;
+    const card = cardRefs.current.get(liveLine);
+    const el = card?.querySelector(".lw-next") ?? [...(card?.querySelectorAll(".lw-lit") ?? [])].pop();
+    if (el) keepInView(el, null, recorderBand);
+  }, [recorder.recording, liveLine, liveCursor]);
 
   const postStt = useCallback(
     (clientTakeId: string, result: SttResult) => {
@@ -334,9 +386,14 @@ export function RecordSession({
     }, ADVANCE_DELAY_MS);
   };
 
-  /** After picking up parts: reload the lines and start at the first new line that needs a voice. */
+  /** After picking up parts: reload the lines and show the new part, at its first line that needs a voice. */
   const afterPickUp = async (characters: { id: string; name: string }[]) => {
     setPickingUp(false);
+    const added = characters.find((c) => !parts.some((p) => p.id === c.id));
+    if (added) {
+      setChosenPart(added.id);
+      writeStorage(partKey, added.id);
+    }
     onPartsChanged(characters);
     const fresh = await api.lines().catch(() => null);
     if (!fresh) return void lines.reload();
@@ -392,6 +449,9 @@ export function RecordSession({
           pendingScores={sttState.status === "unavailable" ? 0 : [...localTakes.values()].filter((t) => !scored.has(t.clientTakeId)).length}
           onRetry={(id) => uploader.retry(id)}
           onPickedUp={(characters) => void afterPickUp(characters)}
+          partId={activePart}
+          otherParts={otherParts}
+          onSwitchPart={switchPart}
           onReview={(lineId) => {
             setView("lines");
             setCurrentId(lineId);
@@ -424,12 +484,33 @@ export function RecordSession({
             <Plus size={22} />
           </button>
           {recordedCount > 0 && (
-            <Link className="icon-btn" to={`/i/${token}/play`} aria-label="Listen to the run-through">
+            <Link className="icon-btn" to={`/i/${token}/play${activePart ? `?part=${activePart}` : ""}`} aria-label="Listen to the run-through">
               <Headphones size={22} />
             </Link>
           )}
         </div>
         <ProgressBar value={recordedCount} max={total} label="Lines recorded" />
+        {activePart && (
+          <div className="part-switch" role="group" aria-label="Part to record">
+            {parts.map((p) => {
+              const own = allLines.filter((l) => saysPart(l, p.id));
+              const left = own.filter((l) => !isRecorded(l.line.id)).length;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="part-chip"
+                  aria-pressed={p.id === activePart}
+                  disabled={!!recorder.recording}
+                  onClick={() => switchPart(p.id)}
+                >
+                  <CharacterName name={p.name} />
+                  <span className="part-chip-meta small">{left === 0 ? "✓ done" : `${left} to go`}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </header>
 
       <main className="record-main">
@@ -578,4 +659,14 @@ function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>[
       {percent !== null && <span className="nums">{percent}%</span>}
     </span>
   );
+}
+
+/** Whether a line belongs to a part: its speaker, or one of a shared line's voices. */
+function saysPart(l: ActorLine, characterId: string): boolean {
+  return l.line.characterId === characterId || (l.line.voiceIds ?? []).includes(characterId);
+}
+
+/** A line with the actor's own take, or an earlier cast member's that keeps playing. */
+function lineDone(l: ActorLine): boolean {
+  return !!l.take || l.current?.source === "actor";
 }
