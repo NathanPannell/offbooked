@@ -3,7 +3,8 @@ import { errorMessage } from "../api/client";
 import { MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
 import { holdWakeLock } from "./wakeLock";
 
-export const MAX_TAKE_MS = 2 * 60 * 1000;
+/** Only a safety net for a take left running by mistake: real takes never get near it. */
+export const MAX_TAKE_MS = 60 * 60 * 1000;
 export const MIN_TAKE_MS = 400;
 
 export type MicStatus = "idle" | "requesting" | "ready";

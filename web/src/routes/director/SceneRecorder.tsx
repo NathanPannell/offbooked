@@ -154,7 +154,7 @@ function SceneLines({
   const stopRef = useRef<() => void>(() => {});
   const recorder = useTakeRecorder({
     onLimit: () => {
-      onError("That's the 2 minute limit, so we stopped there.");
+      onError("That take ran for an hour, so we stopped and kept it.");
       stopRef.current();
     },
   });

@@ -7,6 +7,22 @@ export interface TakeUploadResult {
   linesTotal: number;
 }
 
+/** A long take goes up in parts; until the last one is in, the server says which are missing. */
+export interface TakePartResult {
+  partial: true;
+  parts: number;
+  missing: number[];
+}
+
+/** Which part of a long take this request carries. */
+export interface TakePart {
+  index: number;
+  total: number;
+}
+
+export const partHeaders = (part?: TakePart): Record<string, string> =>
+  part ? { "X-Take-Parts": String(part.total), "X-Take-Part": String(part.index) } : {};
+
 /** All calls scoped to one actor's invite token. */
 export function actorApi(token: string) {
   const auth: Auth = { kind: "invite", token };
@@ -24,8 +40,8 @@ export function actorApi(token: string) {
     deleteTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}`, { method: "DELETE", auth }),
     restoreTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}/restore`, { method: "POST", auth }),
     lines: () => request<{ sections: Section[]; lines: ActorLine[] }>("/invite/lines", { auth }),
-    putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal) =>
-      request<TakeUploadResult>(`/invite/lines/${lineId}/take`, {
+    putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal, part?: TakePart) =>
+      request<TakeUploadResult | TakePartResult>(`/invite/lines/${lineId}/take`, {
         method: "PUT",
         auth,
         body: audio,
@@ -34,6 +50,7 @@ export function actorApi(token: string) {
           "Content-Type": (audio.type || "application/octet-stream").split(";")[0],
           "X-Take-Id": takeId,
           "X-Duration-Ms": String(Math.round(durationMs)),
+          ...partHeaders(part),
         },
       }),
     postStt: (takeId: string, result: SttResult) =>

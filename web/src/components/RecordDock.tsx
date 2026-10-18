@@ -1,7 +1,7 @@
 import { Mic, Square } from "lucide-react";
 import type { ReactNode } from "react";
 import type { MicError } from "../audio/recorder";
-import { MAX_TAKE_MS, type MicStatus } from "../audio/useTakeRecorder";
+import { type MicStatus } from "../audio/useTakeRecorder";
 import { Waveform } from "../audio/Waveform";
 import { formatClock } from "../lib/format";
 import { MicHelp } from "./MicHelp";
@@ -47,7 +47,7 @@ export function RecordDock({
           <span className="rec-dot" aria-hidden="true" />
           <Waveform analyser={analyser} active />
           <span className="dock-timer mono nums">
-            {formatClock(elapsed)} <span className="muted">/ {formatClock(MAX_TAKE_MS)}</span>
+            {formatClock(elapsed)}
           </span>
         </div>
       ) : (

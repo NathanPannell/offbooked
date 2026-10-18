@@ -55,17 +55,29 @@ registerProcessor("offbooked-capture", OffbookedCapture);
 
 type Listener = (chunk: Float32Array) => void;
 
+/** Samples kept for the live transcription, which reads at most the last 10 s: 30 s at 16 kHz. */
+export const KEEP_SAMPLES = 16_000 * 30;
+
 export class LiveCapture {
   private chunks: Float32Array[] = [];
   private listeners = new Set<Listener>();
   /** Samples captured since begin(). */
   length = 0;
+  /** Samples at the start of the take no longer kept, so a take of any length stays small. */
+  private dropped = 0;
+  private kept = 0;
 
   private constructor(private readonly node: AudioWorkletNode) {
     node.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const chunk = event.data;
       this.chunks.push(chunk);
       this.length += chunk.length;
+      this.kept += chunk.length;
+      while (this.chunks.length > 1 && this.kept - this.chunks[0]!.length >= KEEP_SAMPLES) {
+        const old = this.chunks.shift()!;
+        this.kept -= old.length;
+        this.dropped += old.length;
+      }
       this.listeners.forEach((l) => l(chunk));
     };
   }
@@ -95,6 +107,8 @@ export class LiveCapture {
   begin(): void {
     this.chunks = [];
     this.length = 0;
+    this.dropped = 0;
+    this.kept = 0;
     this.node.port.postMessage("on");
   }
 
@@ -102,10 +116,10 @@ export class LiveCapture {
     this.node.port.postMessage("off");
   }
 
-  /** Copies samples [from, to) of the current buffer. */
+  /** Copies samples [from, to) of the current take; samples older than KEEP_SAMPLES come back as silence. */
   slice(from = 0, to = this.length): Float32Array {
     const out = new Float32Array(Math.max(0, to - from));
-    let offset = 0;
+    let offset = this.dropped;
     for (const chunk of this.chunks) {
       const start = Math.max(from - offset, 0);
       const end = Math.min(to - offset, chunk.length);

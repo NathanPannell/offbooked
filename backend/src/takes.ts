@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FastifyRequest } from "fastify";
@@ -13,10 +13,12 @@ import { takeColumns, takeView, type TakeRow } from "./views.ts";
 // Take uploads, shared by the actor endpoint and the director's stand-in endpoint: same body,
 // headers, idempotency, caps and response.
 
-export const MAX_TAKE_BYTES = 8 * 1024 * 1024;
+export const MAX_TAKE_BYTES = 8 * 1024 * 1024; // per request: a longer take comes in parts
+export const MAX_TAKE_PARTS = 12; // so a take is at most 96 MB (well over an hour of phone audio)
 export const MAX_TAKES_PER_LINE = 25; // per recorder
 export const MAX_RECORDER_BYTES = 200 * 1024 * 1024; // per actor, or per director per production for stand-ins
-const MAX_TAKE_MS = 120_000;
+// Only a safety net (the app stops a take left running for an hour): takes have no real length cap.
+const MAX_TAKE_MS = 65 * 60_000;
 const AUDIO_TYPES: Record<string, string> = {
   "audio/webm": "webm",
   "audio/mp4": "m4a",
@@ -68,8 +70,22 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
   const contentType = String(req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
   const ext = AUDIO_TYPES[contentType];
   if (!ext) throw new HttpError(415, "unsupported_media_type", "Recordings must be webm, mp4, ogg or wav audio.");
-  const audio = req.body;
-  if (!Buffer.isBuffer(audio) || audio.length === 0) throw badRequest("The recording is empty.");
+  const body = req.body;
+  if (!Buffer.isBuffer(body) || body.length === 0) throw badRequest("The recording is empty.");
+
+  // A take bigger than one request arrives as byte ranges of the same file, in parts (X-Take-Parts,
+  // X-Take-Part, 0-based). Parts wait in a temp folder until all are in, then join back into the
+  // exact file the phone recorded. Until then the answer says which parts are still missing.
+  let audio = body;
+  const parts = req.headers["x-take-parts"] === undefined ? 1 : Number(req.headers["x-take-parts"]);
+  if (parts !== 1) {
+    const part = Number(req.headers["x-take-part"]);
+    if (!Number.isInteger(parts) || parts < 2 || parts > MAX_TAKE_PARTS) throw badRequest(`X-Take-Parts must be 2 to ${MAX_TAKE_PARTS}.`);
+    if (!Number.isInteger(part) || part < 0 || part >= parts) throw badRequest("X-Take-Part must be a part number below X-Take-Parts.");
+    const joined = await stagePart(id, parts, part, body);
+    if (!joined.audio) return { body: { partial: true as const, parts, missing: joined.missing }, created: false as const };
+    audio = joined.audio;
+  }
 
   const who = standin ? `standin:${userId}` : actorId!;
   await enforce(sql, ctx.log, `take:${who}`, LIMITS.takeUpload, "You're recording very fast. Wait a minute and try again.");
@@ -88,7 +104,7 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
 
   const durationMs = await measure(audio, ext, Number(req.headers["x-duration-ms"]));
   if (durationMs === null) throw badRequest("We couldn't read that recording. Try recording it again.");
-  if (durationMs > MAX_TAKE_MS) throw badRequest("Takes can be up to two minutes long.");
+  if (durationMs > MAX_TAKE_MS) throw badRequest("That take is over an hour long. Record it in shorter pieces.");
 
   // The newest take is current, whoever recorded it. Older takes are kept forever.
   const voiceId = u.voiceId ? await u.voiceId() : null;
@@ -119,6 +135,21 @@ export async function setTakeDeleted(ctx: Ctx, takeId: string, deleted: boolean)
     return rows;
   });
   if (take) await scheduleRender(ctx, take.productionId);
+}
+
+const PARTS_DIR = path.join(tmpdir(), "offbooked-take-parts");
+
+// Saves one part of a take; once every part is in, joins them (and clears the folder).
+async function stagePart(takeId: string, parts: number, part: number, bytes: Buffer): Promise<{ audio: Buffer | null; missing: number[] }> {
+  const dir = path.join(PARTS_DIR, takeId);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, `${part}.part`), bytes);
+  const have = new Set((await readdir(dir)).map((f) => Number(f.replace(/\.part$/, ""))));
+  const missing = Array.from({ length: parts }, (_, i) => i).filter((i) => !have.has(i));
+  if (missing.length) return { audio: null, missing };
+  const audio = Buffer.concat(await Promise.all(Array.from({ length: parts }, (_, i) => readFile(path.join(dir, `${i}.part`)))));
+  await rm(dir, { recursive: true, force: true });
+  return { audio, missing: [] };
 }
 
 // ffprobe the upload; the client's X-Duration-Ms is the fallback when probing fails.

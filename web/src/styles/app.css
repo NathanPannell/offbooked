@@ -3086,6 +3086,43 @@
   letter-spacing: -0.012em;
 }
 
+/* An actor with several parts records one at a time. */
+.part-switch {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.part-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.part-chip[aria-pressed="true"] {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.part-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.part-chip-meta {
+  color: var(--muted);
+}
+
 .stt-chip {
   font-weight: 500;
 }

@@ -1,4 +1,4 @@
-import { actorApi, type TakeUploadResult } from "../api/actor";
+import { actorApi, type TakePart, type TakePartResult, type TakeUploadResult } from "../api/actor";
 import { ApiError, errorMessage } from "../api/client";
 import { standins } from "../api/director";
 import { uuid } from "../lib/uuid";
@@ -15,6 +15,37 @@ export interface NewTake {
   characterId?: string | null;
   audio: Blob;
   durationMs: number;
+}
+
+/** A take bigger than this goes up in parts (the server takes up to 8 MB a request). */
+export const PART_BYTES = 6 * 1024 * 1024;
+
+/**
+ * Uploads a take in one request, or a long one as byte ranges of the same file that the server
+ * joins back together. Parts the server reports missing (say, after it restarted) are sent again.
+ */
+export async function sendInParts(
+  blob: Blob,
+  send: (body: Blob, part?: TakePart) => Promise<TakeUploadResult | TakePartResult>,
+  partBytes = PART_BYTES,
+): Promise<TakeUploadResult> {
+  if (blob.size <= partBytes) {
+    const result = await send(blob);
+    if ("take" in result) return result;
+    throw new ApiError(0, "upload_incomplete", "The take didn't finish uploading. Trying again.", null);
+  }
+  const total = Math.ceil(blob.size / partBytes);
+  let todo = Array.from({ length: total }, (_, i) => i);
+  for (let round = 0; round < 3 && todo.length; round++) {
+    let last: TakeUploadResult | TakePartResult | null = null;
+    for (const index of todo) {
+      last = await send(blob.slice(index * partBytes, (index + 1) * partBytes, blob.type), { index, total });
+      // Already saved (a retry after the answer was lost): done.
+      if ("take" in last) return last;
+    }
+    todo = last && "missing" in last ? last.missing : [];
+  }
+  throw new ApiError(0, "upload_incomplete", "The take didn't finish uploading. Trying again.", null);
 }
 
 type SavedListener = (item: UploadItem, result: TakeUploadResult) => void;
@@ -129,10 +160,11 @@ export class Uploader {
       const audio = await store.audio(item.takeId);
       if (!audio) throw new ApiError(0, "missing_audio", "This take was lost on this device. Record it again.", null);
       const blob = new Blob([audio], { type: item.mime });
-      const result =
+      const send = (body: Blob, part?: TakePart) =>
         item.kind === "director"
-          ? await standins.putTake(item.lineId, blob, item.takeId, item.durationMs, undefined, item.characterId)
-          : await actorApi(item.token).putTake(item.lineId, blob, item.takeId, item.durationMs);
+          ? standins.putTake(item.lineId, body, item.takeId, item.durationMs, undefined, item.characterId, part)
+          : actorApi(item.token).putTake(item.lineId, body, item.takeId, item.durationMs, undefined, part);
+      const result = await sendInParts(blob, send);
       const saved = this.apply(item.takeId, { type: "succeeded" });
       if (saved) this.savedListeners.forEach((l) => l(saved, result));
     } catch (err) {

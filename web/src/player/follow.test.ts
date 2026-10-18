@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorDelta, FOLLOW_ANCHOR, followDelta, followTarget, ROW_SLACK } from "./follow";
+import { anchorDelta, anchorTop, FOLLOW_ANCHOR, followDelta, followTarget, LOOKAHEAD_ROWS, ROW_SLACK } from "./follow";
 
 // A phone: pinned row ends at 52 px, player bar starts at 720 px (band 668 px tall).
 const band = { top: 52, bottom: 720 };
@@ -82,5 +82,26 @@ describe("followDelta (reduced motion)", () => {
 
   it("does nothing without a band", () => {
     expect(followDelta({ top: 10, bottom: 20 }, { top: 100, bottom: 100 })).toBe(0);
+  });
+});
+
+describe("three rows of lookahead", () => {
+  it("holds the row near the middle when there's room below", () => {
+    const tall = { top: 100, bottom: 900 };
+    expect(anchorTop(tall, 30)).toBeCloseTo(100 + 800 * FOLLOW_ANCHOR, 5);
+  });
+
+  it("raises the row so three rows still show beneath it on a short band", () => {
+    // A phone with a big record dock: 260px of band.
+    const short = { top: 120, bottom: 380 };
+    const top = anchorTop(short, 34);
+    expect(top + 34 * (LOOKAHEAD_ROWS + 1)).toBeLessThanOrEqual(short.bottom);
+    expect(top).toBeGreaterThanOrEqual(short.top);
+  });
+
+  it("uses the word's own height as the row", () => {
+    const short = { top: 0, bottom: 300 };
+    const delta = anchorDelta({ top: 200, bottom: 240 }, short);
+    expect(200 - delta).toBeCloseTo(anchorTop(short, 40), 5);
   });
 });

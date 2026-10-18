@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
 import { errorMessage } from "../../api/client";
 import type { ActorLine, Invite } from "../../api/types";
-import { plural } from "../../lib/format";
+import { plural, titleCase } from "../../lib/format";
 import { VERDICT_CHIP } from "../../components/AccuracyChip";
 import { formatVerdictCounts, scoreLabel, verdict, VERDICT_RANK, verdictCounts } from "../../stt/score";
 import type { SttState } from "../../stt/session";
@@ -23,6 +23,9 @@ export function Wrapped({
   pendingScores,
   onRetry,
   onPickedUp,
+  partId = null,
+  otherParts = [],
+  onSwitchPart,
   onReview,
 }: {
   token: string;
@@ -35,6 +38,10 @@ export function Wrapped({
   pendingScores: number;
   onRetry: (takeId: string) => void;
   onPickedUp: (characters: { id: string; name: string }[]) => void;
+  /** With several parts: the one just finished, the others (with lines still to record), and switching. */
+  partId?: string | null;
+  otherParts?: { id: string; name: string; left: number }[];
+  onSwitchPart?: (id: string) => void;
   onReview: (lineId: string) => void;
 }) {
   const [email, setEmail] = useState("");
@@ -51,6 +58,9 @@ export function Wrapped({
     .filter((x) => x.score && verdict(x.score.result) !== "complete")
     .sort((a, b) => VERDICT_RANK[verdict(a.score!.result)] - VERDICT_RANK[verdict(b.score!.result)]);
   const scoring = pendingScores > 0;
+  const partName = partId ? invite.characters.find((c) => c.id === partId)?.name : undefined;
+  const nextPart = otherParts.find((p) => p.left > 0);
+  const playQuery = partId ? `part=${partId}` : "";
   const showSummary = results.length > 0 || scoring;
 
   const submitEmail = async (e: FormEvent) => {
@@ -98,13 +108,19 @@ export function Wrapped({
     <main className="wrapped page page-narrow">
       <div className="curtain-call">
         <p className="eyebrow">{invite.production.title}</p>
-        <h1 className="wrapped-title">You're wrapped</h1>
+        <h1 className="wrapped-title">{partName ? `${titleCase(partName)}'s wrapped` : "You're wrapped"}</h1>
         <p className="lede">
           {emailState === "saved"
             ? "We'll let you know when the full run-through is ready."
             : "Every line is in. The run-through fills in as the rest of the cast records."}
         </p>
       </div>
+
+      {nextPart && onSwitchPart && (
+        <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => onSwitchPart(nextPart.id)}>
+          <Mic size={18} aria-hidden="true" /> Record {titleCase(nextPart.name)} next · {plural(nextPart.left, "line")}
+        </button>
+      )}
 
       {emailState === "ask" || emailState === "sending" ? (
         <form className="card stack" onSubmit={submitEmail}>
@@ -187,10 +203,10 @@ export function Wrapped({
       </section>
 
       <div className="stack wrapped-actions">
-        <Link className="btn btn-primary btn-lg btn-block" to={`/i/${token}/play`}>
+        <Link className={`btn ${nextPart ? "btn-secondary" : "btn-primary btn-lg"} btn-block`} to={`/i/${token}/play${playQuery ? `?${playQuery}` : ""}`}>
           <Headphones size={20} aria-hidden="true" /> Listen to what's recorded so far
         </Link>
-        <Link className="btn btn-secondary btn-block" to={`/i/${token}/play?mode=mine`}>
+        <Link className="btn btn-secondary btn-block" to={`/i/${token}/play?mode=mine${playQuery ? `&${playQuery}` : ""}`}>
           <Mic size={18} aria-hidden="true" /> Practise my part
         </Link>
         <button type="button" className="btn btn-ghost btn-block" onClick={() => onReview(lines[0]?.line.id ?? "")}>
