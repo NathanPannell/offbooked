@@ -66,6 +66,12 @@ export class ScreenKeeper {
           void sentinel.release().catch(() => {});
           return;
         }
+        if (sentinel.released) {
+          // Already gone before it reached us: don't wait for a release event that has passed.
+          this.usingVideo = true;
+          this.acquire();
+          return;
+        }
         this.sentinel = sentinel;
         sentinel.addEventListener("release", () => {
           if (this.sentinel !== sentinel) return;
@@ -77,6 +83,8 @@ export class ScreenKeeper {
       () => {
         // Refused (iOS Low Power Mode, a policy, no user gesture yet): keep awake with the video instead.
         this.requesting = false;
+        // Let go meanwhile, or refused because the page hid: the next hold or showing asks again.
+        if (!this.held || this.env.document.visibilityState !== "visible") return;
         this.usingVideo = true;
         this.acquire();
       },

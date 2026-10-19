@@ -34,14 +34,19 @@ class FakeVideo implements FallbackVideo {
   }
 }
 
-function setup({ api = true, refuse = false } = {}) {
+function setup({ api = true, refuse = false, refuseWhenHidden = false, preReleased = false } = {}) {
   const sentinels: FakeSentinel[] = [];
   const request = vi.fn((type: "screen") => {
     expect(type).toBe("screen");
     if (refuse) return Promise.reject(new DOMException("Low Power Mode", "NotAllowedError"));
-    const s = new FakeSentinel();
-    sentinels.push(s);
-    return Promise.resolve(s);
+    // The browser settles the request later: a page that hid meanwhile is refused.
+    return Promise.resolve().then(() => {
+      if (refuseWhenHidden && doc.visibilityState !== "visible") throw new DOMException("hidden", "NotAllowedError");
+      const s = new FakeSentinel();
+      if (preReleased) s.released = true;
+      sentinels.push(s);
+      return s;
+    });
   });
   const doc = new FakeDocument();
   const video = new FakeVideo();
@@ -156,6 +161,36 @@ describe("ScreenKeeper", () => {
     doc.show("hidden");
     expect(video.paused).toBe(true);
     doc.show("visible");
+    expect(video.paused).toBe(false);
+  });
+
+  it("doesn't switch to the video for a refusal that lands after it was let go", async () => {
+    const { keeper, video, request } = setup({ refuse: true });
+    keeper.hold()();
+    await flush();
+    keeper.hold();
+    await flush();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(video.plays).toBe(1);
+  });
+
+  it("asks the API again when shown after a refusal caused by the page hiding", async () => {
+    const { keeper, video, request, doc, live } = setup({ refuseWhenHidden: true });
+    keeper.hold();
+    doc.visibilityState = "hidden";
+    await flush();
+    expect(video.plays).toBe(0);
+    doc.show("visible");
+    await flush();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(live()).toHaveLength(1);
+    expect(video.plays).toBe(0);
+  });
+
+  it("falls back to the video when the lock arrives already released", async () => {
+    const { keeper, video } = setup({ preReleased: true });
+    keeper.hold();
+    await flush();
     expect(video.paused).toBe(false);
   });
 });
