@@ -40,7 +40,13 @@ export function suggestMerges(characters: Character[]): MergeSuggestion[] {
     const base = baseName(from.name);
     if (!base) continue;
     // A plain name ("CHORUS") is never the duplicate of a variant ("CHORUS (SINGING)").
-    const plain = baseName(from.name) === from.name.toUpperCase().replace(/[^\p{L}\p{N}\s'-]/gu, " ").replace(/\s+/g, " ").trim();
+    const plain =
+      baseName(from.name) ===
+      from.name
+        .toUpperCase()
+        .replace(/[^\p{L}\p{N}\s'-]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
     const same = plain ? [] : byLines.filter((c) => c.id !== from.id && !taken.has(c.id) && !JOINT.test(c.name) && baseName(c.name) === base);
     const into = same.find((c) => c.name.toUpperCase() === base) ?? same[0];
     if (into) {

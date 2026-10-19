@@ -22,8 +22,7 @@ describe("unassigning a part and picking up more", { skip: dbSkip }, () => {
   let wav: Buffer;
   const get = (url: string, token = director) => t.app.inject({ method: "GET", url, headers: bearer(token) });
   const invite = (token: string) => ({ authorization: `Invite ${token}` });
-  const lines = async (token: string) =>
-    (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(token) })).json().lines as ActorItem[];
+  const lines = async (token: string) => (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(token) })).json().lines as ActorItem[];
   const upload = (token: string, lineId: string) =>
     t.app.inject({
       method: "PUT",

@@ -55,5 +55,4 @@ export function parseJoinToken(secret: string, token: string): { productionId: s
   return { productionId, version };
 }
 
-export const joinUrl = (appUrl: string, secret: string, productionId: string, version: number) =>
-  `${appUrl}/join/${joinToken(secret, productionId, version)}`;
+export const joinUrl = (appUrl: string, secret: string, productionId: string, version: number) => `${appUrl}/join/${joinToken(secret, productionId, version)}`;

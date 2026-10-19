@@ -44,10 +44,15 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     // No script review: the parse is taken as read, so nothing is flagged.
     assert.equal(full.flaggedCount, 0);
     assert.ok(
-      full.lines.every((l: { flagged: boolean; flagCode: string | null; flagReason: string | null }) => !l.flagged && l.flagCode === null && l.flagReason === null),
+      full.lines.every(
+        (l: { flagged: boolean; flagCode: string | null; flagReason: string | null }) => !l.flagged && l.flagCode === null && l.flagReason === null,
+      ),
       "parsed lines are never flagged",
     );
-    assert.deepEqual(full.lines.map((l: { seq: number }) => l.seq), full.lines.map((_: unknown, i: number) => i + 1));
+    assert.deepEqual(
+      full.lines.map((l: { seq: number }) => l.seq),
+      full.lines.map((_: unknown, i: number) => i + 1),
+    );
     const [stored] = await t.ctx.sql`select storage_key, parser from scripts where production_id = ${pid}`;
     assert.equal(stored!.parser, "heuristic");
     assert.ok(await t.ctx.storage.exists(stored!.storageKey), "raw upload is stored");
@@ -91,10 +96,17 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     const cued = (await send("PATCH", `/api/lines/${line.id}`, { kind: "dialogue", text: "HAMLET. A little more than kin" })).json().line;
     assert.equal(cued.characterId, char("HAMLET").id);
     assert.equal(cued.text, "A little more than kin");
-    await send("PATCH", `/api/lines/${line.id}`, { kind: "dialogue", characterId: char("KING").id, text: "Have you your father's leave, Laertes? What says Polonius?" });
+    await send("PATCH", `/api/lines/${line.id}`, {
+      kind: "dialogue",
+      characterId: char("KING").id,
+      text: "Have you your father's leave, Laertes? What says Polonius?",
+    });
 
     const split = (await send("POST", `/api/lines/${line.id}/split`, { at: 38 })).json().lines;
-    assert.deepEqual(split.map((l: { text: string }) => l.text), ["Have you your father's leave, Laertes?", "What says Polonius?"]);
+    assert.deepEqual(
+      split.map((l: { text: string }) => l.text),
+      ["Have you your father's leave, Laertes?", "What says Polonius?"],
+    );
     assert.equal(split[1].seq, split[0].seq + 1);
     assert.equal(split[0].id, line.id, "the first part keeps the line id");
     const merged = (await send("POST", `/api/lines/${line.id}/merge-next`)).json().line;
@@ -105,10 +117,20 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(joinedUp.id, line.id);
     assert.equal(joinedUp.text, "Have you your father's leave, Laertes?\nWhat says Polonius?");
     // Undoing a join puts the lower line back as it was: its kind, flag and place in the source.
-    const restored = (await send("POST", `/api/lines/${line.id}/split`, {
-      at: 38,
-      second: { kind: "stage_direction", characterId: line.characterId, flagged: true, flagCode: "speaker", flagReason: "Who speaks?", sourceLine: 41, sourcePage: 3 },
-    })).json().lines[1];
+    const restored = (
+      await send("POST", `/api/lines/${line.id}/split`, {
+        at: 38,
+        second: {
+          kind: "stage_direction",
+          characterId: line.characterId,
+          flagged: true,
+          flagCode: "speaker",
+          flagReason: "Who speaks?",
+          sourceLine: 41,
+          sourcePage: 3,
+        },
+      })
+    ).json().lines[1];
     assert.equal(restored.kind, "stage_direction");
     assert.equal(restored.characterId, null);
     assert.equal(restored.flagged, true);
@@ -124,7 +146,10 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     const first = script.lines.find((l) => l.seq === 1)!;
     assert.equal((await send("POST", `/api/lines/${first.id}/merge-previous`)).statusCode, 400);
     await reload();
-    assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
+    assert.deepEqual(
+      script.lines.map((l) => l.seq),
+      script.lines.map((_, i) => i + 1),
+    );
 
     // Resolve stays for compatibility; on an unflagged line it changes nothing.
     const plain = script.lines.find((l) => l.kind === "dialogue")!;
@@ -149,7 +174,10 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(gone.removedSection, null);
     await reload();
     assert.equal(script.lines.length, before.length - 1);
-    assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
+    assert.deepEqual(
+      script.lines.map((l) => l.seq),
+      script.lines.map((_, i) => i + 1),
+    );
 
     // Undo: insert it back in the same place, scene, speaker and flag.
     const back = (
@@ -172,7 +200,10 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(back.sourceLine, 12);
     await reload();
     assert.equal(script.lines.length, before.length);
-    assert.deepEqual(script.lines.map((l) => l.seq), script.lines.map((_, i) => i + 1));
+    assert.deepEqual(
+      script.lines.map((l) => l.seq),
+      script.lines.map((_, i) => i + 1),
+    );
     // Deleting the only line of a scene drops the scene; undo brings it back with its title.
     const lone = script.lines.at(-1)!;
     await send("POST", `/api/lines/${lone.id}/section-break`, { title: "Epilogue" });
@@ -197,12 +228,23 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(lineBack.sectionId, script.sections.at(-1)!.id);
     // A new scene can't be wedged into the middle of one.
     const mid = script.lines.find((l) => l.seq === 2)!;
-    assert.equal((await send("POST", `/api/productions/${pid}/lines`, { afterLineId: mid.id, newSection: { title: "x" }, kind: "heading", text: "x" })).statusCode, 400);
+    assert.equal(
+      (await send("POST", `/api/productions/${pid}/lines`, { afterLineId: mid.id, newSection: { title: "x" }, kind: "heading", text: "x" })).statusCode,
+      400,
+    );
     // …and a scene that isn't next to the place is refused.
-    assert.equal((await send("POST", `/api/productions/${pid}/lines`, { afterLineId: null, sectionId: lineBack.sectionId, kind: "heading", text: "x" })).statusCode, 400);
+    assert.equal(
+      (await send("POST", `/api/productions/${pid}/lines`, { afterLineId: null, sectionId: lineBack.sectionId, kind: "heading", text: "x" })).statusCode,
+      400,
+    );
     // Put the line back in the first scene for the tests after this one (no sectionId: the scene of the line before).
     const again = (await t.app.inject({ method: "DELETE", url: `/api/lines/${lineBack.id}`, headers: bearer(alice) })).json();
-    await send("POST", `/api/productions/${pid}/lines`, { afterLineId: again.afterLineId, kind: again.line.kind, characterId: again.line.characterId, text: again.line.text });
+    await send("POST", `/api/productions/${pid}/lines`, {
+      afterLineId: again.afterLineId,
+      kind: again.line.kind,
+      characterId: again.line.characterId,
+      text: again.line.text,
+    });
     await reload();
     assert.equal(script.sections.length, 1);
 
@@ -217,13 +259,20 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
 
     // Undo puts a flag back with its code: on an inserted line and on a PATCH that restores an edit.
     const flaggedBack = (
-      await send("POST", `/api/productions/${pid}/lines`, { afterLineId: recorded.id, kind: "stage_direction", text: "Thunder.", flagged: true, flagCode: "direction" })
+      await send("POST", `/api/productions/${pid}/lines`, {
+        afterLineId: recorded.id,
+        kind: "stage_direction",
+        text: "Thunder.",
+        flagged: true,
+        flagCode: "direction",
+      })
     ).json().line;
     assert.equal(flaggedBack.flagCode, "direction");
     const edited = (await send("PATCH", `/api/lines/${flaggedBack.id}`, { text: "Thunder and lightning." })).json().line;
     assert.equal(edited.flagged, false);
     assert.equal(edited.flagCode, null);
-    const undone = (await send("PATCH", `/api/lines/${flaggedBack.id}`, { text: "Thunder.", flagged: true, flagCode: "direction", flagReason: null })).json().line;
+    const undone = (await send("PATCH", `/api/lines/${flaggedBack.id}`, { text: "Thunder.", flagged: true, flagCode: "direction", flagReason: null })).json()
+      .line;
     assert.equal(undone.flagged, true);
     assert.equal(undone.flagCode, "direction");
     assert.equal((await send("PATCH", `/api/lines/${flaggedBack.id}`, { flagged: true, flagCode: "nope" })).statusCode, 400);
@@ -234,7 +283,10 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     const at = script.lines.find((l) => l.text === "[Enter Horatio, Marcellus and Bernardo.]")!;
     const sections = (await send("POST", `/api/lines/${at.id}/section-break`, { title: "Horatio arrives", act: "1", scene: "2b" })).json().sections;
     assert.equal(sections.length, 2);
-    assert.deepEqual(sections.map((s: { seq: number }) => s.seq), [1, 2]);
+    assert.deepEqual(
+      sections.map((s: { seq: number }) => s.seq),
+      [1, 2],
+    );
     await reload();
     const moved = script.lines.filter((l) => l.seq >= at.seq);
     assert.ok(moved.every((l) => l.sectionId === sections[1].id));
@@ -258,7 +310,10 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     const claudius = merged.find((c: { name: string }) => c.name === "CLAUDIUS");
     assert.equal(claudius.lineCount, kingLines + 1);
     assert.deepEqual(claudius.aliases, ["KING", "POLONIUS"]);
-    assert.equal(merged.some((c: { name: string }) => c.name === "POLONIUS"), false);
+    assert.equal(
+      merged.some((c: { name: string }) => c.name === "POLONIUS"),
+      false,
+    );
     await reload();
   });
 

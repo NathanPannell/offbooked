@@ -1,5 +1,5 @@
 import { Check, FileText, Scissors, Trash2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { script as api } from "../../api/director";
 import type { Character, Line, LineKind } from "../../api/types";
 import { characterHue } from "../../lib/format";
@@ -100,10 +100,11 @@ export function LineEditor({
     setDraft(line.text);
   };
 
-  useEffect(() => {
+  const openAtStart = useEffectEvent(() => {
     if (startText !== null) startEdit(startText);
-    // Only when the line opens.
-  }, []);
+  });
+  // Only when the line opens.
+  useEffect(() => openAtStart(), []);
 
   // Grow with the text, and put the caret where the click was.
   useLayoutEffect(() => {
@@ -289,14 +290,7 @@ export function LineEditor({
 
   return (
     <div className={classes}>
-      <div
-        ref={rowRef}
-        className="script-line is-editing"
-        tabIndex={0}
-        role="group"
-        aria-label="Line being edited"
-        onKeyDown={onRowKey}
-      >
+      <div ref={rowRef} className="script-line is-editing" tabIndex={0} role="group" aria-label="Line being edited" onKeyDown={onRowKey}>
         <div className="line-controls">
           <select
             className="line-select kind-select"
@@ -452,7 +446,14 @@ export function LineEditor({
                 t.at === null ? (
                   <span key={i}>{t.text}</span>
                 ) : (
-                  <button key={i} type="button" className="split-word" disabled={busy} onClick={() => void split(t.at!)} aria-label={`Start a new line at “${t.text}”`}>
+                  <button
+                    key={i}
+                    type="button"
+                    className="split-word"
+                    disabled={busy}
+                    onClick={() => void split(t.at!)}
+                    aria-label={`Start a new line at “${t.text}”`}
+                  >
                     {t.text}
                   </button>
                 ),
@@ -472,11 +473,7 @@ export function LineEditor({
             onBlur={() => void commit("blur")}
           />
         ) : (
-          <span
-            className="script-text is-editable"
-            onClick={(e) => startEdit(caretOffsetAt(e.currentTarget, e.clientX, e.clientY))}
-            title="Click to edit"
-          >
+          <span className="script-text is-editable" onClick={(e) => startEdit(caretOffsetAt(e.currentTarget, e.clientX, e.clientY))} title="Click to edit">
             <LineText text={saving ?? line.text} kind={line.kind} />
           </span>
         )}
@@ -519,9 +516,16 @@ function TogetherPicker({
   const ids = characters.filter((c) => chosen.has(c.id)).map((c) => c.id);
   const enough = everyone ? ids.length >= 1 : ids.length >= 2;
   return (
-    <div className="together-picker" role="group" aria-label={everyone ? `Who says ${everyone}` : "Who says this together"} onKeyDown={(e) => e.stopPropagation()}>
+    <div
+      className="together-picker"
+      role="group"
+      aria-label={everyone ? `Who says ${everyone}` : "Who says this together"}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
       <p className="small muted">
-        {everyone ? `Who says ${everyone} here? Each of them records it, and the takes play together.` : "Pick everyone who says this line. Each of them records it, and the takes play together."}
+        {everyone
+          ? `Who says ${everyone} here? Each of them records it, and the takes play together.`
+          : "Pick everyone who says this line. Each of them records it, and the takes play together."}
       </p>
       <div className="together-options">
         {characters.map((c) => (

@@ -96,7 +96,5 @@ export function nextWakeAt(items: UploadItem[]): number | null {
 
 /** The newest take for a line, which is the one the UI reports on. */
 export function latestForLine(items: UploadItem[], token: string, lineId: string): UploadItem | null {
-  return (
-    items.filter((i) => i.token === token && i.lineId === lineId).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
-  );
+  return items.filter((i) => i.token === token && i.lineId === lineId).sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
 }

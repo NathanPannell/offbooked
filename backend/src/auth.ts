@@ -52,7 +52,19 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
   await enforce(ctx.sql, ctx.log, `invite-ip:${req.ip}`, LIMITS.inviteIp);
   if (!parsed) throw unauthorized("This link isn't valid. Ask your director for a new one.");
   const [row] = await ctx.sql<
-    { id: string; name: string; firstName: string | null; email: string | null; tokenVersion: number; createdAt: Date; productionId: string; title: string; performanceDate: string | null; archivedAt: Date | null; directorName: string | null }[]
+    {
+      id: string;
+      name: string;
+      firstName: string | null;
+      email: string | null;
+      tokenVersion: number;
+      createdAt: Date;
+      productionId: string;
+      title: string;
+      performanceDate: string | null;
+      archivedAt: Date | null;
+      directorName: string | null;
+    }[]
   >`
     select a.id, a.name, a.first_name, a.email, a.token_version, a.created_at, p.id as production_id, p.title,
       p.performance_date::text as performance_date, p.archived_at, u.name as director_name

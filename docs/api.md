@@ -6,7 +6,7 @@ The backend (`backend/`, Railway, `https://api.offbooked.com`) and the web app (
 
 - JSON over HTTPS, all routes under `/api`. Errors: `{ "error": { "code": "not_found", "message": "Human readable" } }` with a matching HTTP status.
 - IDs are UUID strings. Timestamps are ISO 8601 strings. Field names are camelCase.
-- Auth is header based, not cookies (the web app and API are on different origins, and previews live on `*.vercel.app`):
+- Auth is header based, not cookies (the web app and API are on different origins):
   - Director: `Authorization: Bearer <sessionToken>`.
   - Actor: `Authorization: Invite <inviteToken>`.
 - CORS: allow origins from `CORS_ORIGINS` (comma list, `*` wildcards in a host allowed), the methods used here, and the headers `Authorization, Content-Type, X-Take-Id, X-Duration-Ms`.

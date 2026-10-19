@@ -26,7 +26,14 @@ ${m.paragraphs.map((p) => `<p style="margin:0 0 12px;font-size:16px;line-height:
 ${button}
 ${m.footer || footerLink ? `<p style="margin:24px 0 0;font-size:12px;line-height:1.5;color:#8a7f74">${esc(m.footer ?? "")}${footerLink}</p>` : ""}
 </td></tr></table></td></tr></table></body></html>`;
-  const text = [m.heading, "", ...m.paragraphs, ...(m.button ? ["", `${m.button.label}: ${m.button.url}`] : []), ...(m.footer ? ["", m.footer] : []), ...(m.footerLink ? [`${m.footerLink.label}: ${m.footerLink.url}`] : [])].join("\n");
+  const text = [
+    m.heading,
+    "",
+    ...m.paragraphs,
+    ...(m.button ? ["", `${m.button.label}: ${m.button.url}`] : []),
+    ...(m.footer ? ["", m.footer] : []),
+    ...(m.footerLink ? [`${m.footerLink.label}: ${m.footerLink.url}`] : []),
+  ].join("\n");
   return { to, subject: m.subject, html, text, headers };
 }
 

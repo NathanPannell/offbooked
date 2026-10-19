@@ -60,13 +60,7 @@ export default function ProductionPage() {
       <div className="steps-bar">
         <nav className="steps" aria-label="Production steps">
           {STEPS.map((s, i) => (
-            <button
-              key={s.id}
-              type="button"
-              className="step"
-              aria-current={tab === s.id ? "page" : undefined}
-              onClick={() => selectTab(s.id)}
-            >
+            <button key={s.id} type="button" className="step" aria-current={tab === s.id ? "page" : undefined} onClick={() => selectTab(s.id)}>
               <span className={`step-dot ${done[s.id] ? "is-done" : ""}`} aria-hidden="true">
                 {done[s.id] ? <Check size={13} strokeWidth={3} /> : i + 1}
               </span>
@@ -77,13 +71,10 @@ export default function ProductionPage() {
       </div>
 
       <section className="step-panel" aria-label={STEPS.find((s) => s.id === tab)!.label}>
-        {tab === "script" && (
-          <ScriptTab production={p} onChanged={() => void production.reload()} onDone={() => selectTab("cast")} />
-        )}
+        {tab === "script" && <ScriptTab production={p} onChanged={() => void production.reload()} onDone={() => selectTab("cast")} />}
         {tab === "cast" && <CastTab production={p} onOpenScript={() => selectTab("script")} onOpenPlay={() => selectTab("play")} />}
         {tab === "play" && <RunThroughTab production={p} />}
       </section>
-
     </main>
   );
 }

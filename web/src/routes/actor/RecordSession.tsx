@@ -118,14 +118,9 @@ export function RecordSession({
     if (chosenPart && parts.some((p) => p.id === chosenPart)) return chosenPart;
     return (parts.find((p) => allLines.some((l) => saysPart(l, p.id) && !lineDone(l))) ?? parts[0]!).id;
   }, [parts, chosenPart, allLines]);
-  const actorLines: ActorLine[] = useMemo(
-    () => (activePart ? allLines.filter((l) => saysPart(l, activePart)) : allLines),
-    [allLines, activePart],
-  );
+  const actorLines: ActorLine[] = useMemo(() => (activePart ? allLines.filter((l) => saysPart(l, activePart)) : allLines), [allLines, activePart]);
   /** Parts other than the one in view that still have lines needing a voice. */
-  const otherParts = parts
-    .filter((p) => p.id !== activePart)
-    .map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineDone(l)).length }));
+  const otherParts = parts.filter((p) => p.id !== activePart).map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineDone(l)).length }));
 
   const live = useLiveTake({
     recording: recorder.recording,
@@ -472,7 +467,9 @@ export function RecordSession({
               <NameEditor name={invite.actor.name} onSave={async (name) => onRenamed((await api.rename(name)).actor)} />
             </p>
             <p className="record-progress" aria-live="polite">
-              {allRecorded ? `All ${total} recorded` : (
+              {allRecorded ? (
+                `All ${total} recorded`
+              ) : (
                 <>
                   Line <span className="nums">{progressLabel}</span>
                 </>
@@ -597,16 +594,14 @@ export function RecordSession({
           cueing
             ? "Listening to the cue… tap to start now."
             : current && isRecorded(current.line.id)
-            ? "Recorded. Tap to record it again."
-            : autoAdvance
-              ? "Tap, then say your line."
-              : "Tap, say your line, tap to stop."
+              ? "Recorded. Tap to record it again."
+              : autoAdvance
+                ? "Tap, then say your line."
+                : "Tap, say your line, tap to stop."
         }
         disabled={!current}
         label={current ? `Record line ${actorLines.indexOf(current) + 1}` : "Record"}
-        onToggle={() =>
-          cueing ? accompaniment.stop() : recorder.recording ? void stopRecording() : current && void startRecording(current.line.id)
-        }
+        onToggle={() => (cueing ? accompaniment.stop() : recorder.recording ? void stopRecording() : current && void startRecording(current.line.id))}
         onRetry={() => currentId && void startRecording(currentId)}
       >
         <div className="dock-options">

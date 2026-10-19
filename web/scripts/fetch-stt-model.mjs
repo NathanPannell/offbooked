@@ -39,7 +39,7 @@ async function download(file) {
       if (actual !== file.sha256) throw new Error(`SHA-256 mismatch: got ${actual}`);
       return bytes;
     } catch (err) {
-      if (attempt >= 3) throw new Error(`${file.path}: ${err.message}`);
+      if (attempt >= 3) throw new Error(`${file.path}: ${err.message}`, { cause: err });
       await new Promise((r) => setTimeout(r, 1000 * attempt));
     }
   }

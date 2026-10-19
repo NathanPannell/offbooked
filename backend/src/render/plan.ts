@@ -22,10 +22,7 @@ export interface PlanLine {
   ttsHash?: string | null; // synthesized clip used when there is no take
 }
 
-export type Segment =
-  | { kind: "take"; takeId: string; samples: number }
-  | { kind: "tts"; hash: string; samples: number }
-  | { kind: "silence"; samples: number };
+export type Segment = { kind: "take"; takeId: string; samples: number } | { kind: "tts"; hash: string; samples: number } | { kind: "silence"; samples: number };
 
 export interface TimingEntry {
   lineId: string;

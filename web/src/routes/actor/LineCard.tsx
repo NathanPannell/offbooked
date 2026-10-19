@@ -214,7 +214,6 @@ const formatSeconds = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-
 /**
  * The line as written, with [directions] muted. While a take records with live transcription, words
  * already said are lit and the next word is hinted.
@@ -229,7 +228,12 @@ function LineText({ text, cursor }: { text: string; cursor: number | null }) {
       {pieces.map((piece, i) => {
         const state = states[i];
         if (state === "space") return piece.text;
-        if (state === "direction") return <span key={i} className="lw-dir">{piece.text}</span>;
+        if (state === "direction")
+          return (
+            <span key={i} className="lw-dir">
+              {piece.text}
+            </span>
+          );
         return (
           <span key={i} className={live ? `lw lw-${state}` : undefined}>
             {piece.text}

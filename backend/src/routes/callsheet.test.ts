@@ -58,7 +58,11 @@ describe("call sheet and recording a part yourself", { skip: dbSkip }, () => {
     const empty = await sheet();
     assert.ok(empty.length > 0);
     assert.ok(empty.every((c) => c.lineCount > 0 && c.linesRecorded === 0 && c.takenBy === null && !c.mine));
-    assert.deepEqual(empty.map((c) => c.lineCount), [...empty.map((c) => c.lineCount)].sort((a, b) => b - a), "biggest parts first");
+    assert.deepEqual(
+      empty.map((c) => c.lineCount),
+      [...empty.map((c) => c.lineCount)].sort((a, b) => b - a),
+      "biggest parts first",
+    );
     assert.equal((await get(`/api/productions/${pid}/call-sheet`, bob)).statusCode, 404, "only the owner sees it");
 
     const { joinUrl } = (await get(`/api/productions/${pid}/join-link`)).json();
@@ -83,7 +87,10 @@ describe("call sheet and recording a part yourself", { skip: dbSkip }, () => {
     assert.ok(inviteUrl.endsWith(`/i/${inviteToken}`));
 
     const invite = (await t.app.inject({ method: "GET", url: "/api/invite", headers: asInvite(inviteToken) })).json();
-    assert.deepEqual(invite.characters.map((c: { name: string }) => c.name), ["HORATIO"]);
+    assert.deepEqual(
+      invite.characters.map((c: { name: string }) => c.name),
+      ["HORATIO"],
+    );
     assert.equal(invite.actor.firstName, "Alice", "named already, so the welcome step is skipped");
 
     const again = (await post(`/api/productions/${pid}/record-as`, { characterId: horatio })).json();

@@ -7,15 +7,7 @@ import type { ReviewActions } from "./ScriptReview";
 import { suggestMerges } from "./duplicateCharacters";
 
 /** Rename, merge and add characters. */
-export function CharactersPanel({
-  productionId,
-  characters,
-  actions,
-}: {
-  productionId: string;
-  characters: Character[];
-  actions: ReviewActions;
-}) {
+export function CharactersPanel({ productionId, characters, actions }: { productionId: string; characters: Character[]; actions: ReviewActions }) {
   const [editing, setEditing] = useState<{ id: string; mode: "rename" | "merge" } | null>(null);
   const [name, setName] = useState("");
   const [intoId, setIntoId] = useState("");
@@ -28,7 +20,9 @@ export function CharactersPanel({
 
   return (
     <div className="stack characters-panel">
-      <p className="small muted">Duplicates like “HAMLET” and “HAM.”, or “MACBETH” and “MACBETH (ASIDE)”, can be merged: every line moves to the one you keep.</p>
+      <p className="small muted">
+        Duplicates like “HAMLET” and “HAM.”, or “MACBETH” and “MACBETH (ASIDE)”, can be merged: every line moves to the one you keep.
+      </p>
       <ul className="character-list">
         {sorted.map((c) => (
           <li key={c.id} className="character-row">
@@ -121,7 +115,13 @@ export function CharactersPanel({
           if (await run(() => api.createCharacter(productionId, newName.trim().toUpperCase()))) setNewName("");
         }}
       >
-        <input className="input grow" placeholder="New character name" value={newName} onChange={(e) => setNewName(e.target.value)} aria-label="New character name" />
+        <input
+          className="input grow"
+          placeholder="New character name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          aria-label="New character name"
+        />
         <button className="btn btn-secondary btn-sm" disabled={busy || !newName.trim()}>
           <Plus size={16} aria-hidden="true" /> Add
         </button>

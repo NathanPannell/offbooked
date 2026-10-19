@@ -43,8 +43,8 @@ export function Onboarding({
       body: (
         <>
           <p>
-            {directorName} is putting together a read-through of <em>{productionTitle}</em>. Everyone records their own lines on their phone,
-            whenever suits them.
+            {directorName} is putting together a read-through of <em>{productionTitle}</em>. Everyone records their own lines on their phone, whenever suits
+            them.
           </p>
           <p>No app to install and no account. This link is all you need, so keep it handy.</p>
         </>

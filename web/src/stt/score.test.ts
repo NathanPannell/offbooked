@@ -18,9 +18,7 @@ import {
 
 describe("normalizeWords", () => {
   it("lowercases and strips punctuation", () => {
-    expect(normalizeWords("To be, or not to be: that is the question!")).toEqual(
-      "to be or not to be that is the question".split(" "),
-    );
+    expect(normalizeWords("To be, or not to be: that is the question!")).toEqual("to be or not to be that is the question".split(" "));
   });
 
   it("treats curly and straight apostrophes the same", () => {
@@ -45,15 +43,11 @@ describe("normalizeWords", () => {
   });
 
   it("splits on dashes and ellipses", () => {
-    expect(normalizeWords("My good lord—wait… well-known")).toEqual([
-      "my", "good", "lord", "wait", "well", "known",
-    ]);
+    expect(normalizeWords("My good lord—wait… well-known")).toEqual(["my", "good", "lord", "wait", "well", "known"]);
   });
 
   it("spells out simple numbers", () => {
-    expect(normalizeWords("I have 3 sons and 21 daughters")).toEqual(
-      "i have three sons and twenty one daughters".split(" "),
-    );
+    expect(normalizeWords("I have 3 sons and 21 daughters")).toEqual("i have three sons and twenty one daughters".split(" "));
   });
 
   it("strips surrounding quotes but keeps archaic words", () => {
@@ -255,7 +249,9 @@ describe("annotateLine", () => {
 describe("stage directions in a line", () => {
   it("a take that skips a direction at the start or end is still complete", () => {
     expect(verdict(scoreLine("[His phone pings] This is his Lordship's man.", "this is his lordship's man"))).toBe("complete");
-    expect(verdict(scoreLine("(to ESCALUS) Fellow, why dost thou show me thus to th' world?", "fellow why dost thou show me thus to the world"))).toBe("complete");
+    expect(verdict(scoreLine("(to ESCALUS) Fellow, why dost thou show me thus to th' world?", "fellow why dost thou show me thus to the world"))).toBe(
+      "complete",
+    );
     expect(verdict(scoreLine("Bear me to prison, where I am committed. (Exit.)", "bear me to prison where i am committed"))).toBe("complete");
     expect(verdict(scoreLine("Come, [he rises] bring them away.", "come bring them away"))).toBe("complete");
   });

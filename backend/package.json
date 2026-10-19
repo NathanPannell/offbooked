@@ -11,7 +11,11 @@
     "dev": "node --env-file-if-exists=.env --watch src/server.ts",
     "seed": "node --env-file-if-exists=.env src/seed.ts",
     "test": "node --env-file-if-exists=.env --test --test-concurrency=4 \"src/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:coverage": "node --env-file-if-exists=.env --test --test-concurrency=4 --experimental-test-coverage --test-coverage-lines=93 --test-coverage-branches=84 --test-coverage-functions=90 \"src/**/*.test.ts\"",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write \"src/**/*.ts\" \"bench/*.ts\" eslint.config.js",
+    "format:check": "prettier --check \"src/**/*.ts\" \"bench/*.ts\" eslint.config.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
@@ -25,8 +29,13 @@
     "unpdf": "^1.8.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
     "diff": "^9.0.0",
-    "typescript": "^5.9.3"
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.0"
   }
 }

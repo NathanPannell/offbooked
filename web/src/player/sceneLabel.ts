@@ -4,7 +4,10 @@ import { titleCase } from "../lib/format";
 // Malcolm, Captain, Lennox +1". Names are in order of first line; after `max` the rest are counted.
 
 export function sceneLabel(title: string, speakerIds: string[], names: Map<string, string>, max = 4): string {
-  const who = speakerIds.map((id) => names.get(id)).filter((n): n is string => Boolean(n)).map(titleCase);
+  const who = speakerIds
+    .map((id) => names.get(id))
+    .filter((n): n is string => Boolean(n))
+    .map(titleCase);
   if (who.length === 0) return title;
   const shown = who.slice(0, max).join(", ");
   return `${title} · ${who.length > max ? `${shown} +${who.length - max}` : shown}`;

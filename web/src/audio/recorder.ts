@@ -16,7 +16,10 @@ export function canRecord(): boolean {
 export type MicErrorKind = "denied" | "no-mic" | "busy" | "insecure" | "unsupported" | "unknown";
 
 export class MicError extends Error {
-  constructor(readonly kind: MicErrorKind, message: string) {
+  constructor(
+    readonly kind: MicErrorKind,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -72,8 +75,7 @@ export class MicSession {
     } catch (err) {
       throw toMicError(err);
     }
-    const Ctor: AudioContextCtor | undefined =
-      window.AudioContext ?? (window as unknown as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext;
+    const Ctor: AudioContextCtor | undefined = window.AudioContext ?? (window as unknown as { webkitAudioContext?: AudioContextCtor }).webkitAudioContext;
     if (Ctor) {
       // Only for the level meter; never connected to the speakers.
       this.context = new Ctor();

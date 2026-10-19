@@ -17,14 +17,16 @@ const SPECIAL_HEADING_RE = /^(PROLOGUE|EPILOGUE)\.?$/i;
 const ENTRANCE_RE = /^(?:Enter|Exit|Exeunt|Re-?enter|Manet|Manent|Flourish|Sennet|Alarum|Alarums|Trumpets|Thunder)\b/;
 const VOICE_EXTENSION_RE = /^(?:V\.?\s?O\.?|O\.?\s?S\.?|O\.?\s?C\.?|CONT['’]?D\.?|CONTINUED)$/i;
 const STOPWORDS = new Set(
-  "Yes No Oh O Well Now Ay Nay What Why Come Good Then So Here There Thus Ha Ah Alas Farewell Sir Madam Peace Look Hark Away Go Stay Hold Indeed Enter Exit Exeunt Mr Mrs Ms Dr St Fie Pray Adieu Amen True Note Page".split(" "),
+  "Yes No Oh O Well Now Ay Nay What Why Come Good Then So Here There Thus Ha Ah Alas Farewell Sir Madam Peace Look Hark Away Go Stay Hold Indeed Enter Exit Exeunt Mr Mrs Ms Dr St Fie Pray Adieu Amen True Note Page".split(
+    " ",
+  ),
 );
 
 const CAPS_NAME = String.raw`[A-Z][A-Z0-9'’&\-]*(?:[ .][A-Z][A-Z0-9'’&\-]*){0,3}`;
 const STANDALONE_CUE_RE = new RegExp(String.raw`^(${CAPS_NAME})\.?\s*(?:[(\[]([^)\]]{1,40})[)\]])?\s*[.:]?$`);
 const INLINE_CUE_RE = new RegExp(String.raw`^(${CAPS_NAME})\s*(?:[(\[]([^)\]]{1,40})[)\]])?\s*(?:[.:]\s+|:|\s{2,}|\t+)(.+)$`);
 const TITLE_CUE_RE = /^([A-Z][a-z]{1,11}(?: [A-Z][a-z]{1,11})?)\.\s+(\S.*)$/;
-const COLON_CUE_RE = /^([A-Z][A-Za-z'’\-]{1,15}(?: [A-Z][A-Za-z'’\-]{1,15}){0,2}):\s+(\S.*)$/;
+const COLON_CUE_RE = /^([A-Z][A-Za-z'’-]{1,15}(?: [A-Z][A-Za-z'’-]{1,15}){0,2}):\s+(\S.*)$/;
 
 export function romanToNumber(value: string): string {
   const upper = value.toUpperCase();
@@ -67,7 +69,12 @@ function isHeadingTail(tail: string): boolean {
 }
 
 export function canonicalName(raw: string): string {
-  return raw.trim().replace(/[.:,;]+$/, "").replace(/\s+/g, " ").trim().toUpperCase();
+  return raw
+    .trim()
+    .replace(/[.:,;]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
 }
 
 function isCapsName(name: string): boolean {
@@ -137,7 +144,10 @@ interface Block {
 const UNATTRIBUTED = flag("direction", "No speaker found, so this was treated as a stage direction");
 
 export function heuristicParse(source: string): ParsedLine[] {
-  const rawLines = source.replace(/\r\n?/g, "\n").split("\n").map((l) => l.trim());
+  const rawLines = source
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((l) => l.trim());
   const titleCues = findTitleCues(rawLines);
   const out: ParsedLine[] = [];
   let current: Block | null = null;
@@ -183,7 +193,7 @@ export function heuristicParse(source: string): ParsedLine[] {
       out.push({ kind: "heading", speaker: null, speakerAsWritten: null, text: raw, act: heading.act, scene: heading.scene, flag: null });
       continue;
     }
-    if (/^[(\[]/.test(raw)) {
+    if (/^[([]/.test(raw)) {
       const who: Speaker | null = current?.kind === "dialogue" ? current.who : pending;
       if (!/[)\]]/.test(raw)) {
         flush();

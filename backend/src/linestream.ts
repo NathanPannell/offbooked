@@ -66,19 +66,20 @@ const silentMs = (r: { kind: string; text: string }) => (r.kind === "stage_direc
 // Audio for some of a production's dialogue lines and stage directions, in the order asked (unknown ids are left out).
 // With `waitMs`, waits that long for clips still being made; without it, starts making them in the
 // background and answers at once (ready: false for those). `priority` orders TTS synthesis.
-export async function lineAudio(
-  ctx: Ctx,
-  productionId: string,
-  lineIds: string[],
-  opts: { priority: TtsPriority; waitMs?: number },
-): Promise<LineAudioView[]> {
+export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[], opts: { priority: TtsPriority; waitMs?: number }): Promise<LineAudioView[]> {
   const rows = new Map((await rowsFor(ctx, productionId, lineIds)).map((r) => [r.id, r]));
   const ordered = lineIds.flatMap((id) => (rows.has(id) ? [rows.get(id)!] : []));
   const waitMs = opts.waitMs ?? 0;
   const deadline = (p: Promise<unknown>) => {
     if (waitMs <= 0) return Promise.resolve();
     let timer: NodeJS.Timeout | undefined;
-    return Promise.race([p.then(() => undefined, () => undefined), new Promise<void>((r) => (timer = setTimeout(r, waitMs)))]).finally(() => clearTimeout(timer));
+    return Promise.race([
+      p.then(
+        () => undefined,
+        () => undefined,
+      ),
+      new Promise<void>((r) => (timer = setTimeout(r, waitMs))),
+    ]).finally(() => clearTimeout(timer));
   };
 
   // Shared lines: one voice's take plays as it is, two or more play mixed. Without voice takes
@@ -90,7 +91,14 @@ export async function lineAudio(
     const takes = byVoice.get(r.id);
     if (!takes?.length) continue;
     const t = takes[0]!;
-    Object.assign(r, { takeId: t.id, recordedBy: t.recordedBy, storageKey: t.storageKey, normalizedKey: t.normalizedKey, normalizedSamples: t.normalizedSamples, streamKey: t.streamKey });
+    Object.assign(r, {
+      takeId: t.id,
+      recordedBy: t.recordedBy,
+      storageKey: t.storageKey,
+      normalizedKey: t.normalizedKey,
+      normalizedSamples: t.normalizedSamples,
+      streamKey: t.streamKey,
+    });
     if (takes.length > 1) mixes.set(r.id, takes);
   }
 
@@ -115,14 +123,32 @@ export async function lineAudio(
   for (const r of ordered) {
     if (!r.takeId || !r.storageKey || mixes.has(r.id)) continue;
     const source = r.recordedBy ?? "actor";
-    const row: TakeAudioRow = { id: r.takeId, storageKey: r.storageKey, normalizedKey: r.normalizedKey, normalizedSamples: r.normalizedSamples, streamKey: r.streamKey };
+    const row: TakeAudioRow = {
+      id: r.takeId,
+      storageKey: r.storageKey,
+      normalizedKey: r.normalizedKey,
+      normalizedSamples: r.normalizedSamples,
+      streamKey: r.streamKey,
+    };
     if (r.streamKey && r.normalizedSamples && isCurrentNormalized(r.normalizedKey)) {
-      takeViews.set(r.id, { lineId: r.id, audioUrl: await ctx.storage.signedUrl(r.streamKey), durationMs: samplesToMs(r.normalizedSamples), source, ready: true });
+      takeViews.set(r.id, {
+        lineId: r.id,
+        audioUrl: await ctx.storage.signedUrl(r.streamKey),
+        durationMs: samplesToMs(r.normalizedSamples),
+        source,
+        ready: true,
+      });
       continue;
     }
     const job = normalizedTake(ctx, productionId, row, { stream: true }).then(
       async (t) => {
-        takeViews.set(r.id, { lineId: r.id, audioUrl: t.streamKey ? await ctx.storage.signedUrl(t.streamKey) : null, durationMs: samplesToMs(t.samples), source, ready: true });
+        takeViews.set(r.id, {
+          lineId: r.id,
+          audioUrl: t.streamKey ? await ctx.storage.signedUrl(t.streamKey) : null,
+          durationMs: samplesToMs(t.samples),
+          source,
+          ready: true,
+        });
       },
       (err) => {
         // An unreadable take plays as silence rather than stalling the run-through.
@@ -174,7 +200,14 @@ export async function lineAudio(
       const req = requests.get(r.id);
       const key = req ? clips.get(req.hash)?.cueKey : null;
       if (req && key) {
-        return { lineId: r.id, audioUrl: await ctx.storage.signedUrl(key), durationMs: samplesToMs(clips.get(req.hash)!.samples), source: "tts", ready: true, ...(clips.get(req.hash)!.timings ? { segments: clips.get(req.hash)!.timings! } : {}) };
+        return {
+          lineId: r.id,
+          audioUrl: await ctx.storage.signedUrl(key),
+          durationMs: samplesToMs(clips.get(req.hash)!.samples),
+          source: "tts",
+          ready: true,
+          ...(clips.get(req.hash)!.timings ? { segments: clips.get(req.hash)!.timings! } : {}),
+        };
       }
       // Still being synthesized, or no TTS here (or synthesis failed): silent, like the render.
       if (req && !ttsSettled) return { lineId: r.id, audioUrl: null, durationMs: silentMs(r), source: "tts", ready: false };
@@ -204,7 +237,9 @@ export const playPriority = (prefetch: unknown): TtsPriority => (prefetch === "1
 // anything: the current take's recorder, else "tts" when TTS can voice it, else "none". The player
 // shows these as tags.
 export async function lineSources(ctx: Ctx, productionId: string): Promise<Record<string, AudioSource>> {
-  const rows = await ctx.sql<{ id: string; kind: string; characterId: string | null; text: string; recordedBy: "actor" | "standin" | null; takeId: string | null }[]>`
+  const rows = await ctx.sql<
+    { id: string; kind: string; characterId: string | null; text: string; recordedBy: "actor" | "standin" | null; takeId: string | null }[]
+  >`
     select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id, t.recorded_by
     from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'
     where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') order by l.seq`;

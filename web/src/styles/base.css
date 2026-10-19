@@ -266,7 +266,9 @@ textarea {
   cursor: pointer;
   flex: none;
   text-decoration: none;
-  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
 .icon-btn:hover:not(:disabled) {
@@ -345,7 +347,9 @@ textarea {
   border-radius: var(--radius);
   background: var(--card);
   font-size: 16px;
-  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
 }
 
 .input::placeholder {
@@ -635,7 +639,9 @@ button.chip {
   font-weight: 600;
   font-size: var(--text-sm);
   cursor: pointer;
-  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
 .segmented button:hover:not([aria-pressed="true"]):not(:disabled) {
@@ -645,7 +651,9 @@ button.chip {
 .segmented button[aria-pressed="true"] {
   background: var(--card);
   color: var(--ink);
-  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-sm);
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    var(--shadow-sm);
 }
 
 @media (max-width: 420px) {

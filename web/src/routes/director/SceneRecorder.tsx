@@ -68,8 +68,8 @@ export default function SceneRecorder() {
             </Link>
           </div>
           <p className="muted">
-            Every line {character ? titleCase(character.name) : "they"} says, with what's recorded. Listen back, delete a take, or read one in
-            yourself as a stand-in.
+            Every line {character ? titleCase(character.name) : "they"} says, with what's recorded. Listen back, delete a take, or read one in yourself as a
+            stand-in.
           </p>
         </div>
         <SceneLines
@@ -98,10 +98,7 @@ export default function SceneRecorder() {
             <Headphones size={16} aria-hidden="true" /> Run-through
           </Link>
         </div>
-        <p className="muted">
-          Every line starts in a computer voice. Record any of them here and your take plays instead, until the actor records their
-          own.
-        </p>
+        <p className="muted">Every line starts in a computer voice. Record any of them here and your take plays instead, until the actor records their own.</p>
         <label className="field scene-picker">
           <span>Scene</span>
           <select className="input" value={sectionId} onChange={(e) => setParams({ section: e.target.value }, { replace: true })}>
@@ -114,13 +111,7 @@ export default function SceneRecorder() {
         </label>
       </div>
       {sectionId ? (
-        <SceneLines
-          key={sectionId}
-          productionId={id}
-          cacheKey={`${id}:${sectionId}`}
-          load={() => standins.sectionLines(id, sectionId)}
-          onError={toast}
-        />
+        <SceneLines key={sectionId} productionId={id} cacheKey={`${id}:${sectionId}`} load={() => standins.sectionLines(id, sectionId)} onError={toast} />
       ) : (
         <p className="page muted">This script has no scenes yet.</p>
       )}
@@ -213,7 +204,14 @@ function SceneLines({
     const url = URL.createObjectURL(take.blob);
     try {
       const voiceId = all.find((l) => l.line.id === lineId)?.voiceId ?? null;
-      const clientTakeId = await uploader.add({ kind: "director", token: productionId, lineId, characterId: voiceId, audio: take.blob, durationMs: take.durationMs });
+      const clientTakeId = await uploader.add({
+        kind: "director",
+        token: productionId,
+        lineId,
+        characterId: voiceId,
+        audio: take.blob,
+        durationMs: take.durationMs,
+      });
       setLocalTakes((m) => {
         const next = new Map(m);
         const old = next.get(lineId);
@@ -260,16 +258,19 @@ function SceneLines({
     onError("Take deleted", {
       label: "Undo",
       onClick: () =>
-        void standins.restoreTake(takeId).then(async () => {
-          if (local) {
-            setDeleted((d) => {
-              const next = new Set(d);
-              next.delete(local.clientTakeId);
-              return next;
-            });
-          }
-          await refresh();
-        }, (err) => onError(errorMessage(err))),
+        void standins.restoreTake(takeId).then(
+          async () => {
+            if (local) {
+              setDeleted((d) => {
+                const next = new Set(d);
+                next.delete(local.clientTakeId);
+                return next;
+              });
+            }
+            await refresh();
+          },
+          (err) => onError(errorMessage(err)),
+        ),
     });
   };
 
@@ -314,7 +315,8 @@ function SceneLines({
     <>
       <div className="page scene-filter">
         <p className="small muted nums">
-          {plural(all.length, "line")}: {counts.actor ?? 0} by the cast · {counts.standin ?? 0} stand-in · {(counts.tts ?? 0) + (counts.none ?? 0)} still computer voice
+          {plural(all.length, "line")}: {counts.actor ?? 0} by the cast · {counts.standin ?? 0} stand-in · {(counts.tts ?? 0) + (counts.none ?? 0)} still
+          computer voice
         </p>
         {speakers.length > 1 && !data.data.sections && (
           <div className="chip-row" role="group" aria-label="Show lines for">
@@ -334,7 +336,8 @@ function SceneLines({
           {shown.map((l, i) => {
             const source = voiced(l);
             const actorLine: ActorLine = { line: l.line, sectionTitle: "", cue: l.cue, directions: [], take: l.take, together: l.together };
-            const heading = sectionTitles.size > 0 && (i === 0 || shown[i - 1]!.line.sectionId !== l.line.sectionId) ? sectionTitles.get(l.line.sectionId) : null;
+            const heading =
+              sectionTitles.size > 0 && (i === 0 || shown[i - 1]!.line.sectionId !== l.line.sectionId) ? sectionTitles.get(l.line.sectionId) : null;
             const takeId = shownTake(l);
             return (
               <li

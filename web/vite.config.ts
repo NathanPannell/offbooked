@@ -25,5 +25,15 @@ export default defineConfig({
   worker: { format: "es", plugins: () => [dropUnusedOrtWasm()] },
   optimizeDeps: { exclude: ["@huggingface/transformers"] },
   build: { target: "es2022" },
-  test: { environment: "node", include: ["src/**/*.test.ts"] },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**"],
+      // The floor is the coverage the unit tests reached when it was set; raise it, never lower it.
+      // Screens are covered by the Playwright journeys in e2e/, not here.
+      thresholds: { lines: 23, statements: 23, branches: 23, functions: 15 },
+    },
+  },
 });

@@ -86,15 +86,17 @@ export class SttSession {
     const generation = this.generation;
     const current = () => generation === this.generation;
     this.set({ status: "loading", progress: null });
-    this.engine.load(({ fraction }) => current() && this.set({ progress: fraction })).then(
-      () => {
-        if (!current()) return;
-        this.set({ status: "ready", progress: 1 });
-        this.settleReady(true);
-        requestPersistentStorage();
-      },
-      () => current() && this.fail(),
-    );
+    this.engine
+      .load(({ fraction }) => current() && this.set({ progress: fraction }))
+      .then(
+        () => {
+          if (!current()) return;
+          this.set({ status: "ready", progress: 1 });
+          this.settleReady(true);
+          requestPersistentStorage();
+        },
+        () => current() && this.fail(),
+      );
   }
 
   private fail() {

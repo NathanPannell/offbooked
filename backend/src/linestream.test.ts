@@ -146,7 +146,14 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     lines = made.script.lines;
     const chars = new Map(made.script.characters.map((c: { name: string; id: string }) => [c.name, c.id]));
     hamletId = chars.get("HAMLET") as string;
-    hamlet = (await t.app.inject({ method: "POST", url: `/api/productions/${pid}/cast`, headers: bearer(alice), payload: { name: "Riz", characterIds: [chars.get("HAMLET")] } })).json().member;
+    hamlet = (
+      await t.app.inject({
+        method: "POST",
+        url: `/api/productions/${pid}/cast`,
+        headers: bearer(alice),
+        payload: { name: "Riz", characterIds: [chars.get("HAMLET")] },
+      })
+    ).json().member;
   });
   after(() => t.close());
 
@@ -168,9 +175,18 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     const bobLine = other.script.lines.find((l: Line) => l.kind === "dialogue")!;
     assert.equal((await get(`/api/invite/lines/${bobLine.id}/audio`, invite(hamlet.inviteUrl))).statusCode, 404, "another production's line");
     assert.equal((await get(`/api/invite/lines/${line.id}/audio`, bearer(alice))).statusCode, 401, "the invite route needs an invite token");
-    const warmed = await t.app.inject({ method: "POST", url: "/api/invite/lines/audio/warm", headers: invite(hamlet.inviteUrl), payload: { lineIds: [line.id, bobLine.id] } });
+    const warmed = await t.app.inject({
+      method: "POST",
+      url: "/api/invite/lines/audio/warm",
+      headers: invite(hamlet.inviteUrl),
+      payload: { lineIds: [line.id, bobLine.id] },
+    });
     assert.equal(warmed.statusCode, 200);
-    assert.deepEqual(warmed.json().lines.map((l: { lineId: string }) => l.lineId), [line.id], "lines from elsewhere are left out");
+    assert.deepEqual(
+      warmed.json().lines.map((l: { lineId: string }) => l.lineId),
+      [line.id],
+      "lines from elsewhere are left out",
+    );
     await t.ctx.jobs.idle();
   });
 
@@ -196,13 +212,24 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     const segments = asideAudio.segments as { startMs: number; endMs: number; text: string; narrator: boolean }[];
     assert.deepEqual(
       segments.map((s) => [s.text, s.narrator]),
-      [["Now go.", false], ["To the Servant.", true], ["Was it not", false]],
+      [
+        ["Now go.", false],
+        ["To the Servant.", true],
+        ["Was it not", false],
+      ],
     );
-    assert.ok(segments.every((s, i) => s.endMs > s.startMs && (i === 0 || s.startMs >= segments[i - 1]!.endMs)), JSON.stringify(segments));
+    assert.ok(
+      segments.every((s, i) => s.endMs > s.startMs && (i === 0 || s.startMs >= segments[i - 1]!.endMs)),
+      JSON.stringify(segments),
+    );
     assert.ok(segments.at(-1)!.endMs <= asideAudio.durationMs);
     await t.ctx.sql`update lines set text = ${aside.text} where id = ${aside.id}`;
     const spoken = synth.calls.slice(n);
-    assert.deepEqual(spoken.map((c) => c.text), ["Now go.", "To the Servant.", "Was it not"], "the character pauses for the direction");
+    assert.deepEqual(
+      spoken.map((c) => c.text),
+      ["Now go.", "To the Servant.", "Was it not"],
+      "the character pauses for the direction",
+    );
     assert.deepEqual(
       spoken.map((c) => c.voice === NARRATOR_VOICE_ID),
       [false, true, false],
@@ -245,7 +272,13 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     await until(() => synth.waiting === 1, "the render to start its first clip");
     const warmed = await warm([p1!.id, p2!.id]);
     assert.equal(warmed.statusCode, 200);
-    assert.deepEqual(warmed.json().lines.map((l: { ready: boolean; source: string }) => [l.ready, l.source]), [[false, "tts"], [false, "tts"]]);
+    assert.deepEqual(
+      warmed.json().lines.map((l: { ready: boolean; source: string }) => [l.ready, l.source]),
+      [
+        [false, "tts"],
+        [false, "tts"],
+      ],
+    );
     const listening = audio(now!.id);
     await until(() => t.ctx.tts!.queued === 5, "everything to queue");
     const order: string[] = [];
@@ -253,7 +286,11 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
       await until(() => synth.waiting === 1, "the next clip");
       order.push(synth.releaseOne());
     }
-    assert.deepEqual(order.slice(1, 4), [now!, p1!, p2!].map((l) => speakable(l.text)), "the listener's line, then the prefetches, then the render");
+    assert.deepEqual(
+      order.slice(1, 4),
+      [now!, p1!, p2!].map((l) => speakable(l.text)),
+      "the listener's line, then the prefetches, then the render",
+    );
     const res = await listening;
     assert.equal(res.json().ready, true);
     await render;
@@ -273,8 +310,15 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     // The test above synthesized three render lines with a stand-in voice; everything else once.
     assert.equal(synth.calls.length, utterances + 3 + extraCalls);
     const before = synth.calls.length;
-    const all = await warm(dialogue().slice(0, 30).map((l) => l.id));
-    assert.ok(all.json().lines.every((l: { ready: boolean; audioUrl: string }) => l.ready && l.audioUrl), "every clip is ready after the render");
+    const all = await warm(
+      dialogue()
+        .slice(0, 30)
+        .map((l) => l.id),
+    );
+    assert.ok(
+      all.json().lines.every((l: { ready: boolean; audioUrl: string }) => l.ready && l.audioUrl),
+      "every clip is ready after the render",
+    );
     assert.equal(synth.calls.length, before);
     // Timing from the render matches the clip lengths the player is given.
     const first = rt.render.timing[0];
@@ -285,7 +329,12 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     const own = dialogue().find((l) => l.characterId === hamletId)!;
     const partner = dialogue().find((l) => l.characterId !== hamletId)!;
     const put = (url: string, headers: Record<string, string>) =>
-      t.app.inject({ method: "PUT", url, headers: { ...headers, "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "700" }, payload: wav });
+      t.app.inject({
+        method: "PUT",
+        url,
+        headers: { ...headers, "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "700" },
+        payload: wav,
+      });
     assert.equal((await put(`/api/invite/lines/${own.id}/take`, invite(hamlet.inviteUrl))).statusCode, 200);
     assert.equal((await put(`/api/lines/${partner.id}/take`, bearer(alice))).statusCode, 200);
     const [mineRes, partnerRes] = await Promise.all([audio(own.id), audio(partner.id)]);

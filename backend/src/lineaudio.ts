@@ -26,7 +26,12 @@ export async function cueViews(ctx: Ctx, productionId: string, cues: (LineRow | 
     (takeIds.length ? await sql<TakeRow[]>`select ${takeColumns(sql)} from takes where id = any(${takeIds}::uuid[])` : []).map((t) => [t.id, t]),
   );
 
-  const ttsUrls = await ttsCueUrls(ctx, productionId, present.filter((c) => !c.currentTakeId), opts.waitMs ?? ctx.config.tts.cueWaitMs);
+  const ttsUrls = await ttsCueUrls(
+    ctx,
+    productionId,
+    present.filter((c) => !c.currentTakeId),
+    opts.waitMs ?? ctx.config.tts.cueWaitMs,
+  );
   return Promise.all(
     cues.map(async (cue) => {
       if (!cue) return null;
@@ -46,10 +51,12 @@ async function ttsCueUrls(ctx: Ctx, productionId: string, lines: LineRow[], wait
   const engine = tts && lines.length ? await tts.engine() : null;
   if (!tts || !engine) return urls;
   const voices = await tts.voices(productionId);
-  const byLine = new Map(lines.flatMap((l) => {
-    const r = tts.request(engine, voices.get(l.characterId ?? ""), l.text);
-    return r ? [[l.id, r] as const] : [];
-  }));
+  const byLine = new Map(
+    lines.flatMap((l) => {
+      const r = tts.request(engine, voices.get(l.characterId ?? ""), l.text);
+      return r ? [[l.id, r] as const] : [];
+    }),
+  );
   const requests = [...byLine.values()];
   let clips = await tts.cached(requests.map((r) => r.hash));
   const missing = requests.filter((r) => !clips.get(r.hash)?.cueKey);
@@ -73,7 +80,12 @@ async function ttsCueUrls(ctx: Ctx, productionId: string, lines: LineRow[], wait
 
 // Starts synthesizing cue clips without waiting, e.g. when an actor opens their link.
 export async function warmCues(ctx: Ctx, productionId: string, cues: LineRow[]): Promise<void> {
-  await ttsCueUrls(ctx, productionId, cues.filter((c) => !c.currentTakeId), 0);
+  await ttsCueUrls(
+    ctx,
+    productionId,
+    cues.filter((c) => !c.currentTakeId),
+    0,
+  );
 }
 
 // The cue for each line: the closest earlier dialogue line not said by the same speaker. `isOwn`
