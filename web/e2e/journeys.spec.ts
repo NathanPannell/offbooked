@@ -22,18 +22,21 @@ async function signInAsDirector(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/app$/);
 }
 
+async function createProduction(page: Page, title: string): Promise<void> {
+  await page.goto("/app/new");
+  await page.getByLabel("Title").fill(title);
+  await page.getByRole("button", { name: "Next: add the script" }).click();
+  await expect(page).toHaveURL(/\/app\/p\/[^/?]+/);
+  await page.locator('input[type="file"]').setInputFiles({ name: "hamlet.txt", mimeType: "text/plain", buffer: Buffer.from(SCRIPT) });
+  await expect(page.getByRole("heading", { name: "Send this to your cast" })).toBeVisible({ timeout: 30_000 });
+}
+
 test("a director uploads a script and shares the cast link, and a cast member opens it", async ({ page, browser }, testInfo) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAsDirector(page);
 
-  await page.goto("/app/new");
-  await page.getByLabel("Title").fill("Hamlet (e2e)");
-  await page.getByRole("button", { name: "Next: add the script" }).click();
-  await expect(page).toHaveURL(/\/app\/p\/[^/?]+/);
-
-  await page.locator('input[type="file"]').setInputFiles({ name: "hamlet.txt", mimeType: "text/plain", buffer: Buffer.from(SCRIPT) });
   // Once the script is read, the next step is sharing it: the cast page opens with the parts found.
-  await expect(page.getByRole("heading", { name: "Send this to your cast" })).toBeVisible({ timeout: 30_000 });
+  await createProduction(page, "Hamlet (e2e)");
   await expect(page.getByText("0 of 2 parts taken")).toBeVisible();
   await page.getByRole("button", { name: "Script", exact: true }).click();
   await expect(page.getByText("Stand, and unfold yourself.")).toBeVisible();
@@ -59,4 +62,48 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await page.reload();
   await expect(page.getByText("1 of 2 parts taken")).toBeVisible();
   await actor.close();
+});
+
+test("the screen stays on while the run-through plays", async ({ page }) => {
+  // Stand in for the Screen Wake Lock API and count what the page asks for and gives back.
+  await page.addInitScript(() => {
+    const log = { requested: 0, released: 0 };
+    (window as unknown as { wakeLockLog: typeof log }).wakeLockLog = log;
+    Object.defineProperty(Navigator.prototype, "wakeLock", {
+      configurable: true,
+      get: () => ({
+        request: (type: string) => {
+          if (type !== "screen") return Promise.reject(new TypeError(type));
+          log.requested++;
+          const sentinel = new EventTarget() as EventTarget & { released: boolean; type: string; release: () => Promise<void> };
+          sentinel.released = false;
+          sentinel.type = "screen";
+          sentinel.release = () => {
+            if (!sentinel.released) {
+              sentinel.released = true;
+              log.released++;
+              sentinel.dispatchEvent(new Event("release"));
+            }
+            return Promise.resolve();
+          };
+          return Promise.resolve(sentinel);
+        },
+      }),
+    });
+  });
+  const wakeLock = () => page.evaluate(() => (window as unknown as { wakeLockLog: { requested: number; released: number } }).wakeLockLog);
+
+  await signInAsDirector(page);
+  await createProduction(page, "Hamlet (run-through)");
+  await page.getByRole("button", { name: "Run-through", exact: true }).click();
+  const play = page.getByRole("group", { name: "Playback" }).getByRole("button", { name: "Play", exact: true });
+  await expect(play).toBeEnabled();
+  expect(await wakeLock()).toEqual({ requested: 0, released: 0 });
+
+  await play.click();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect.poll(wakeLock).toEqual({ requested: 1, released: 0 });
+
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await expect.poll(wakeLock).toEqual({ requested: 1, released: 1 });
 });

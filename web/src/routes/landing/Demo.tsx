@@ -1,5 +1,6 @@
 import { Pause, Play } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
+import { useWakeLock } from "../../audio/wakeLock";
 import { DEMO_LINES, DEMO_TITLE, holdMs } from "./demoScript";
 
 export interface DemoHandle {
@@ -21,6 +22,7 @@ export const Demo = forwardRef<DemoHandle>(function Demo(_, ref) {
   const [mode, setMode] = useState<"full" | "mine">("mine");
   const [index, setIndex] = useState(-1);
   const [playing, setPlaying] = useState(false);
+  useWakeLock(playing);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const run = useRef(0);
   const modeRef = useRef(mode);
