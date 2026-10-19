@@ -2,6 +2,7 @@ import { Crosshair, Mic, Pause, Play, SkipBack, SkipForward } from "lucide-react
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
+import { useWakeLock } from "../audio/wakeLock";
 import { CharacterName } from "../components/CharacterName";
 import { Dialog } from "../components/Dialog";
 import { Loading } from "../components/Loading";
@@ -145,6 +146,9 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   }, [engine, queue]);
 
   const state = useSyncExternalStore(engine?.subscribe ?? noopSubscribe, engine?.getState ?? initialState);
+  // Nobody touches the phone during a run-through: keep the screen on for as long as it plays,
+  // through gaps, the listener's own lines and waits for a clip.
+  useWakeLock(state.playing);
 
   useEffect(() => {
     engine?.setPart(part);

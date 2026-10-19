@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/client";
 import { MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
-import { holdWakeLock } from "./wakeLock";
+import { useWakeLock } from "./wakeLock";
 
 /** Only a safety net for a take left running by mistake: real takes never get near it. */
 export const MAX_TAKE_MS = 60 * 60 * 1000;
@@ -17,19 +17,18 @@ export type MicStatus = "idle" | "requesting" | "ready";
 export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => void } = {}) {
   const micRef = useRef<MicSession | null>(null);
   const takeRef = useRef<ActiveTake | null>(null);
-  const releaseWakeLock = useRef<() => void>(() => {});
   const onLimitRef = useRef(onLimit);
   onLimitRef.current = onLimit;
   const [recording, setRecording] = useState<{ lineId: string; startedAt: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [micStatus, setMicStatus] = useState<MicStatus>("idle");
   const [micError, setMicError] = useState<MicError | null>(null);
+  useWakeLock(recording !== null);
 
   useEffect(
     () => () => {
       takeRef.current?.cancel();
       micRef.current?.close();
-      releaseWakeLock.current();
     },
     [],
   );
@@ -62,7 +61,6 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
       setMicError(err instanceof MicError ? err : new MicError("unknown", errorMessage(err)));
       return false;
     }
-    releaseWakeLock.current = holdWakeLock();
     setElapsed(0);
     setRecording({ lineId, startedAt: performance.now() });
     return true;
@@ -72,7 +70,6 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
   const stop = useCallback(async (): Promise<(RecordedTake & { tooShort: boolean }) | null> => {
     const take = takeRef.current;
     takeRef.current = null;
-    releaseWakeLock.current();
     setRecording(null);
     if (!take) return null;
     const recorded = await take.stop();
