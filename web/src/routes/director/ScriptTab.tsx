@@ -8,15 +8,7 @@ import { ParseProgressView } from "./ParseProgressView";
 import { ScriptReview } from "./ScriptReview";
 import { ScriptUpload } from "./ScriptUpload";
 
-export function ScriptTab({
-  production,
-  onChanged,
-  onDone,
-}: {
-  production: Production;
-  onChanged: () => void;
-  onDone: () => void;
-}) {
+export function ScriptTab({ production, onChanged, onDone }: { production: Production; onChanged: () => void; onDone: () => void }) {
   const script = useResource<Script>(() => scriptApi.get(production.id), production.id);
   const [replacing, setReplacing] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -62,13 +54,5 @@ export function ScriptTab({
     );
   }
 
-  return (
-    <ScriptReview
-      production={production}
-      script={data}
-      reload={script.reload}
-      onReplace={() => setReplacing(true)}
-      onDone={onDone}
-    />
-  );
+  return <ScriptReview production={production} script={data} reload={script.reload} onReplace={() => setReplacing(true)} onDone={onDone} />;
 }

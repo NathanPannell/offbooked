@@ -48,7 +48,11 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     // Start synthesizing TTS cues now, so they are ready by the time the recording screen loads.
     ctx.jobs.run("warm actor cues", async () => {
       const items = actorItems(await linesOf(sql, s.production.id), s.characterIds);
-      await warmCues(ctx, s.production.id, items.flatMap((it) => (it.cue ? [it.cue] : [])));
+      await warmCues(
+        ctx,
+        s.production.id,
+        items.flatMap((it) => (it.cue ? [it.cue] : [])),
+      );
     });
     const characters = await sql<{ id: string; name: string }[]>`
       select id, name from characters where id = any(${s.characterIds}::uuid[]) order by lower(name)`;
@@ -120,9 +124,18 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
           order by line_id, created_at desc`
       : [];
     const current = await currentTakes(ctx, ids, s.characterIds, s.actor.id);
-    const together = await togetherViews(ctx, s.production.id, items.map((it) => it.line), new Set(s.characterIds));
+    const together = await togetherViews(
+      ctx,
+      s.production.id,
+      items.map((it) => it.line),
+      new Set(s.characterIds),
+    );
     const takeByLine = new Map(own.map((t) => [t.lineId, t]));
-    const cues = await cueViews(ctx, s.production.id, items.map((it) => it.cue));
+    const cues = await cueViews(
+      ctx,
+      s.production.id,
+      items.map((it) => it.cue),
+    );
     const sectionTitles = new Map(sections.map((sec) => [sec.id, sec.title]));
     const usedSections = new Set(items.map((it) => it.line.sectionId));
     return {
@@ -152,9 +165,11 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
       lineId,
       recorder: { kind: "actor", actorId: s.actor.id },
       lineAllowed: async () =>
-        (await sql`
+        (
+          await sql`
           select 1 from lines where id = ${lineId} and production_id = ${s.production.id} and kind = 'dialogue'
-            and (character_id = any(${s.characterIds}::uuid[]) or voice_ids && ${s.characterIds}::uuid[])`).length > 0,
+            and (character_id = any(${s.characterIds}::uuid[]) or voice_ids && ${s.characterIds}::uuid[])`
+        ).length > 0,
       // On a shared line the take is for the first of the actor's characters who says it.
       voiceId: async () => {
         const [row] = await sql<{ voiceIds: string[] | null }[]>`select voice_ids from lines where id = ${lineId}`;

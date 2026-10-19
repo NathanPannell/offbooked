@@ -1,16 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CAPTURE_RATE, type LiveCapture } from "../audio/liveCapture";
-import {
-  applyPass,
-  decideAdvance,
-  nextPassInterval,
-  passWindowSeconds,
-  rmsDb,
-  segmentLine,
-  startProgress,
-  startVad,
-  vadStep,
-} from "./live";
+import { applyPass, decideAdvance, nextPassInterval, passWindowSeconds, rmsDb, segmentLine, startProgress, startVad, vadStep } from "./live";
 import { prepareForAsr } from "./prepare";
 import type { SttSession } from "./session";
 
@@ -80,7 +70,8 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
     const controller = new AbortController();
     const cleanups: (() => void)[] = [];
 
-    const publish = () => setView((v) => (v && v.lineId === lineId && v.cursor === progress.cursor && v.mode === mode ? v : { lineId, mode, cursor: progress.cursor }));
+    const publish = () =>
+      setView((v) => (v && v.lineId === lineId && v.cursor === progress.cursor && v.mode === mode ? v : { lineId, mode, cursor: progress.cursor }));
     publish();
 
     const evaluate = () => {

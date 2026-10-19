@@ -1,17 +1,6 @@
 import type { SpokenSegment } from "../api/types";
 import type { Clip, ClipLoader } from "./clips";
-import {
-  gapBetweenMs,
-  isMine,
-  nextIndex,
-  NO_PART,
-  playableFrom,
-  prefetchWindow,
-  previousIndex,
-  stepFor,
-  type Part,
-  type QueueLine,
-} from "./queue";
+import { gapBetweenMs, isMine, nextIndex, NO_PART, playableFrom, prefetchWindow, previousIndex, stepFor, type Part, type QueueLine } from "./queue";
 import { silenceUrl } from "./silence";
 
 export interface Gap {

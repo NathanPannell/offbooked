@@ -12,7 +12,7 @@ function readPcm(buf: Buffer, name: string): Pcm {
   if (buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WAVE") throw new Error(`${name} is not a WAV file`);
   let fmt: Buffer | null = null;
   let data: Buffer | null = null;
-  for (let at = 12; at + 8 <= buf.length; ) {
+  for (let at = 12; at + 8 <= buf.length;) {
     const id = buf.toString("ascii", at, at + 4);
     const size = buf.readUInt32LE(at + 4);
     const body = buf.subarray(at + 8, Math.min(buf.length, at + 8 + size));

@@ -75,7 +75,8 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
       }
       if (kind === "text") {
         const text = decodeText(data);
-        if (text.length > MAX_SCRIPT_CHARS) throw new HttpError(413, "payload_too_large", "This script is too long. Split it into parts under 600,000 characters.");
+        if (text.length > MAX_SCRIPT_CHARS)
+          throw new HttpError(413, "payload_too_large", "This script is too long. Split it into parts under 600,000 characters.");
         source = { kind: "text", text, data };
       } else {
         source = { kind, data };
@@ -83,7 +84,8 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
     } else {
       const text = body(req.body).text;
       if (typeof text !== "string" || !text.trim()) throw badRequest("Paste the script text, or upload a file.");
-      if (text.length > MAX_SCRIPT_CHARS) throw new HttpError(413, "payload_too_large", "This script is too long. Split it into parts under 600,000 characters.");
+      if (text.length > MAX_SCRIPT_CHARS)
+        throw new HttpError(413, "payload_too_large", "This script is too long. Split it into parts under 600,000 characters.");
       source = { kind: "text", text };
     }
     await enforce(ctx.sql, ctx.log, `parse:${user.id}`, LIMITS.scriptParse, "Too many script uploads in the last hour. Try again later.");

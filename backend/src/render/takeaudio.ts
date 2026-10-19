@@ -38,7 +38,8 @@ export async function normalizedTake(
   opts: { stream?: boolean; flacTo?: string } = {},
 ): Promise<NormalizedTake> {
   const { storage } = ctx;
-  const have = isCurrentNormalized(take.normalizedKey) && take.normalizedSamples ? { normalizedKey: take.normalizedKey, samples: take.normalizedSamples } : null;
+  const have =
+    isCurrentNormalized(take.normalizedKey) && take.normalizedSamples ? { normalizedKey: take.normalizedKey, samples: take.normalizedSamples } : null;
   if (have && (take.streamKey || !opts.stream) && (await storage.exists(have.normalizedKey))) {
     if (opts.flacTo) await writeFile(opts.flacTo, await storage.get(have.normalizedKey));
     return { ...have, streamKey: take.streamKey };
@@ -72,10 +73,7 @@ async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { 
     await writeFile(source, await storage.get(take.storageKey));
     const samples = await normalizeClip(source, flac, m4a, { clean: true });
     const normalizedKey = `productions/${productionId}/normalized/${take.id}.${NORMALIZE_VERSION}.flac`;
-    await Promise.all([
-      storage.put(normalizedKey, await readFile(flac), "audio/flac"),
-      storage.put(streamKey, await readFile(m4a), "audio/mp4"),
-    ]);
+    await Promise.all([storage.put(normalizedKey, await readFile(flac), "audio/flac"), storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
     await sql`update takes set normalized_key = ${normalizedKey}, normalized_samples = ${samples}, stream_key = ${streamKey} where id = ${take.id}`;
     return { normalizedKey, samples, streamKey };
   } finally {

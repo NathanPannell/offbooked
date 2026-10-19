@@ -15,20 +15,13 @@ const STEPS: Record<Platform, string[]> = {
     "If Chrome itself is blocked: Settings → Apps → Chrome → Permissions → Microphone.",
     "Come back and tap Try again.",
   ],
-  "mac-safari": [
-    "In the menu bar choose Safari → Settings for This Website.",
-    "Set Microphone to Allow.",
-    "Then tap Try again.",
-  ],
+  "mac-safari": ["In the menu bar choose Safari → Settings for This Website.", "Set Microphone to Allow.", "Then tap Try again."],
   "desktop-chrome": [
     "Click the icon at the left of the address bar.",
     "Turn Microphone on (or choose Allow).",
     "Then click Try again. You may need to reload the page.",
   ],
-  "desktop-firefox": [
-    "Click the microphone icon in the address bar.",
-    "Remove the block, then click Try again and choose Allow.",
-  ],
+  "desktop-firefox": ["Click the microphone icon in the address bar.", "Remove the block, then click Try again and choose Allow."],
   "desktop-other": ["Allow microphone access for this site in your browser's settings, then try again."],
 };
 

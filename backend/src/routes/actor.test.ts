@@ -30,7 +30,12 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
   const as = (who: { inviteUrl: string }) => invite(who.inviteUrl);
   const linesOf = (name: string) => lines.filter((l) => l.kind === "dialogue" && l.characterId === chars.get(name));
   const upload = (who: { inviteUrl: string }, lineId: string, takeId = randomUUID(), audio = wav, type = "audio/wav") =>
-    t.app.inject({ method: "PUT", url: `/api/invite/lines/${lineId}/take`, headers: { ...as(who), "content-type": type, "x-take-id": takeId, "x-duration-ms": "700" }, payload: audio });
+    t.app.inject({
+      method: "PUT",
+      url: `/api/invite/lines/${lineId}/take`,
+      headers: { ...as(who), "content-type": type, "x-take-id": takeId, "x-duration-ms": "700" },
+      payload: audio,
+    });
 
   before(async () => {
     t = await createTestApp();
@@ -46,7 +51,9 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     lines = made.script.lines;
     chars = new Map(made.script.characters.map((c: { name: string; id: string }) => [c.name, c.id]));
     const cast = async (production: string, name: string, characterIds: string[], email?: string) =>
-      (await t.app.inject({ method: "POST", url: `/api/productions/${production}/cast`, headers: bearer(director), payload: { name, email, characterIds } })).json().member;
+      (
+        await t.app.inject({ method: "POST", url: `/api/productions/${production}/cast`, headers: bearer(director), payload: { name, email, characterIds } })
+      ).json().member;
     hamlet = await cast(pid, "Riz", [chars.get("HAMLET")!]);
     horatio = await cast(pid, "Jo", [chars.get("HORATIO")!, chars.get("MARCELLUS")!], "jo@example.test");
     const other = await productionWithScript(t, director, "ANNA: Hello there.\nBEN: Hi.", "Other");
@@ -82,7 +89,10 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     assert.ok(leaked.length <= res.lines.length, "only cue lines of other characters are visible");
     const first = res.lines[0];
     assert.equal(first.cue.characterName, "HAMLET");
-    assert.equal(first.cue.text, "O that this too too solid flesh would melt, Thaw, and resolve itself into a dew! How weary, stale, flat, and unprofitable Seem to me all the uses of this world! But break my heart, for I must hold my tongue.");
+    assert.equal(
+      first.cue.text,
+      "O that this too too solid flesh would melt, Thaw, and resolve itself into a dew! How weary, stale, flat, and unprofitable Seem to me all the uses of this world! But break my heart, for I must hold my tongue.",
+    );
     assert.deepEqual(first.directions, ["[Enter Horatio, Marcellus and Bernardo.]"]);
     assert.equal(first.take, null);
     assert.equal(first.sectionTitle, "Act 1, Scene 2");
@@ -149,7 +159,11 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     assert.equal(stt.statusCode, 204);
     const again = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: as(hamlet) })).json().lines[0].take;
     assert.equal(again.stt.accuracy, 0.9);
-    assert.equal((await t.app.inject({ method: "POST", url: `/api/invite/takes/${second.take.id}/stt`, headers: as(horatio), payload: { transcript: "", accuracy: 1 } })).statusCode, 404);
+    assert.equal(
+      (await t.app.inject({ method: "POST", url: `/api/invite/takes/${second.take.id}/stt`, headers: as(horatio), payload: { transcript: "", accuracy: 1 } }))
+        .statusCode,
+      404,
+    );
   });
 
   test("per-line take cap", async () => {
@@ -243,7 +257,10 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().practice.avgAccuracy, 0.75);
-    assert.equal((await t.app.inject({ method: "POST", url: "/api/invite/contact", headers: as(hamlet), payload: { email: "riz@example.test" } })).statusCode, 204);
+    assert.equal(
+      (await t.app.inject({ method: "POST", url: "/api/invite/contact", headers: as(hamlet), payload: { email: "riz@example.test" } })).statusCode,
+      204,
+    );
     assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: as(hamlet) })).json().hasEmail, true);
   });
 
@@ -251,11 +268,18 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     const reset = (await t.app.inject({ method: "POST", url: `/api/cast/${horatio.id}/reset-link`, headers: bearer(director) })).json().member;
     const old = await t.app.inject({ method: "GET", url: "/api/invite", headers: as(horatio) });
     assert.equal(old.statusCode, 410);
-    assert.deepEqual({ directorName: old.json().directorName, productionTitle: old.json().productionTitle }, { directorName: "Sam", productionTitle: "Hamlet" });
+    assert.deepEqual(
+      { directorName: old.json().directorName, productionTitle: old.json().productionTitle },
+      { directorName: "Sam", productionTitle: "Hamlet" },
+    );
     assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) })).statusCode, 200);
 
     await t.app.inject({ method: "PATCH", url: `/api/productions/${pid}`, headers: bearer(director), payload: { performanceDate: "2020-01-01" } });
-    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) })).statusCode, 410, "expired 14 days after the performance");
+    assert.equal(
+      (await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) })).statusCode,
+      410,
+      "expired 14 days after the performance",
+    );
     await t.app.inject({ method: "PATCH", url: `/api/productions/${pid}`, headers: bearer(director), payload: { performanceDate: null } });
     await t.app.inject({ method: "POST", url: `/api/productions/${pid}/archive`, headers: bearer(director) });
     const archived = await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) });

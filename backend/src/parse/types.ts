@@ -17,7 +17,16 @@ export interface ParsedLine {
 export interface StructuredScript {
   sections: { act: string | null; scene: string | null; title: string }[];
   characters: { name: string; aliases: string[] }[];
-  lines: { section: number; kind: LineKind; character: string | null; text: string; flagCode: FlagCode | null; flagReason: string | null; sourceLine: number | null; page: number | null }[];
+  lines: {
+    section: number;
+    kind: LineKind;
+    character: string | null;
+    text: string;
+    flagCode: FlagCode | null;
+    flagReason: string | null;
+    sourceLine: number | null;
+    page: number | null;
+  }[];
 }
 
 export interface ParseUsage {

@@ -125,8 +125,17 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
       (await sql<{ id: string; name: string }[]>`select id, name from characters where production_id = ${productionId}`).map((c) => [c.id, c.name]),
     );
     const ttsReady = ctx.tts ? Boolean(await ctx.tts.engine()) : false;
-    const cues = await cueViews(ctx, productionId, items.map((it) => it.cue));
-    const together = await togetherViews(ctx, productionId, items.map((it) => it.line), new Set(voice ? [voice.id] : []));
+    const cues = await cueViews(
+      ctx,
+      productionId,
+      items.map((it) => it.cue),
+    );
+    const together = await togetherViews(
+      ctx,
+      productionId,
+      items.map((it) => it.line),
+      new Set(voice ? [voice.id] : []),
+    );
     return Promise.all(
       items.map(async ({ line }, i) => {
         const id = takeFor(line);
@@ -135,7 +144,14 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
         return {
           line: lineView(line),
           // A shared line is read as the character in view, or by all its voices in a scene.
-          characterName: voice?.name ?? (line.voiceIds ? line.voiceIds.map((v) => names.get(v) ?? "").filter(Boolean).join(" & ") : (names.get(line.characterId!) ?? "")),
+          characterName:
+            voice?.name ??
+            (line.voiceIds
+              ? line.voiceIds
+                  .map((v) => names.get(v) ?? "")
+                  .filter(Boolean)
+                  .join(" & ")
+              : (names.get(line.characterId!) ?? "")),
           take: take ? await takeView(storage, take) : null,
           audioSource,
           cue: cues[i] ?? null,

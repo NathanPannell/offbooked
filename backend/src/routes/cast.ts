@@ -52,7 +52,9 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
     const phone = optionalString(b, "phone", 40) ?? null;
     const characterIds = uuidList(b, "characterIds", true)!;
     const actorId = await sql.begin(async (tx) => {
-      const [row] = await tx<{ id: string }[]>`insert into actors (production_id, name, email, phone) values (${p.id}, ${name}, ${email}, ${phone}) returning id`;
+      const [row] = await tx<
+        { id: string }[]
+      >`insert into actors (production_id, name, email, phone) values (${p.id}, ${name}, ${email}, ${phone}) returning id`;
       await assignCharacters(tx, p.id, row!.id, characterIds);
       return row!.id;
     });
@@ -89,7 +91,18 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get("/api/productions/:id/call-sheet", async (req) => {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, idOf(req.params));
-    const rows = await sql<{ id: string; name: string; lineCount: number; linesRecorded: number; sharedLines: number; takenBy: string | null; actorId: string | null; mine: boolean }[]>`
+    const rows = await sql<
+      {
+        id: string;
+        name: string;
+        lineCount: number;
+        linesRecorded: number;
+        sharedLines: number;
+        takenBy: string | null;
+        actorId: string | null;
+        mine: boolean;
+      }[]
+    >`
       select c.id, c.name,
         (select count(*)::int from line_voices lv where lv.character_id = c.id) as line_count,
         (select count(*)::int from line_voices lv where lv.character_id = c.id

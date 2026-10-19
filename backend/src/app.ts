@@ -62,8 +62,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     if (err instanceof HttpError) return reply.code(err.status).send({ error: { code: err.code, message: err.message }, ...err.extra });
     const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500;
     if (status === 500) req.log.error({ err }, "request failed");
-    const message =
-      status === 413 ? "That upload is too large." : status === 500 ? "Something went wrong on our side. Try again." : err.message;
+    const message = status === 413 ? "That upload is too large." : status === 500 ? "Something went wrong on our side. Try again." : err.message;
     return reply.code(status).send({ error: { code: STATUS_CODES[status] ?? "error", message } });
   });
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: { code: "not_found", message: "Not found." } }));

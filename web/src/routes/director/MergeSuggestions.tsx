@@ -51,8 +51,11 @@ export function MergeSuggestions({
             return (
               <li key={key} className="merge-row">
                 <span className="grow">
-                  <CharacterName name={s.from.name} /> <span className="small muted">({s.from.lineCount} {s.from.lineCount === 1 ? "line" : "lines"})</span> looks like{" "}
-                  <CharacterName name={s.into.name} />
+                  <CharacterName name={s.from.name} />{" "}
+                  <span className="small muted">
+                    ({s.from.lineCount} {s.from.lineCount === 1 ? "line" : "lines"})
+                  </span>{" "}
+                  looks like <CharacterName name={s.into.name} />
                 </span>
                 <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void onMerge(s.from, s.into)}>
                   Merge into {s.into.name}

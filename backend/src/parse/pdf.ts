@@ -52,13 +52,7 @@ export function dropOverprints<T extends Item>(items: T[]): T[] {
   const sorted = [...items].sort((a, b) => b.str.length - a.str.length);
   const kept: T[] = [];
   for (const it of sorted) {
-    const dup = kept.some(
-      (k) =>
-        Math.abs(k.y - it.y) <= tol &&
-        it.x >= k.x - tol &&
-        it.x + it.width <= k.x + k.width + tol &&
-        k.str.includes(it.str.trim()),
-    );
+    const dup = kept.some((k) => Math.abs(k.y - it.y) <= tol && it.x >= k.x - tol && it.x + it.width <= k.x + k.width + tol && k.str.includes(it.str.trim()));
     if (!dup) kept.push(it);
   }
   return items.filter((it) => kept.includes(it));
@@ -167,7 +161,11 @@ function dropRunningHeaders(pages: PageLine[][]): PageLine[][] {
 // Inserts a blank line where the vertical gap is clearly larger than normal line spacing.
 function withParagraphBreaks(lines: PageLine[]): string {
   if (lines.length < 2) return lines.map((l) => l.text).join("\n");
-  const gaps = lines.slice(1).map((l, i) => lines[i]!.y - l.y).filter((g) => g > 0).sort((a, b) => a - b);
+  const gaps = lines
+    .slice(1)
+    .map((l, i) => lines[i]!.y - l.y)
+    .filter((g) => g > 0)
+    .sort((a, b) => a - b);
   const typical = gaps[Math.floor(gaps.length / 2)] ?? 0;
   return lines
     .map((l, i) => {

@@ -39,7 +39,13 @@ describe("cast join link and script source", { skip: dbSkip }, () => {
     const { inviteToken } = claim.json();
     const invite = await t.app.inject({ method: "GET", url: "/api/invite", headers: { authorization: `Invite ${inviteToken}` } });
     assert.equal(invite.statusCode, 200);
-    assert.deepEqual(invite.json().characters.map((c: { name: string }) => c.name).sort(), ["HAMLET", "HORATIO"]);
+    assert.deepEqual(
+      invite
+        .json()
+        .characters.map((c: { name: string }) => c.name)
+        .sort(),
+      ["HAMLET", "HORATIO"],
+    );
 
     const after = (await get(`/api/join/${token}`)).json();
     assert.equal(after.characters.find((c: { id: string }) => c.id === hamlet.id).takenBy, "Riz");

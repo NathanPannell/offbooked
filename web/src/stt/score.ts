@@ -12,8 +12,26 @@ export const COMPLETE_COVERAGE = 0.7;
 export const SHORT_LINE_WORDS = 3;
 
 const ONES = [
-  "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-  "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen",
+  "zero",
+  "one",
+  "two",
+  "three",
+  "four",
+  "five",
+  "six",
+  "seven",
+  "eight",
+  "nine",
+  "ten",
+  "eleven",
+  "twelve",
+  "thirteen",
+  "fourteen",
+  "fifteen",
+  "sixteen",
+  "seventeen",
+  "eighteen",
+  "nineteen",
 ];
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
 
@@ -39,7 +57,13 @@ function yearToWords(n: number): string {
 }
 
 const ORDINAL_WORDS: Record<string, string> = {
-  one: "first", two: "second", three: "third", five: "fifth", eight: "eighth", nine: "ninth", twelve: "twelfth",
+  one: "first",
+  two: "second",
+  three: "third",
+  five: "fifth",
+  eight: "eighth",
+  nine: "ninth",
+  twelve: "twelfth",
 };
 
 function ordinalToWords(n: number): string {
@@ -185,9 +209,15 @@ function collapseRepeatedTail(words: string[]): string[] {
   for (let size = 1; size <= 6; size++) {
     let repeats = 1;
     while ((repeats + 1) * size <= words.length) {
-      const a = words.slice(words.length - size).map(key).join(" ");
+      const a = words
+        .slice(words.length - size)
+        .map(key)
+        .join(" ");
       const start = words.length - (repeats + 1) * size;
-      const b = words.slice(start, start + size).map(key).join(" ");
+      const b = words
+        .slice(start, start + size)
+        .map(key)
+        .join(" ");
       if (a !== b) break;
       repeats++;
     }

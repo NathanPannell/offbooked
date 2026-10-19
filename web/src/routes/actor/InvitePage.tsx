@@ -51,10 +51,16 @@ export default function InvitePage() {
       />
     );
   }
-  if (!alreadyStarted) return <Welcome invite={data} onStart={async (firstName) => {
-    await api.start(firstName);
-    setStarted(true);
-  }} />;
+  if (!alreadyStarted)
+    return (
+      <Welcome
+        invite={data}
+        onStart={async (firstName) => {
+          await api.start(firstName);
+          setStarted(true);
+        }}
+      />
+    );
   return (
     <RecordSession
       token={token}
@@ -99,22 +105,14 @@ function Welcome({ invite, onStart }: { invite: Invite; onStart: (firstName: str
           ))}
         </h1>
         <p className="marquee-meta">
-          {invite.production.directorName} invited you to record {plural(invite.linesTotal, "line")}. It takes a few
-          minutes.
+          {invite.production.directorName} invited you to record {plural(invite.linesTotal, "line")}. It takes a few minutes.
         </p>
       </div>
 
       <form className="welcome-form stack" onSubmit={submit}>
         <label className="field">
           <span>Your first name</span>
-          <input
-            className="input input-lg"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoComplete="given-name"
-            required
-            enterKeyHint="go"
-          />
+          <input className="input input-lg" value={name} onChange={(e) => setName(e.target.value)} autoComplete="given-name" required enterKeyHint="go" />
         </label>
         {error && (
           <p className="field-error" role="alert">
@@ -124,9 +122,7 @@ function Welcome({ invite, onStart }: { invite: Invite; onStart: (firstName: str
         <button className="btn btn-primary btn-lg btn-block" disabled={busy || !name.trim()}>
           {busy ? "Starting…" : "Start"}
         </button>
-        <p className="small muted consent">
-          Your recordings are shared with the cast and director of {invite.production.title}. No account needed.
-        </p>
+        <p className="small muted consent">Your recordings are shared with the cast and director of {invite.production.title}. No account needed.</p>
       </form>
       <span className="sr-only">You're playing {joinNames(roles)}.</span>
     </main>
@@ -148,11 +144,7 @@ function LinkGone({ body, token }: { body: Record<string, unknown> | null; token
           {director ? `Ask ${director} for a fresh one.` : "Ask your director for a fresh one."}
         </p>
         {joinToken && (
-          <a
-            className="btn btn-primary"
-            href={`/join/${joinToken}`}
-            onClick={() => forgetJoin(joinToken)}
-          >
+          <a className="btn btn-primary" href={`/join/${joinToken}`} onClick={() => forgetJoin(joinToken)}>
             Pick your part again
           </a>
         )}

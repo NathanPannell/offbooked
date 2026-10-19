@@ -1,5 +1,5 @@
 import { Crosshair, Mic, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
 import { CharacterName } from "../components/CharacterName";
@@ -69,14 +69,16 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
 
   // Role, my-line mode and speed: remembered per production, read once the run-through loads.
   const productionId = data?.production.id;
-  useEffect(() => {
-    if (!productionId) return;
+  const loadStored = useEffectEvent((productionId: string) => {
     const roles = new Set([...(isActor ? [MY_PART] : []), ...characters.map((c) => c.id)]);
     const loaded = loadSettings(productionId, defaultSettings(isActor, initialMode), roles);
     const withMode = initialMode === "mine" ? { ...loaded, role: loaded.role || (isActor ? MY_PART : ""), mode: "pause" as const } : loaded;
     // Opened for one part: only its lines are yours, and the scene list keeps only its scenes.
     setStored(initialRole && roles.has(initialRole) ? { ...withMode, role: initialRole } : withMode);
+  });
+  useEffect(() => {
     // Only when the production changes: later reloads of the same run-through keep the settings.
+    if (productionId) loadStored(productionId);
   }, [productionId]);
   const settings = stored ?? defaultSettings(isActor, initialMode);
   const update = (patch: Partial<PlayerSettings>) => {
@@ -121,6 +123,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   // The engine owns the <audio> element and the clip cache for the life of the screen.
   const linesRef = useRef(lineById);
   linesRef.current = lineById;
+  const hasData = data !== undefined;
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
@@ -135,7 +138,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
       e.destroy();
       clips.dispose();
     };
-  }, [data !== undefined, audio]);
+  }, [hasData, audio]);
 
   useEffect(() => {
     engine?.setLines(queue);
@@ -252,7 +255,10 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   const sections = [...data.sections].sort((a, b) => a.seq - b.seq);
   // With a part picked, the scene list keeps only the scenes that part speaks in.
   const sceneChoices = hasRole ? sections.filter((s) => speakersBySection.get(s.id)?.some((id) => roleIds.has(id))) : sections;
-  const ownNames = myCharacterIds.map((id) => characterName.get(id)).filter(Boolean).join(" & ");
+  const ownNames = myCharacterIds
+    .map((id) => characterName.get(id))
+    .filter(Boolean)
+    .join(" & ");
   const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
   const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
   const canScore = pausing && onPracticeDone !== undefined;
@@ -401,9 +407,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                             {who && <CharacterName name={who} />}
                             {label.voices && <span className="lyric-voices">{label.voices}</span>}
                             {isMine && <span className="sr-only">{skipped ? "(your line, silent)" : "(your line)"}</span>}
-                            {result && (
-                              <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>
-                            )}
+                            {result && <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>}
                           </span>
                         )}
                         {isCurrent && engine && audioRef.current ? (
@@ -451,13 +455,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
       )}
 
       <div className="player-controls" role="group" aria-label="Playback">
-        <button
-          type="button"
-          className="speed-btn"
-          onClick={() => update({ speed: nextSpeed })}
-          aria-label={speedLabel}
-          title={speedLabel}
-        >
+        <button type="button" className="speed-btn" onClick={() => update({ speed: nextSpeed })} aria-label={speedLabel} title={speedLabel}>
           {formatSpeed(settings.speed)}
         </button>
         <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">

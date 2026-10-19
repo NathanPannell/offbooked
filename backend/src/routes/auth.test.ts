@@ -72,7 +72,11 @@ describe("director auth", { skip: dbSkip }, () => {
 
   test("CORS allows configured origins including wildcard hosts", async () => {
     const preflight = (origin: string) =>
-      t.app.inject({ method: "OPTIONS", url: "/api/productions", headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "authorization,x-take-id" } });
+      t.app.inject({
+        method: "OPTIONS",
+        url: "/api/productions",
+        headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "authorization,x-take-id" },
+      });
     const ok = await preflight("https://offbooked-git-mvp-team.vercel.app");
     assert.equal(ok.headers["access-control-allow-origin"], "https://offbooked-git-mvp-team.vercel.app");
     assert.match(String(ok.headers["access-control-allow-headers"]), /X-Take-Id/i);

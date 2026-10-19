@@ -59,25 +59,20 @@ export function ScriptReview({
     return map;
   }, [lines]);
   const lineById = useMemo(() => new Map(lines.map((l) => [l.id, l])), [lines]);
-  const selected = selectedId ? lineById.get(selectedId) ?? null : null;
+  const selected = selectedId ? (lineById.get(selectedId) ?? null) : null;
   const recordingStarted = production.progress.linesRecorded > 0;
 
-  const goTo = useCallback(
-    (line: Line | null, open = true) => {
-      if (!line) return;
-      setSelectedId(line.id);
-      if (open) {
-        setEditingId(line.id);
-        setStartText(null);
-      }
-      // After React commits (the editor moves to this line), measure and scroll: see reviewScroll.ts.
-      scrollToLine(line.id);
-      requestAnimationFrame(() =>
-        document.getElementById(`line-${line.id}`)?.querySelector<HTMLElement>(".script-line")?.focus({ preventScroll: true }),
-      );
-    },
-    [],
-  );
+  const goTo = useCallback((line: Line | null, open = true) => {
+    if (!line) return;
+    setSelectedId(line.id);
+    if (open) {
+      setEditingId(line.id);
+      setStartText(null);
+    }
+    // After React commits (the editor moves to this line), measure and scroll: see reviewScroll.ts.
+    scrollToLine(line.id);
+    requestAnimationFrame(() => document.getElementById(`line-${line.id}`)?.querySelector<HTMLElement>(".script-line")?.focus({ preventScroll: true }));
+  }, []);
 
   // ---- edits ----
 
@@ -224,7 +219,7 @@ export function ScriptReview({
   lineKeyRef.current = onLineKey;
   const stableLineKey = useCallback((e: KeyboardEvent, line: Line) => lineKeyRef.current(e, line), []);
 
-  const editing = editingId ? lineById.get(editingId) ?? null : null;
+  const editing = editingId ? (lineById.get(editingId) ?? null) : null;
 
   return (
     <div className={`review ${sourceOpen ? "source-open" : ""}`}>
@@ -275,9 +270,7 @@ export function ScriptReview({
                     onClose={() => {
                       setEditingId(null);
                       // After React swaps the editor back for the plain line.
-                      setTimeout(() =>
-                        document.getElementById(`line-${line.id}`)?.querySelector<HTMLElement>(".script-line")?.focus({ preventScroll: true }),
-                      );
+                      setTimeout(() => document.getElementById(`line-${line.id}`)?.querySelector<HTMLElement>(".script-line")?.focus({ preventScroll: true }));
                     }}
                   />
                 )}
@@ -361,7 +354,11 @@ function ScriptSection({
   const hasOpen = lines.some((l) => l.id === editingId || l.id === selectedId);
 
   return (
-    <section id={`section-${section.id}`} className={`script-section ${hasOpen ? "has-open" : ""}`} style={{ containIntrinsicSize: `auto ${lines.length * 64}px` }}>
+    <section
+      id={`section-${section.id}`}
+      className={`script-section ${hasOpen ? "has-open" : ""}`}
+      style={{ containIntrinsicSize: `auto ${lines.length * 64}px` }}
+    >
       <header className="section-head">
         {renaming ? (
           <form
@@ -420,7 +417,7 @@ function ScriptSection({
             ) : (
               <ScriptLine
                 line={line}
-                characterName={line.characterId ? characters.get(line.characterId)?.name ?? null : null}
+                characterName={line.characterId ? (characters.get(line.characterId)?.name ?? null) : null}
                 voices={speakerLabel(line, characters).voices}
                 selected={line.id === selectedId}
                 onOpen={onOpen}
@@ -454,17 +451,11 @@ const ScriptLine = memo(function ScriptLine({
   // A click on the text starts editing it right there; a click on the name opens the line's controls.
   const open = (e: MouseEvent<HTMLButtonElement>) => {
     const onText = (e.target as HTMLElement).closest(".script-text");
-    onOpen(line, onText ? caretFromClick(e) ?? "end" : null);
+    onOpen(line, onText ? (caretFromClick(e) ?? "end") : null);
   };
   return (
     <div className={classes}>
-      <button
-        type="button"
-        className="script-line"
-        onClick={open}
-        onKeyDown={(e) => onKey(e, line)}
-        aria-expanded={false}
-      >
+      <button type="button" className="script-line" onClick={open} onKeyDown={(e) => onKey(e, line)} aria-expanded={false}>
         {line.kind === "dialogue" &&
           (characterName ? (
             <span className="script-speaker-row">

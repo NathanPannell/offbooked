@@ -3,7 +3,13 @@ import { flag, type Flag } from "./flags.ts";
 import { canonicalName } from "./heuristic.ts";
 import type { ParsedLine, StructuredScript } from "./types.ts";
 
-const words = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+const words = (s: string) =>
+  s
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
 const JOINT = /[/&,+]|\bAND\b|\bBOTH\b|\bALL\b/i;
 
 // "HAM" abbreviates "HAMLET"; "LADY M" abbreviates "LADY MACBETH". A whole-word prefix is not an
@@ -141,11 +147,27 @@ export function buildStructure(parsed: ParsedLine[]): StructuredScript {
     }
     const character = chars.nameFor(p);
     if (p.kind === "dialogue" && !character) {
-      lines.push({ section: sections.length - 1, kind: "stage_direction", character: null, text, ...stored(p.flag ?? NO_SPEAKER), sourceLine: p.sourceLine ?? null, page: null });
+      lines.push({
+        section: sections.length - 1,
+        kind: "stage_direction",
+        character: null,
+        text,
+        ...stored(p.flag ?? NO_SPEAKER),
+        sourceLine: p.sourceLine ?? null,
+        page: null,
+      });
       return;
     }
     if (p.kind === "dialogue") hasDialogue = true;
-    lines.push({ section: sections.length - 1, kind: p.kind, character, text, ...stored(p.flag ?? chars.flagFor(p, index)), sourceLine: p.sourceLine ?? null, page: null });
+    lines.push({
+      section: sections.length - 1,
+      kind: p.kind,
+      character,
+      text,
+      ...stored(p.flag ?? chars.flagFor(p, index)),
+      sourceLine: p.sourceLine ?? null,
+      page: null,
+    });
   });
 
   const used = new Set(lines.map((l) => l.character).filter(Boolean));

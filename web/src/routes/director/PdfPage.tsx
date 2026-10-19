@@ -1,7 +1,7 @@
 import { getDocument, GlobalWorkerOptions, RenderingCancelledException, Util, type PDFDocumentProxy } from "pdfjs-dist";
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { directorHeaders } from "../../api/client";
 import { matchTextItems } from "./sourceMatch";
 
@@ -66,6 +66,9 @@ export default function PdfPage({
     return () => observer.disconnect();
   }, []);
 
+  // The parent's callbacks, always the latest ones; a new callback does not redraw the page.
+  const reportPageCount = useEffectEvent((count: number) => onPageCount(count));
+  const reportMatch = useEffectEvent((found: boolean | null) => onMatch(found));
   useEffect(() => {
     if (!width || !canvasRef.current) return;
     let cancelled = false;
@@ -75,7 +78,7 @@ export default function PdfPage({
       try {
         const doc = await loadDocument(url, cacheKey);
         if (cancelled) return;
-        onPageCount(doc.numPages);
+        reportPageCount(doc.numPages);
         const pageNumber = Math.min(Math.max(1, page), doc.numPages);
         const pdfPage = await doc.getPage(pageNumber);
         if (cancelled) return;
@@ -95,7 +98,7 @@ export default function PdfPage({
 
         if (!highlight) {
           setBoxes([]);
-          onMatch(null);
+          reportMatch(null);
           return;
         }
         const content = await pdfPage.getTextContent();
@@ -112,19 +115,18 @@ export default function PdfPage({
           return { left: tx[4]!, top: tx[5]! - fontHeight * 0.95, width: item.width * viewport.scale, height: fontHeight * 1.2 };
         });
         setBoxes(found);
-        onMatch(found.length > 0);
+        reportMatch(found.length > 0);
       } catch (err) {
         if (cancelled || err instanceof RenderingCancelledException) return;
         setRendering(false);
         setError("Couldn't open the original PDF.");
-        onMatch(false);
+        reportMatch(false);
       }
     })();
     return () => {
       cancelled = true;
       task?.cancel();
     };
-    // onPageCount and onMatch are state setters from the parent.
   }, [url, cacheKey, page, highlight, width]);
 
   // SourcePane keeps the highlight centred in the pane (as boxes arrive, the sheet opens or resizes).

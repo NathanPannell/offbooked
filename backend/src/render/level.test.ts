@@ -23,10 +23,21 @@ after(async () => {
 async function voice(name: string, db: number, seconds: number, noise?: number): Promise<string> {
   const file = path.join(dir, `${name}.wav`);
   const tone = `sine=f=220:r=48000:d=${seconds},volume=${db}dB,volume='if(lt(mod(t,0.6),0.3),1,0.15)':eval=frame,adelay=600,apad=pad_dur=0.6`;
-  const args = noise === undefined
-    ? ["-f", "lavfi", "-i", tone]
-    : ["-f", "lavfi", "-i", tone, "-f", "lavfi", "-i", `anoisesrc=c=pink:a=${10 ** (noise / 20)}:r=48000:d=${seconds + 1.2}`,
-       "-filter_complex", "[0][1]amix=inputs=2:duration=first:normalize=0"];
+  const args =
+    noise === undefined
+      ? ["-f", "lavfi", "-i", tone]
+      : [
+          "-f",
+          "lavfi",
+          "-i",
+          tone,
+          "-f",
+          "lavfi",
+          "-i",
+          `anoisesrc=c=pink:a=${10 ** (noise / 20)}:r=48000:d=${seconds + 1.2}`,
+          "-filter_complex",
+          "[0][1]amix=inputs=2:duration=first:normalize=0",
+        ];
   await exec("ffmpeg", ["-hide_banner", "-nostdin", "-y", ...args, "-ac", "1", file]);
   return file;
 }

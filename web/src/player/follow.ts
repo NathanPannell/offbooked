@@ -67,12 +67,7 @@ export function followDelta(rect: { top: number; bottom: number }, band: Band): 
  * The page offset to scroll to so `rect` is followed, or null to stay put: anchored rows normally,
  * the comfort band with reduced motion. Clamped to what the page can scroll.
  */
-export function followTarget(
-  rect: { top: number; bottom: number },
-  band: Band,
-  page: { scrollY: number; maxScroll: number },
-  reduced: boolean,
-): number | null {
+export function followTarget(rect: { top: number; bottom: number }, band: Band, page: { scrollY: number; maxScroll: number }, reduced: boolean): number | null {
   const delta = reduced ? followDelta(rect, band) : anchorDelta(rect, band);
   if (!delta) return null;
   const top = Math.max(0, Math.min(page.maxScroll, page.scrollY + delta));

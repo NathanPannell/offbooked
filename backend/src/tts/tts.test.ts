@@ -6,7 +6,19 @@ import path from "node:path";
 import { test } from "node:test";
 import { silentLog } from "../log.ts";
 import { PiperSynthesizer, pooledProcs } from "./piper.ts";
-import { assignVoices, clipHash, guessGender, NARRATOR, NARRATOR_VOICE_ID, speakable, speakableDirection, spokenParts, TTS_SETTINGS, VOICE_MODELS, VOICES } from "./voices.ts";
+import {
+  assignVoices,
+  clipHash,
+  guessGender,
+  NARRATOR,
+  NARRATOR_VOICE_ID,
+  speakable,
+  speakableDirection,
+  spokenParts,
+  TTS_SETTINGS,
+  VOICE_MODELS,
+  VOICES,
+} from "./voices.ts";
 import { joinWavs } from "./wav.ts";
 import { toneWav } from "../test/tts.ts";
 
@@ -53,7 +65,10 @@ test("the narrator's voice is reserved: no character ever gets it", () => {
   // Reserving it moves only a character that would have had it (and possibly those after it):
   // everyone before the first such character keeps the voice they had before.
   const cast = chars(["HAMLET", "HORATIO", "QUEEN", "KING", "OPHELIA", "POLONIUS", "LAERTES", "GHOST"]);
-  const unreserved = assignVoices(cast, VOICES.map((v) => (v.id === NARRATOR_VOICE_ID ? { ...v, id: "unreserved" } : v)));
+  const unreserved = assignVoices(
+    cast,
+    VOICES.map((v) => (v.id === NARRATOR_VOICE_ID ? { ...v, id: "unreserved" } : v)),
+  );
   const reserved = assignVoices(cast);
   for (const c of cast) {
     if (unreserved.get(c.id)!.id === "unreserved") break;
@@ -62,7 +77,10 @@ test("the narrator's voice is reserved: no character ever gets it", () => {
 });
 
 test("stage directions are read without their brackets; asides inside dialogue are dropped", () => {
-  assert.equal(speakableDirection("[Flourish. Enter Claudius, King of Denmark,\n  Gertrude the Queen.]"), "Flourish. Enter Claudius, King of Denmark,\nGertrude the Queen.");
+  assert.equal(
+    speakableDirection("[Flourish. Enter Claudius, King of Denmark,\n  Gertrude the Queen.]"),
+    "Flourish. Enter Claudius, King of Denmark,\nGertrude the Queen.",
+  );
   assert.equal(speakableDirection("_Exit._"), "Exit.");
   assert.equal(speakableDirection("[ ]"), "");
   assert.equal(speakable("Now go. [To the Servant.] Was it not"), "Now go. Was it not");

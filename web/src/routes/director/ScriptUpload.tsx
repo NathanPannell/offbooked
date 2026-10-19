@@ -68,8 +68,8 @@ export function ScriptUpload({
       {failure && (
         <div className="notice notice-error" role="alert">
           <div>
-            <strong>We couldn't read that script.</strong> {failure} Try the file again, or paste the text. Pasting usually works
-            best for scanned or unusual layouts.
+            <strong>We couldn't read that script.</strong> {failure} Try the file again, or paste the text. Pasting usually works best for scanned or unusual
+            layouts.
           </div>
         </div>
       )}

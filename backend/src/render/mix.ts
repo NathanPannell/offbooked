@@ -21,7 +21,10 @@ export interface MixedClip {
 }
 
 export const mixHash = (takeIds: string[]) =>
-  createHash("sha256").update(`${MIX_VERSION}|${[...new Set(takeIds)].sort().join(",")}`).digest("hex").slice(0, 32);
+  createHash("sha256")
+    .update(`${MIX_VERSION}|${[...new Set(takeIds)].sort().join(",")}`)
+    .digest("hex")
+    .slice(0, 32);
 
 export interface VoiceTake extends TakeAudioRow {
   lineId: string;
@@ -81,10 +84,7 @@ async function make(ctx: Ctx, productionId: string, hash: string, takes: TakeAud
     const samples = await mixClips(inputs, path.join(dir, "mix.wav"), flac, m4a);
     const normalizedKey = `productions/${productionId}/mixes/${hash}.flac`;
     const streamKey = `productions/${productionId}/mixes/${hash}.m4a`;
-    await Promise.all([
-      ctx.storage.put(normalizedKey, await readFile(flac), "audio/flac"),
-      ctx.storage.put(streamKey, await readFile(m4a), "audio/mp4"),
-    ]);
+    await Promise.all([ctx.storage.put(normalizedKey, await readFile(flac), "audio/flac"), ctx.storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
     await ctx.sql`
       insert into take_mixes (hash, production_id, normalized_key, stream_key, samples)
       values (${hash}, ${productionId}, ${normalizedKey}, ${streamKey}, ${samples})

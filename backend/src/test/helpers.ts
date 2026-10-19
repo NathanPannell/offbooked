@@ -14,7 +14,9 @@ import type { Synthesizer } from "../tts/piper.ts";
 
 process.env.NODE_ENV = "test";
 
-// DB tests need DATABASE_URL (backend/.env locally). Without it they are skipped, not failed.
+// DB tests need DATABASE_URL (backend/.env locally). Without it they are skipped, not failed,
+// except in CI, where skipping them would let the migrations and the idle-worker test go unchecked.
+if (process.env.CI && !process.env.DATABASE_URL) throw new Error("CI runs the DB tests: set DATABASE_URL to a throwaway Postgres");
 export const dbSkip = process.env.DATABASE_URL ? false : "DATABASE_URL is not set";
 
 export interface TestApp {
@@ -26,7 +28,9 @@ export interface TestApp {
 
 // Each test file gets its own throwaway schema, migrated from scratch and dropped afterwards.
 // TTS is off unless a test passes a synthesizer (see FakeSynthesizer in ./tts.ts).
-export async function createTestApp(opts: { labeler?: Labeler | null; ensemble?: EnsembleInferrer | null; env?: Record<string, string>; synthesizer?: Synthesizer | null } = {}): Promise<TestApp> {
+export async function createTestApp(
+  opts: { labeler?: Labeler | null; ensemble?: EnsembleInferrer | null; env?: Record<string, string>; synthesizer?: Synthesizer | null } = {},
+): Promise<TestApp> {
   const url = process.env.DATABASE_URL!;
   const schema = `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const admin = createSql(url, { max: 1 });
@@ -53,7 +57,12 @@ export async function createTestApp(opts: { labeler?: Labeler | null; ensemble?:
     ...opts.env,
   });
   const mailer = new LogMailer(silentLog);
-  const ctx = createCtx(config, sql, silentLog, { mailer, labeler: opts.labeler ?? null, ensemble: opts.ensemble ?? null, synthesizer: opts.synthesizer ?? null });
+  const ctx = createCtx(config, sql, silentLog, {
+    mailer,
+    labeler: opts.labeler ?? null,
+    ensemble: opts.ensemble ?? null,
+    synthesizer: opts.synthesizer ?? null,
+  });
   const app = buildApp({ ctx, probeFfmpeg: async () => "ffmpeg test" });
   await app.ready();
   return {

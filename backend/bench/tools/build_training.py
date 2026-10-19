@@ -4,7 +4,7 @@ Usage (Windows, from the repository root):
   python -I backend/bench/tools/build_training.py --downloads <dir> [--screenplain <exe>] [--only <slug>]
 
   --downloads    where fetched files go, one fresh sub-directory per file
-                 (outside the repository, e.g. ../.codex/bench-downloads).
+                 (outside the repository, e.g. ../.claude/tmp/bench-downloads).
                  A sub-directory that already holds the file is reused.
   --screenplain  screenplain executable for the screenplay fixture
                  (pip install "screenplain[PDF]" in a venv).

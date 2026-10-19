@@ -8,7 +8,11 @@ import { actorDoneEmail, castCompleteEmail, runthroughReadyEmail } from "./templ
 type Kind = "actor_done" | "cast_complete" | "runthrough_ready";
 
 // Sends each (kind, production, actor) at most once. Failures are logged and recorded, never thrown.
-async function sendOnce(ctx: Ctx, n: { kind: Kind; productionId: string; actorId: string | null; to: string | null }, build: (to: string) => Email): Promise<void> {
+async function sendOnce(
+  ctx: Ctx,
+  n: { kind: Kind; productionId: string; actorId: string | null; to: string | null },
+  build: (to: string) => Email,
+): Promise<void> {
   const { sql, log } = ctx;
   if (!n.to) return;
   try {
@@ -49,7 +53,11 @@ async function productionInfo(ctx: Ctx, productionId: string): Promise<Productio
   return p;
 }
 
-export async function notifyActorDone(ctx: Ctx, productionId: string, actor: { id: string; name: string; firstName: string | null; linesTotal: number }): Promise<void> {
+export async function notifyActorDone(
+  ctx: Ctx,
+  productionId: string,
+  actor: { id: string; name: string; firstName: string | null; linesTotal: number },
+): Promise<void> {
   const p = await productionInfo(ctx, productionId);
   if (!p) return;
   // No "you finished your lines" email when the director recorded the part themselves.

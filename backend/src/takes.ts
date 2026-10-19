@@ -61,13 +61,17 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
   const [existing] = await sql<{ actorId: string | null; recordedByUserId: string | null; recordedBy: string; lineId: string }[]>`
     select actor_id, recorded_by_user_id, recorded_by, line_id from takes where id = ${id}`;
   if (existing) {
-    const same = existing.lineId === u.lineId && (standin ? existing.recordedBy === "standin" && existing.recordedByUserId === userId : existing.actorId === actorId);
+    const same =
+      existing.lineId === u.lineId && (standin ? existing.recordedBy === "standin" && existing.recordedByUserId === userId : existing.actorId === actorId);
     if (!same) throw conflict("take_id_conflict", "That take id was already used for another recording.");
     return respond(false);
   }
 
   if (!(await u.lineAllowed())) throw notFound("Line not found.");
-  const contentType = String(req.headers["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
+  const contentType = String(req.headers["content-type"] ?? "")
+    .split(";")[0]!
+    .trim()
+    .toLowerCase();
   const ext = AUDIO_TYPES[contentType];
   if (!ext) throw new HttpError(415, "unsupported_media_type", "Recordings must be webm, mp4, ogg or wav audio.");
   const body = req.body;

@@ -56,8 +56,7 @@ export function WordDiff({ text, ops, transcript }: { text: string; ops: WordOp[
         <span className="eyebrow">We heard</span> {transcript ? `“${transcript}”` : "nothing we could make out"}
       </p>
       <p className="word-diff-legend small muted">
-        <del className="wd-missed">missed</del> <mark className="wd-changed">changed</mark>{" "}
-        <ins className="wd-extra">extra</ins>
+        <del className="wd-missed">missed</del> <mark className="wd-changed">changed</mark> <ins className="wd-extra">extra</ins>
       </p>
     </div>
   );

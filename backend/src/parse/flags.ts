@@ -37,7 +37,8 @@ export function classifyFlagReason(reason: string): FlagCode | null {
   if (CONTINUED.test(r) && !STILL_UNCLEAR.test(r)) return null;
   if (/missed|more than one speaker|two speakers|very long speech|inline cue|split at/.test(r)) return "missed_cue";
   if (/\b(?:act|scene)\b.*\b(?:inferred|not printed|number|header|heading)\b|\bheading\b|running.header/.test(r)) return "heading";
-  if (/differs|not found|labell?ed by the parser|not part of the play|skipp|page number|stray|artifact|footnote|garbled line|marginal|editorial/.test(r)) return "text";
+  if (/differs|not found|labell?ed by the parser|not part of the play|skipp|page number|stray|artifact|footnote|garbled line|marginal|editorial/.test(r))
+    return "text";
   if (/no speaker found|direction|parenthetical|delivery/.test(r)) return "direction";
   if (/speaker|\bcue|speaks only once|assigned to|could be|merged|joint|shared|sung|song|inferred/.test(r)) return "speaker";
   return null;

@@ -42,7 +42,12 @@ const tokenize = (text: string) =>
 // them out of the speech, so they are not scored as spoken words.
 export const spokenWords = (text: string) => text.replace(/\[[^\]]*\]/g, " ");
 
-const nameKey = (s: string) => s.toUpperCase().replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+const nameKey = (s: string) =>
+  s
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
 export function scoreParse(golden: Golden, pred: StructuredScript): Score & { errors: string[] } {
   const gold: { word: string; speaker: string; speech: number }[] = [];
@@ -55,7 +60,10 @@ export function scoreParse(golden: Golden, pred: StructuredScript): Score & { er
   const goldToPred = new Int32Array(gold.length).fill(-1);
   let gi = 0;
   let pi = 0;
-  for (const part of diffArrays(gold.map((g) => g.word), predWords.map((p) => p.word))) {
+  for (const part of diffArrays(
+    gold.map((g) => g.word),
+    predWords.map((p) => p.word),
+  )) {
     const n = part.count ?? part.value.length;
     if (part.added) pi += n;
     else if (part.removed) gi += n;
@@ -80,7 +88,13 @@ export function scoreParse(golden: Golden, pred: StructuredScript): Score & { er
     const ranked = [...m].sort((a, b) => b[1] - a[1]);
     mapping.set(ps, ranked[0]![0]);
     const total = ranked.reduce((n, [, c]) => n + c, 0);
-    if (ranked[1] && ranked[1][1] >= 20 && ranked[1][1] / total >= 0.15) mergedSpeakers.push(`${ps} ⊇ ${ranked.slice(0, 3).map(([g]) => g).join("+")}`);
+    if (ranked[1] && ranked[1][1] >= 20 && ranked[1][1] / total >= 0.15)
+      mergedSpeakers.push(
+        `${ps} ⊇ ${ranked
+          .slice(0, 3)
+          .map(([g]) => g)
+          .join("+")}`,
+      );
   }
 
   const aliasesOf = new Map<string, Set<string>>();
@@ -112,7 +126,11 @@ export function scoreParse(golden: Golden, pred: StructuredScript): Score & { er
     if (ok) speechesOk++;
     else if (errors.length < 60) {
       const s = golden.speeches[i]!;
-      const got = [...predSpeakerOfSpeech[i]!].sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n}×${c}`).join(", ") || "missing";
+      const got =
+        [...predSpeakerOfSpeech[i]!]
+          .sort((a, b) => b[1] - a[1])
+          .map(([n, c]) => `${n}×${c}`)
+          .join(", ") || "missing";
       errors.push(`#${i} ${s.speaker}: "${s.text.slice(0, 70)}" → ${got} (recalled ${st.matched}/${st.words})`);
     }
   });
@@ -123,7 +141,8 @@ export function scoreParse(golden: Golden, pred: StructuredScript): Score & { er
   predWords.forEach((p) => lineWords.set(p.line, (lineWords.get(p.line) ?? 0) + 1));
   const extra: string[] = [];
   for (const [line, n] of lineWords) {
-    if ((lineMatched.get(line) ?? 0) / n < 0.5 && extra.length < 40) extra.push(`extra: ${predDialogue[line]!.character}: "${predDialogue[line]!.text.slice(0, 90)}" (${n} words)`);
+    if ((lineMatched.get(line) ?? 0) / n < 0.5 && extra.length < 40)
+      extra.push(`extra: ${predDialogue[line]!.character}: "${predDialogue[line]!.text.slice(0, 90)}" (${n} words)`);
   }
   const predTotals = new Map<string, { words: number; matched: number }>();
   predWords.forEach((p) => {
@@ -140,8 +159,7 @@ export function scoreParse(golden: Golden, pred: StructuredScript): Score & { er
 
   const sectionKey = (s: { act: string | null; scene: string | null }) => `${s.act ?? ""}.${s.scene ?? ""}`;
   const predSections = pred.sections.filter((s) => s.act || s.scene);
-  const sectionsMatch =
-    golden.sections.length === predSections.length && golden.sections.every((s, i) => sectionKey(s) === sectionKey(predSections[i]!));
+  const sectionsMatch = golden.sections.length === predSections.length && golden.sections.every((s, i) => sectionKey(s) === sectionKey(predSections[i]!));
 
   const precisionMatched = goldToPred.reduce((n, p) => n + (p >= 0 ? 1 : 0), 0);
   const score: Score = {

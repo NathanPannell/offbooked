@@ -13,7 +13,7 @@ bench/
   tools/                                    fetch, generators, verifier (Python 3.13)
 ```
 
-There is also a **holdout set** of 5 fixtures in the same layout at `../.codex/holdout/` (outside the repository). It is kept for a final "works first try" run. Don't open it, tune against it, or copy anything from it while working on the parser. Its build scripts live next to it, not here.
+There is also a **holdout set** of 5 fixtures in the same layout at `../.codex/holdout/` (outside the repository, in the workspace; kept data, not scratch). It is kept for a final "works first try" run. Don't open it, tune against it, or copy anything from it while working on the parser. Its build scripts live next to it, not here.
 
 `source.*` files are byte-for-byte what was downloaded, or what the documented conversion produced. `.gitattributes` marks them `-text`, so Git keeps CRLF line endings and BOMs.
 
@@ -71,8 +71,8 @@ Requirements: Python 3.13 with `pymupdf`, `lxml`, `beautifulsoup4` and `python-d
 
 ```bash
 # from the repository root (Windows)
-python -I backend/bench/tools/build_training.py --downloads ../.codex/bench-downloads \
-  --screenplain ../.codex/bench-venv/Scripts/screenplain.exe
+python -I backend/bench/tools/build_training.py --downloads ../.claude/tmp/bench-downloads \
+  --screenplain ../.claude/tmp/bench-venv/Scripts/screenplain.exe
 python -I backend/bench/tools/verify.py backend/bench/fixtures/folger-hamlet-pdf --sample
 ```
 

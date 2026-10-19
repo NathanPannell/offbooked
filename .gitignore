@@ -10,3 +10,6 @@ dist/
 __pycache__/
 .claude/
 web/public/models/
+coverage/
+playwright-report/
+test-results/

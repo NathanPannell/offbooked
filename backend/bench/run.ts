@@ -83,9 +83,13 @@ for (const slug of slugs) {
       const { errors, ...score } = scoreParse(golden, structure);
       Object.assign(record, score);
       fs.writeFileSync(path.join(outDir, `${slug}.errors.txt`), [...score.failures, "", ...errors].join("\n"));
-      console.log(`${score.pass ? "PASS" : "FAIL"} ${seconds.toFixed(0)}s speaker ${pct(score.speakerAccuracy)} speech ${pct(score.speechAccuracy)} recall ${pct(score.recall)} precision ${pct(score.precision)} names ${pct(score.nameAgreement)} sections ${score.sections.pred}/${score.sections.gold} flagged ${flagged} ${JSON.stringify(flagCodes)}`);
+      console.log(
+        `${score.pass ? "PASS" : "FAIL"} ${seconds.toFixed(0)}s speaker ${pct(score.speakerAccuracy)} speech ${pct(score.speechAccuracy)} recall ${pct(score.recall)} precision ${pct(score.precision)} names ${pct(score.nameAgreement)} sections ${score.sections.pred}/${score.sections.gold} flagged ${flagged} ${JSON.stringify(flagCodes)}`,
+      );
       if (!score.pass) console.log(`   ${score.failures.join(" | ")}`);
-      rows.push(`| ${slug} | ${kind} | ${score.pass ? "✅" : "❌"} | ${pct(score.speakerAccuracy)} | ${pct(score.speechAccuracy)} | ${pct(score.recall)} | ${pct(score.precision)} | ${pct(score.nameAgreement)} | ${score.sections.pred}/${score.sections.gold} | ${flagged} | ${seconds.toFixed(0)}s | ${usage.inputTokens + usage.outputTokens} |`);
+      rows.push(
+        `| ${slug} | ${kind} | ${score.pass ? "✅" : "❌"} | ${pct(score.speakerAccuracy)} | ${pct(score.speechAccuracy)} | ${pct(score.recall)} | ${pct(score.precision)} | ${pct(score.nameAgreement)} | ${score.sections.pred}/${score.sections.gold} | ${flagged} | ${seconds.toFixed(0)}s | ${usage.inputTokens + usage.outputTokens} |`,
+      );
     } else {
       console.log(`parsed in ${seconds.toFixed(0)}s, ${structure.lines.length} lines, no golden`);
     }

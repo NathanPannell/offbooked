@@ -7,7 +7,24 @@ Remote line recording and run-through playback for theatre casts. A director upl
 - `backend/`: Node 24 + Fastify API and, later, the ffmpeg render worker. TypeScript runs through Node's type stripping, so there is no build step. `tsc` is for typechecking only.
 - `web/`: the Vite + React app at offbooked.com (landing, director app, actor recording, run-through player, on-device accuracy check). See "Web" below.
 - `railway.json`: Railway build and health check config for the backend.
-- `.github/workflows/`: `ci.yml` (typecheck and tests), `deploy-backend.yml` (deploys `main` to Railway).
+- `.github/workflows/`: `ci.yml` (the CI gate, see "Delivery"), `deploy-backend.yml` (deploys `main` to Railway).
+
+## Delivery
+
+Every change ships the same way, through the `deliver` skill (`~/.claude/skills/deliver/SKILL.md`). There are no preview deployments.
+
+1. Branch from the latest `origin/staging` (`feat/`, `fix/`, `chore/` or `ci/<name>`), in the session's worktree or `<workspace>/.claude/worktrees/<branch>/`. Scratch files (logs, screenshots, throwaway databases) go in `<workspace>/.claude/tmp/<branch>/`, which is git-ignored and deleted freely.
+2. Open a **draft** PR against `staging`.
+3. CI (`ci.yml`) is the gate. It runs on every PR into `staging` or `main` and on each push to `staging`, with these jobs:
+   - **Backend**: `npm ci`, Prettier, ESLint with zero warnings, `tsc`, migrations applied twice to a throwaway Postgres 17 service container (the second run must be a no-op), and the tests with a coverage floor (`test:coverage`, which includes the render worker's idle-no-queries test). In CI the DB tests must run: `src/test/helpers.ts` fails without `DATABASE_URL`.
+   - **Web**: `npm ci`, Prettier, ESLint with zero warnings, `tsc`, Vitest with a coverage floor (`vite.config.ts`), and the production build.
+   - **E2E**: the web app built against a local API, served by `vite preview`, with the real backend on a throwaway Postgres (`web/playwright.config.ts`). The journeys in `web/e2e/` run on desktop and phone Chromium: a director signs in, uploads a script and copies the cast link; a cast member opens it, skips the intro, picks a part and reaches their lines. The report and traces are uploaded when it fails.
+   - **Docker**: builds the Railway image and checks Piper speaks inside it.
+   - **Security**: `npm audit --audit-level=high` for both packages, no committed `.env` files, and a gitleaks scan of the full history.
+4. Review the diff, fix blocking findings, mark the PR ready once every check is green on the head commit, and squash-merge into `staging`. Confirm CI passes for the merge commit on `staging`. Merging into `staging` deploys nothing.
+5. Production is a separate PR from `staging` to `main`, made only when the user asks and merged only with their approval. A push to `main` deploys the backend (`deploy-backend.yml`) and the web app (Vercel).
+
+Coverage floors are today's levels; raise them when coverage rises, never lower them. The React Compiler lint rules are off in `web/eslint.config.js` because the app doesn't use the compiler; the classic hook rules are errors.
 
 ## Commands
 
@@ -15,9 +32,13 @@ Remote line recording and run-through playback for theatre casts. A director upl
 cd backend
 npm install
 npm run dev        # http://localhost:8080/health
-npm test
+npm test           # npm run test:coverage for the CI run with the coverage floor
 npm run typecheck
+npm run lint
+npm run format     # format:check in CI
 ```
+
+Never point `DATABASE_URL` at Neon for tests or the e2e run. Use a throwaway local Postgres (a Docker container, or `initdb` into `<workspace>/.claude/tmp/`).
 
 `/health` returns 503 when ffmpeg is not on `PATH`, so locally it is only 200 if ffmpeg is installed.
 
@@ -32,7 +53,7 @@ npm run typecheck
   3. `cues.ts` learns the cues used across the whole script and repairs the model's blocks: re-splits merged speeches at cue lines, fixes shifted speakers, claims cue lines labelled as directions, and reclaims dialogue labelled as front matter after the play has started.
   4. `assemble.ts` builds lines from the source text: strips cues, keeps each speech as one dialogue line with directions printed inside it or on its cue line (`[brackets]`, `_italics_` sentences, parentheses in scripts that use them for directions, ones the model marks with `>>`) left in its text as `[brackets]`, trusts printed act/scene headings over model numbers.
   5. Flags are computed but not stored or shown: the parser still works them out with the six codes in `flags.ts` (the model writes `?? <code>`; a speech that carries on after a direction or page break without a new cue is never flagged), but `saveStructure` in `job.ts` saves every line unflagged. There is no script review; migration `012_no_review.sql` cleared older flags.
-- Parser changes must be measured with the benchmark in `backend/bench/` (README there). Run the training fixtures at least twice; model output varies between runs. Holdout sets live outside the repo in `.codex/holdout*` and are only for first-try checks.
+- Parser changes must be measured with the benchmark in `backend/bench/` (README there). Run the training fixtures at least twice; model output varies between runs. Holdout sets live outside the repo in `<workspace>/.codex/holdout*` and are only for first-try checks. They are kept data, not scratch: never move them into `.claude/tmp/`.
 - Neon ignores a plain `search_path` startup parameter; `createSql` passes it through `options` instead.
 - Audio sources: every dialogue line in a render uses its current take (the newest, by the cast actor or a director's stand-in), else a TTS clip, else silence. Timing entries carry `source` (`actor`, `standin`, `tts`, `none`). Progress, cast status, the actor-done email and cast completion count only takes with `recorded_by = 'actor'`; stand-ins and TTS never do. An actor's own `take` in `/api/invite/lines` is their latest own take, not a stand-in.
 - Takes: `src/takes.ts` handles both uploads (`PUT /api/invite/lines/:lineId/take` for actors, `PUT /api/lines/:id/take` for directors in `src/routes/standin.ts`), with the same idempotency and caps per recorder. Stand-in takes have no `actor_id`; `recorded_by_user_id` holds the director. Normalizing a take cuts it to its speech (`src/render/trim.ts`): the noise floor and speech level come from the clip's own 10 ms frame levels, sound shorter than 40 ms (a tap or click) doesn't count, and 120 ms before / 200 ms after the speech are kept; nothing inside the speech is cut. Recordings then get a light clean-up (`highpass=f=70`, `afftdn=nr=10`, tracking the clip’s own noise floor; voices first, noise reduction second). Every clip, take or TTS, is levelled in two passes: loudnorm measures it, then one fixed gain to -16 LUFS (capped at ±30 dB) with a fast limiter at -1.5 dBFS, so all lines play at the same loudness (`level.test.ts`). The version is in the normalized key (`<take>.t3.flac`), so older takes are redone lazily on first use; TTS clips move to `TTS_SETTINGS.version` 3 the same way. Takes have no real length cap (65 min server safety net, the app stops at an hour); one bigger than a request (8 MB) arrives in parts (`X-Take-Parts`/`X-Take-Part`), staged in the temp folder and joined into the original file (`stagePart`); the web uploader sends takes over 6 MB that way (`sendInParts`).
@@ -49,14 +70,14 @@ npm run typecheck
 - Workspace `eee14ab1-1ec2-442b-a659-9af6d97ba0c2`, project `offbooked` (`08b6cf6f-a52b-441d-81f2-bdb5621029df`).
 - Environment `production` (`409aeebb-d5ed-4e8c-ae02-fb6403bb81d1`), service `api` (`63b9f8b1-d6d8-4ae6-8b4f-85ce3830259a`).
 - URL: https://api.offbooked.com (custom domain, CNAME in Vercel DNS). Railway's own URL https://api-production-c2bf5.up.railway.app also works.
-- The service has no Railway Git integration. Deploys run from GitHub Actions on push to `main` with `railway up`. The workflow sets `APP_REVISION` to the commit and waits until `/health` reports it.
+- The service has no Railway Git integration. Deploys run from GitHub Actions on push to `main` with `railway up` (the job refuses any other ref, so `staging` never deploys). The workflow sets `APP_REVISION` to the commit and waits until `/health` reports it. There is no staging environment.
 - GitHub environment `production` holds the secret `RAILWAY_API_TOKEN` (the workspace token from the Windows user environment) and the variables `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_SERVICE_ID`, `API_URL`.
 - To deploy by hand, run `railway up --ci -p <project> -e <environment> -s <service>` with `RAILWAY_API_TOKEN` set from the Windows user environment. Never print the token.
 
 ## Web hosting (Vercel) and DNS
 
 - `offbooked.com` was bought through Vercel and uses Vercel DNS, in team `nathanpannells-projects` (`team_CJ0RWNsNJK6vDQy2raakV6cZ`). The Vercel MCP connector cannot see this team; use `VERCEL_TOKEN` from the Windows user environment.
-- Vercel project `offbooked` (`prj_6C9NIcC5InImQXSAZWflMJhYFJYx`), root directory `web`, Git-linked to this repo. A push to `main` deploys production; PR branches get preview deployments.
+- Vercel project `offbooked` (`prj_6C9NIcC5InImQXSAZWflMJhYFJYx`), root directory `web`, Git-linked to this repo. A push to `main` deploys production. Every other branch is skipped by `ignoreCommand` in `web/vercel.json`, so there are no preview deployments.
 - Domains: `offbooked.com` (production), `www.offbooked.com` redirects to it with a 308.
 - DNS records for the backend: `api` CNAME to Railway's target and the `_railway-verify.api` TXT record. Don't remove them.
 
@@ -68,9 +89,12 @@ Vite + React 19 + TypeScript + React Router in `web/`, plain CSS with tokens in 
 cd web
 npm install
 npm run dev        # http://localhost:5173, API at VITE_API_URL (first run downloads the ~40 MB speech model)
-npm test           # Vitest: scoring, live words and auto-advance, play queue planning, line timing, upload queue, browser detection, review scrolling, joining and splitting lines, join memory, parse progress, source matching, next step, hosted speech model files
+npm test           # Vitest (npm run test:coverage for the floor): scoring, live words and auto-advance, play queue planning, line timing, upload queue, browser detection, review scrolling, joining and splitting lines, join memory, parse progress, source matching, next step, hosted speech model files
 npm run typecheck
 npm run build      # tsc, then vite build to dist/ (what Vercel runs)
+npm run lint
+npm run format     # format:check in CI
+VITE_API_URL=http://localhost:8080 npm run build && DATABASE_URL=<throwaway postgres> npm run test:e2e   # Playwright journeys; starts the backend and vite preview itself (needs ffmpeg and `npx playwright install chromium`)
 ```
 
 - Env: `VITE_API_URL` (dev default `http://localhost:8080`, production builds default to `https://api.offbooked.com`). `VITE_STT_MODEL` picks the on-device speech model: `moonshine-tiny` (default), `whisper-tiny.en`, or `off`.

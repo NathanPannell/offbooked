@@ -127,7 +127,10 @@ export class PiperSynthesizer implements Synthesizer {
         const { stdout } = await run(this.bin, [...this.binArgs, "--version"], { timeout: 15_000, windowsHide: true });
         return `piper ${stdout.trim().split("\n")[0]}`;
       } catch (err) {
-        this.log.warn({ bin: this.bin, voicesDir: this.voicesDir, err: String((err as Error).message ?? err) }, "Piper TTS unavailable; unrecorded lines render as silence");
+        this.log.warn(
+          { bin: this.bin, voicesDir: this.voicesDir, err: String((err as Error).message ?? err) },
+          "Piper TTS unavailable; unrecorded lines render as silence",
+        );
         return null;
       }
     })();

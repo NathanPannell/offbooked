@@ -122,7 +122,13 @@ export function SourcePane({
             {showPdf && (
               <div className="pdf-wrap">
                 <div className="pdf-nav">
-                  <button type="button" className="icon-btn" disabled={page! <= 1} onClick={() => setPage((p) => Math.max(1, (p ?? 1) - 1))} aria-label="Previous page">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    disabled={page! <= 1}
+                    onClick={() => setPage((p) => Math.max(1, (p ?? 1) - 1))}
+                    aria-label="Previous page"
+                  >
                     <ChevronLeft size={18} />
                   </button>
                   <span className="mono nums">

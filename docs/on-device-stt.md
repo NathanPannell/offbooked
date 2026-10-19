@@ -420,7 +420,7 @@ If profiling later shows we need threads (for example to move to Moonshine Base)
 
 ### Testing and rollout
 
-1. **Spike, before building UI.** Build a throwaway page under `.codex/` or a preview deployment that records and transcribes 20 fixed lines. Measure cold load time, warm latency per clip and WER on at least one mid-range Android phone, one iPhone on iOS 17 or 18, one iPhone on iOS 26, and desktop Chrome and Safari. Compare Moonshine Tiny fp32+q8, Moonshine Tiny all-q8 (the 32 MB option) and Whisper tiny.en q8. Pick the dtype mix based on the results.
+1. **Spike, before building UI.** Build a throwaway page under `<workspace>/.claude/tmp/`, served from a local production build (`vite preview --host` on the LAN), that records and transcribes 20 fixed lines. Measure cold load time, warm latency per clip and WER on at least one mid-range Android phone, one iPhone on iOS 17 or 18, one iPhone on iOS 26, and desktop Chrome and Safari. Compare Moonshine Tiny fp32+q8, Moonshine Tiny all-q8 (the 32 MB option) and Whisper tiny.en q8. Pick the dtype mix based on the results.
 2. Unit tests for `score.ts`: contractions, numbers, compounds, near matches, a 1-word line, an empty transcript, a transcript with only insertions, and highlight index mapping.
 3. Ship behind a feature flag. Log (anonymously): capability check result, load time, per-take latency, how often each verdict occurs, and how often "Accuracy unavailable" happens.
 4. Calibrate the thresholds on pilot data (above), then enable by default.

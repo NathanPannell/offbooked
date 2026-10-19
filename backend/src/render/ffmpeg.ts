@@ -32,7 +32,17 @@ export async function probeDurationSeconds(file: string): Promise<number | null>
 
 // Exact length of a FLAC/WAV we produced, in samples at the render rate.
 export async function probeSamples(file: string): Promise<number> {
-  const { stdout } = await exec("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration_ts,sample_rate,duration", "-of", "json", file]);
+  const { stdout } = await exec("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "a:0",
+    "-show_entries",
+    "stream=duration_ts,sample_rate,duration",
+    "-of",
+    "json",
+    file,
+  ]);
   const stream = (JSON.parse(stdout) as { streams?: { duration_ts?: number; sample_rate?: string; duration?: string }[] }).streams?.[0];
   if (stream?.duration_ts && Number(stream.sample_rate) === RATE) return stream.duration_ts;
   const seconds = Number.parseFloat(stream?.duration ?? "") || (await probeDurationSeconds(file)) || 0;
@@ -131,9 +141,33 @@ export async function normalizeClipCut(
     const filters = `${pre}${levelTo(await measureLoudness(input, pre))}`;
     return ffmpeg(
       m4a
-        ? ["-i", input, "-vn", "-filter_complex", `${filters},aresample=${RATE},asplit[f][a]`,
-           "-map", "[f]", "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output,
-           "-map", "[a]", "-ac", "1", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", m4a]
+        ? [
+            "-i",
+            input,
+            "-vn",
+            "-filter_complex",
+            `${filters},aresample=${RATE},asplit[f][a]`,
+            "-map",
+            "[f]",
+            "-ac",
+            "1",
+            "-sample_fmt",
+            "s16",
+            "-c:a",
+            "flac",
+            output,
+            "-map",
+            "[a]",
+            "-ac",
+            "1",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            "-movflags",
+            "+faststart",
+            m4a,
+          ]
         : ["-i", input, "-vn", "-af", filters, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output],
     );
   };
@@ -169,8 +203,15 @@ export async function concatToM4a(files: string[], workDir: string, output: stri
 export async function mixClips(inputs: string[], wav: string, output: string, m4a: string): Promise<number> {
   await ffmpeg([
     ...inputs.flatMap((f) => ["-i", f]),
-    "-filter_complex", `amix=inputs=${inputs.length}:duration=longest:dropout_transition=0:normalize=0`,
-    "-ar", String(RATE), "-ac", "1", "-c:a", "pcm_s16le", wav,
+    "-filter_complex",
+    `amix=inputs=${inputs.length}:duration=longest:dropout_transition=0:normalize=0`,
+    "-ar",
+    String(RATE),
+    "-ac",
+    "1",
+    "-c:a",
+    "pcm_s16le",
+    wav,
   ]);
   return normalizeClip(wav, output, m4a);
 }

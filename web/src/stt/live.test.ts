@@ -151,7 +151,11 @@ describe("applyPass", () => {
 
   it("follows a windowed transcript that starts mid-line", () => {
     const text = "Now is the winter of our discontent made glorious summer by this sun of York";
-    const { cursors } = replay(text, ["Now is the winter of our discontent", { windowed: "of our discontent made glorious summer" }, { windowed: "made glorious summer by this sun of York" }]);
+    const { cursors } = replay(text, [
+      "Now is the winter of our discontent",
+      { windowed: "of our discontent made glorious summer" },
+      { windowed: "made glorious summer by this sun of York" },
+    ]);
     expect(cursors).toEqual([7, 10, 15]);
   });
 
@@ -247,7 +251,12 @@ describe("decideAdvance", () => {
     let vad = startVad();
     const decisions: string[] = [];
     // 100 ms frames: 0.3 s quiet, 1.5 s speech, then quiet, with a transcript every 0.4 s.
-    const transcripts = new Map([[800, "get thee"], [1200, "get thee to a"], [1600, "get thee to a nun"], [2000, "get thee to a nunnery"]]);
+    const transcripts = new Map([
+      [800, "get thee"],
+      [1200, "get thee to a"],
+      [1600, "get thee to a nun"],
+      [2000, "get thee to a nunnery"],
+    ]);
     for (let t = 100; t <= 3000; t += 100) {
       vad = vadStep(vad, t > 300 && t <= 1800 ? -22 : -70, 100);
       const heard = transcripts.get(t);
@@ -271,7 +280,14 @@ describe("decideAdvance", () => {
       vad = vadStep(vad, t > 300 && t <= 1800 ? -22 : -70, 100);
       if (t === 1200) progress = applyPass(progress, tokens, "kept her");
       if (t === 2000) progress = applyPass(progress, tokens, "kept her through ornery");
-      const d = decideAdvance({ mode: "live", totalTokens: tokens.length, cursor: progress.cursor, speechMs: vad.speechMs, silenceMs: vad.silenceMs, caughtUp: true });
+      const d = decideAdvance({
+        mode: "live",
+        totalTokens: tokens.length,
+        cursor: progress.cursor,
+        speechMs: vad.speechMs,
+        silenceMs: vad.silenceMs,
+        caughtUp: true,
+      });
       if (d === "advance") first = t;
     }
     expect(progress.cursor).toBeLessThan(tokens.length * 0.7);

@@ -269,15 +269,18 @@ export class TtsService {
         const { samples, cutStartMs } = await normalizeClipCut(wav, flac, m4a);
         const lengthMs = Math.round((samples * 1000) / RENDER_SETTINGS.sampleRate);
         const at = (ms: number) => Math.max(0, Math.min(lengthMs, Math.round(ms - cutStartMs)));
-        const timings: SpokenSegment[] = pieces.map((p, i) => ({ startMs: at(spans[i]!.startMs), endMs: at(spans[i]!.endMs), text: p.text, narrator: p.narrator }));
+        const timings: SpokenSegment[] = pieces.map((p, i) => ({
+          startMs: at(spans[i]!.startMs),
+          endMs: at(spans[i]!.endMs),
+          text: p.text,
+          narrator: p.narrator,
+        }));
         if (samples <= 0) throw new Error("synthesized clip is empty");
         const storageKey = `tts/${r.hash}.flac`;
         const cueKey = `tts/${r.hash}.m4a`;
-        await Promise.all([
-          this.storage.put(storageKey, await readFile(flac), "audio/flac"),
-          this.storage.put(cueKey, await readFile(m4a), "audio/mp4"),
-        ]);
-        await this.sql`insert into tts_clips (hash, voice, storage_key, samples, cue_key, timings) values (${r.hash}, ${r.voice.id}, ${storageKey}, ${samples}, ${cueKey}, ${this.sql.json(timings as never)})
+        await Promise.all([this.storage.put(storageKey, await readFile(flac), "audio/flac"), this.storage.put(cueKey, await readFile(m4a), "audio/mp4")]);
+        await this
+          .sql`insert into tts_clips (hash, voice, storage_key, samples, cue_key, timings) values (${r.hash}, ${r.voice.id}, ${storageKey}, ${samples}, ${cueKey}, ${this.sql.json(timings as never)})
                        on conflict (hash) do update set cue_key = coalesce(tts_clips.cue_key, excluded.cue_key)`;
         return { hash: r.hash, storageKey, samples, cueKey, timings };
       }

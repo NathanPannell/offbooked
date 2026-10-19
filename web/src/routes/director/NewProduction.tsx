@@ -31,7 +31,14 @@ export default function NewProduction() {
         </div>
         <label className="field">
           <span>Title</span>
-          <input className="input input-lg" required autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Hamlet, or Our Town (spring)" />
+          <input
+            className="input input-lg"
+            required
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="e.g. Hamlet, or Our Town (spring)"
+          />
         </label>
         {error && (
           <p className="field-error" role="alert">

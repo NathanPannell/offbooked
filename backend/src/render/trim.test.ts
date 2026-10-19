@@ -63,7 +63,18 @@ describe("on real audio", { skip: false }, () => {
   async function makeTake(file: string, noise = 0.003) {
     const voice = "(between(t,0.8,1.0)+between(t,1.08,1.28)+between(t,1.36,1.8))*0.3*sin(2*PI*180*t)*(0.6+0.4*sin(2*PI*5*t))";
     const clicks = "(between(t,0.3,0.305)+between(t,2.5,2.508))*0.8";
-    await exec("ffmpeg", ["-hide_banner", "-nostdin", "-y", "-f", "lavfi", "-i", `aevalsrc='${voice}+${clicks}+${noise}*(2*random(0)-1)':s=48000:d=3`, "-c:a", "pcm_s16le", file]);
+    await exec("ffmpeg", [
+      "-hide_banner",
+      "-nostdin",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      `aevalsrc='${voice}+${clicks}+${noise}*(2*random(0)-1)':s=48000:d=3`,
+      "-c:a",
+      "pcm_s16le",
+      file,
+    ]);
   }
 
   test("finds the voice in a take with room noise and clicks", async () => {
