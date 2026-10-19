@@ -13,9 +13,9 @@ Remote line recording and run-through playback for theatre casts. A director upl
 
 Every change ships the same way, through the `deliver` skill (`~/.claude/skills/deliver/SKILL.md`). There are no preview deployments.
 
-1. Branch from the latest `origin/staging` (`feat/`, `fix/`, `chore/` or `ci/<name>`), in the session's worktree or `<workspace>/.claude/worktrees/<branch>/`. Scratch files (logs, screenshots, throwaway databases) go in `<workspace>/.claude/tmp/<branch>/`, which is git-ignored and deleted freely.
+1. Branch from the latest `origin/staging` (`feat/`, `fix/`, `chore/` or `ci/<name>`), in the session's worktree or `<workspace>/.claude/worktrees/<branch>/`. Scratch files (logs, screenshots, throwaway databases) go in `<workspace>/.claude/tmp/<branch>/`, outside the repository, and can be deleted freely.
 2. Open a **draft** PR against `staging`.
-3. CI (`ci.yml`) is the gate. It runs on every PR into `staging` or `main` and on each push to `staging`, with these jobs:
+3. CI (`ci.yml`) is the gate. It runs on every PR into `staging` or `main` and on each push to `staging` or `main`, with these jobs:
    - **Backend**: `npm ci`, Prettier, ESLint with zero warnings, `tsc`, migrations applied twice to a throwaway Postgres 17 service container (the second run must be a no-op), and the tests with a coverage floor (`test:coverage`, which includes the render worker's idle-no-queries test). In CI the DB tests must run: `src/test/helpers.ts` fails without `DATABASE_URL`.
    - **Web**: `npm ci`, Prettier, ESLint with zero warnings, `tsc`, Vitest with a coverage floor (`vite.config.ts`), and the production build.
    - **E2E**: the web app built against a local API, served by `vite preview`, with the real backend on a throwaway Postgres (`web/playwright.config.ts`). The journeys in `web/e2e/` run on desktop and phone Chromium: a director signs in, uploads a script and copies the cast link; a cast member opens it, skips the intro, picks a part and reaches their lines. The report and traces are uploaded when it fails.
@@ -24,7 +24,7 @@ Every change ships the same way, through the `deliver` skill (`~/.claude/skills/
 4. Review the diff, fix blocking findings, mark the PR ready once every check is green on the head commit, and squash-merge into `staging`. Confirm CI passes for the merge commit on `staging`. Merging into `staging` deploys nothing.
 5. Production is a separate PR from `staging` to `main`, made only when the user asks and merged only with their approval. A push to `main` deploys the backend (`deploy-backend.yml`) and the web app (Vercel).
 
-Coverage floors are today's levels; raise them when coverage rises, never lower them. The React Compiler lint rules are off in `web/eslint.config.js` because the app doesn't use the compiler; the classic hook rules are errors.
+GitHub rulesets and branch protection need a paid plan for this private repo, so nothing stops a red PR from merging: merge only when every check is green on the head commit. Coverage floors are today's levels; raise them when coverage rises, never lower them. The backend floor counts only modules a test imports (Node's coverage), so give every new module a test. The React Compiler lint rules are off in `web/eslint.config.js` because the app doesn't use the compiler; the classic hook rules are errors.
 
 ## Commands
 
@@ -77,7 +77,7 @@ Never point `DATABASE_URL` at Neon for tests or the e2e run. Use a throwaway loc
 ## Web hosting (Vercel) and DNS
 
 - `offbooked.com` was bought through Vercel and uses Vercel DNS, in team `nathanpannells-projects` (`team_CJ0RWNsNJK6vDQy2raakV6cZ`). The Vercel MCP connector cannot see this team; use `VERCEL_TOKEN` from the Windows user environment.
-- Vercel project `offbooked` (`prj_6C9NIcC5InImQXSAZWflMJhYFJYx`), root directory `web`, Git-linked to this repo. A push to `main` deploys production. Every other branch is skipped by `ignoreCommand` in `web/vercel.json`, so there are no preview deployments.
+- Vercel project `offbooked` (`prj_6C9NIcC5InImQXSAZWflMJhYFJYx`), root directory `web`, Git-linked to this repo. A push to `main` deploys production. Every other branch is skipped by `ignoreCommand` in `web/vercel.json`, so there are no preview deployments. The same check skips a `vercel --prod` CLI deploy (it has no Git ref); production web deploys come only from `main` through Git.
 - Domains: `offbooked.com` (production), `www.offbooked.com` redirects to it with a 308.
 - DNS records for the backend: `api` CNAME to Railway's target and the `_railway-verify.api` TXT record. Don't remove them.
 

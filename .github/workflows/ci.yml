@@ -1,17 +1,18 @@
 name: CI
 
 # The gate for every PR into staging (and the staging → main release PR), and a re-run on each
-# merge into staging. Nothing here deploys: production deploys only from main (deploy-backend.yml
+# push to staging and main. Nothing here deploys: production deploys only from main (deploy-backend.yml
 # and Vercel's Git integration).
 on:
   pull_request:
     branches: [staging, main]
   push:
-    branches: [staging]
+    branches: [staging, main]
 
+# A new push to a PR cancels its older run; runs for merge commits on staging and main always finish.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -39,6 +40,8 @@ jobs:
       DATABASE_URL: postgres://offbooked:offbooked@localhost:5432/offbooked_test
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
@@ -68,6 +71,8 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
@@ -100,6 +105,8 @@ jobs:
       DATABASE_URL: postgres://offbooked:offbooked@localhost:5432/offbooked_e2e
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
@@ -142,6 +149,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - name: Build the backend image
         run: docker build -f backend/Dockerfile -t offbooked-api .
       - name: Piper speaks inside the image
@@ -162,6 +171,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
