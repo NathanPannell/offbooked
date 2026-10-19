@@ -46,9 +46,7 @@ export function RecordDock({
         <div className="dock-meta">
           <span className="rec-dot" aria-hidden="true" />
           <Waveform analyser={analyser} active />
-          <span className="dock-timer mono nums">
-            {formatClock(elapsed)}
-          </span>
+          <span className="dock-timer mono nums">{formatClock(elapsed)}</span>
         </div>
       ) : (
         <p className="dock-hint">

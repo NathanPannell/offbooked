@@ -47,10 +47,8 @@ const none: Auth = { kind: "none" };
 
 export const auth = {
   /** Returns a dev sign-in link when the backend logs emails instead of sending them. */
-  request: (email: string) =>
-    request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: { email } }),
-  verify: (token: string) =>
-    request<{ sessionToken: string; user: User }>("/auth/verify", { auth: none, json: { token } }),
+  request: (email: string) => request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: { email } }),
+  verify: (token: string) => request<{ sessionToken: string; user: User }>("/auth/verify", { auth: none, json: { token } }),
   me: () => request<{ user: User }>("/me", { auth: director }),
   updateMe: (name: string) => request<{ user: User }>("/me", { method: "PATCH", auth: director, json: { name } }),
   logout: () => request<void>("/auth/logout", { method: "POST", auth: director }),
@@ -58,15 +56,13 @@ export const auth = {
 
 export const productions = {
   list: () => request<{ productions: Production[] }>("/productions", { auth: director }),
-  create: (input: { title: string; performanceDate?: string | null }) =>
-    request<{ production: Production }>("/productions", { auth: director, json: input }),
+  create: (input: { title: string; performanceDate?: string | null }) => request<{ production: Production }>("/productions", { auth: director, json: input }),
   get: (id: string) => request<{ production: Production }>(`/productions/${id}`, { auth: director }),
   update: (id: string, input: { title?: string; performanceDate?: string | null }) =>
     request<{ production: Production }>(`/productions/${id}`, { method: "PATCH", auth: director, json: input }),
   archive: (id: string) => request<void>(`/productions/${id}/archive`, { method: "POST", auth: director }),
   runthrough: (id: string) => request<RunThrough>(`/productions/${id}/runthrough`, { auth: director }),
-  render: (id: string) =>
-    request<{ render: Render }>(`/productions/${id}/render`, { method: "POST", auth: director }),
+  render: (id: string) => request<{ render: Render }>(`/productions/${id}/render`, { method: "POST", auth: director }),
   /** Line-by-line audio for the run-through player. */
   lineAudio: (id: string): LineAudioApi => ({
     line: (lineId, opts = {}) =>
@@ -111,25 +107,19 @@ export const script = {
       /** Several people say it (a group is made from their names); on an ALL line, who is on stage (null: Claude's guess). */
       voiceIds?: string[] | null;
     },
-  ) =>
-    request<{ line: Line }>(`/lines/${lineId}`, { method: "PATCH", auth: director, json: input }),
+  ) => request<{ line: Line }>(`/lines/${lineId}`, { method: "PATCH", auth: director, json: input }),
   /** `second` restores a line that a join removed (undo); without it the new line copies this one. */
   splitLine: (lineId: string, at: number, second?: SplitSecond) =>
     request<{ lines: [Line, Line] }>(`/lines/${lineId}/split`, { auth: director, json: { at, second } }),
-  mergeNext: (lineId: string) =>
-    request<{ line: Line }>(`/lines/${lineId}/merge-next`, { method: "POST", auth: director }),
+  mergeNext: (lineId: string) => request<{ line: Line }>(`/lines/${lineId}/merge-next`, { method: "POST", auth: director }),
   /** Joins the line into the one before it, which keeps its id, kind and speaker. */
-  mergePrevious: (lineId: string) =>
-    request<{ line: Line }>(`/lines/${lineId}/merge-previous`, { method: "POST", auth: director }),
+  mergePrevious: (lineId: string) => request<{ line: Line }>(`/lines/${lineId}/merge-previous`, { method: "POST", auth: director }),
   /** Deletes a line without recordings; the answer is what `insertLine` needs to undo it. */
-  deleteLine: (lineId: string) =>
-    request<DeletedLine>(`/lines/${lineId}`, { method: "DELETE", auth: director }),
-  insertLine: (productionId: string, input: InsertLine) =>
-    request<{ line: Line }>(`/productions/${productionId}/lines`, { auth: director, json: input }),
+  deleteLine: (lineId: string) => request<DeletedLine>(`/lines/${lineId}`, { method: "DELETE", auth: director }),
+  insertLine: (productionId: string, input: InsertLine) => request<{ line: Line }>(`/productions/${productionId}/lines`, { auth: director, json: input }),
   sectionBreak: (lineId: string, input: { title: string; act?: string; scene?: string }) =>
     request<{ sections: Section[] }>(`/lines/${lineId}/section-break`, { auth: director, json: input }),
-  resolveLine: (lineId: string) =>
-    request<{ line: Line }>(`/lines/${lineId}/resolve`, { method: "POST", auth: director }),
+  resolveLine: (lineId: string) => request<{ line: Line }>(`/lines/${lineId}/resolve`, { method: "POST", auth: director }),
   renameSection: (sectionId: string, title: string) =>
     request<{ section: Section }>(`/sections/${sectionId}`, { method: "PATCH", auth: director, json: { title } }),
   createCharacter: (productionId: string, name: string) =>
@@ -149,8 +139,7 @@ export const script = {
 
 /** The director's cast page: a read-only call sheet, and recording a part themselves. */
 export const cast = {
-  callSheet: (productionId: string) =>
-    request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
+  callSheet: (productionId: string) => request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
   /** Takes a part away from whoever has it; their takes stay and keep playing. */
   unassign: (productionId: string, characterId: string) =>
     request<void>(`/productions/${productionId}/characters/${characterId}/unassign`, { method: "POST", auth: director }),
@@ -165,8 +154,7 @@ export const cast = {
 /** The one link the whole cast can use to pick their characters. */
 export const joinLink = {
   get: (productionId: string) => request<{ joinUrl: string }>(`/productions/${productionId}/join-link`, { auth: director }),
-  reset: (productionId: string) =>
-    request<{ joinUrl: string }>(`/productions/${productionId}/join-link/reset`, { method: "POST", auth: director }),
+  reset: (productionId: string) => request<{ joinUrl: string }>(`/productions/${productionId}/join-link/reset`, { method: "POST", auth: director }),
 };
 
 /** Director stand-in recordings, scene by scene. */

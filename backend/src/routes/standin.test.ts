@@ -79,7 +79,10 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     assert.equal(rt.status, "ready");
     assert.equal(rt.stale, false);
     assert.equal(rt.timing.length, dialogue().length);
-    assert.ok(rt.timing.every((e) => e.source === "tts" && !e.recorded && e.endMs > e.startMs), JSON.stringify(rt.timing.slice(0, 3)));
+    assert.ok(
+      rt.timing.every((e) => e.source === "tts" && !e.recorded && e.endMs > e.startMs),
+      JSON.stringify(rt.timing.slice(0, 3)),
+    );
     // The fake speaks 250 ms per word; trimmed and loudness-normalized, the clip keeps about that length.
     const first3 = rt.timing[0]!;
     const words = dialogue()[0]!.text.split(/\s+/).length;
@@ -92,7 +95,10 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
       const line = dialogue().find((l) => l.text.replace(/\s+/g, " ").includes(call.text.slice(0, 30)))!;
       voiceOf.set(line.characterId!, (voiceOf.get(line.characterId!) ?? new Set()).add(call.voice));
     }
-    assert.ok([...voiceOf.values()].every((v) => v.size === 1), "each character keeps one voice");
+    assert.ok(
+      [...voiceOf.values()].every((v) => v.size === 1),
+      "each character keeps one voice",
+    );
     assert.equal(new Set([...voiceOf.values()].map((v) => [...v][0])).size, voiceOf.size, "characters get different voices");
 
     // A forced rebuild reuses every cached clip.
@@ -137,7 +143,12 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     assert.equal((await put(`/api/lines/${line.id}/take`, {})).statusCode, 401);
     const direction = lines.find((l) => l.kind === "stage_direction")!;
     assert.equal((await standin(direction.id)).statusCode, 404, "only dialogue has takes");
-    const bad = await t.app.inject({ method: "PUT", url: `/api/lines/${line.id}/take`, headers: { ...bearer(alice), "content-type": "text/plain", "x-take-id": randomUUID() }, payload: "x" });
+    const bad = await t.app.inject({
+      method: "PUT",
+      url: `/api/lines/${line.id}/take`,
+      headers: { ...bearer(alice), "content-type": "text/plain", "x-take-id": randomUUID() },
+      payload: "x",
+    });
     assert.equal(bad.statusCode, 415);
   });
 
@@ -146,7 +157,11 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     for (const l of mine) assert.equal((await standin(l.id)).statusCode, 200);
     await t.ctx.jobs.idle();
     const member = async () =>
-      (await get(`/api/productions/${pid}/cast`)).json().cast.find((m: { id: string }) => m.id === horatio.id) as { status: string; linesRecorded: number; linesTotal: number };
+      (await get(`/api/productions/${pid}/cast`)).json().cast.find((m: { id: string }) => m.id === horatio.id) as {
+        status: string;
+        linesRecorded: number;
+        linesTotal: number;
+      };
     assert.equal((await member()).linesRecorded, 0);
     assert.equal((await member()).status, "not_opened");
     assert.equal((await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded, 0);
@@ -155,7 +170,10 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
 
     // The actor records their own lines: their takes become current and count.
     const own = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(horatio.inviteUrl) })).json().lines;
-    assert.ok(own.every((l: { take: unknown }) => l.take === null), "a stand-in isn't the actor's own take");
+    assert.ok(
+      own.every((l: { take: unknown }) => l.take === null),
+      "a stand-in isn't the actor's own take",
+    );
     for (const l of mine) assert.equal((await actorTake(horatio, l.id)).statusCode, 200);
     await t.ctx.jobs.idle();
     assert.deepEqual([(await member()).linesRecorded, (await member()).status], [mine.length, "done"]);
@@ -166,7 +184,10 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     const rt = await render();
     const byLine = new Map(rt.timing.map((e) => [e.lineId, e]));
     assert.ok(mine.every((l) => byLine.get(l.id)!.source === "actor"));
-    assert.ok(linesOf("HAMLET").every((l) => byLine.get(l.id)!.source === "standin" && byLine.get(l.id)!.recorded), "stand-ins fill the run-through");
+    assert.ok(
+      linesOf("HAMLET").every((l) => byLine.get(l.id)!.source === "standin" && byLine.get(l.id)!.recorded),
+      "stand-ins fill the run-through",
+    );
     assert.ok(!t.mailer.sent.some((m) => m.subject.startsWith("Cast complete")), "Hamlet's lines are only stand-ins");
 
     // A later stand-in is newest and plays, but the actor's progress stays.
@@ -183,12 +204,13 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     const body = res.json();
     assert.equal(body.section.id, section);
     assert.equal(body.lines.length, dialogue().filter((l) => l.sectionId === section).length);
-    const row = (b: { lines: { line: { id: string } }[] }, lineId: string) => b.lines.find((l) => l.line.id === lineId) as unknown as {
-      characterName: string;
-      audioSource: string;
-      take: { recordedBy: string } | null;
-      cue: { characterName: string; text: string; audioUrl: string | null; audioSource: string };
-    };
+    const row = (b: { lines: { line: { id: string } }[] }, lineId: string) =>
+      b.lines.find((l) => l.line.id === lineId) as unknown as {
+        characterName: string;
+        audioSource: string;
+        take: { recordedBy: string } | null;
+        cue: { characterName: string; text: string; audioUrl: string | null; audioSource: string };
+      };
     const first = row(body, linesOf("HAMLET")[0]!.id);
     assert.equal(first.characterName, "HAMLET");
     assert.equal(first.audioSource, "standin");
@@ -220,7 +242,10 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
 
     const hamletLines = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(hamlet.inviteUrl) })).json().lines;
     const sources = new Set(hamletLines.map((l: { cue: { audioSource: string } | null }) => l.cue?.audioSource));
-    assert.ok([...sources].every((s) => s === "actor" || s === "standin" || s === "tts"), [...sources].join());
+    assert.ok(
+      [...sources].every((s) => s === "actor" || s === "standin" || s === "tts"),
+      [...sources].join(),
+    );
   });
 
   test("without TTS the run-through falls back to silence", async () => {

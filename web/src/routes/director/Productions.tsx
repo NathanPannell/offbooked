@@ -32,8 +32,7 @@ export default function Productions() {
           <p className="eyebrow">Welcome{user.name ? `, ${user.name}` : ""}</p>
           <h1 className="display">Let's get your cast off book.</h1>
           <p className="lede">
-            Add your script, share one link with the cast, and everyone records their lines from their phone. You get the whole
-            play back as a run-through.
+            Add your script, share one link with the cast, and everyone records their lines from their phone. You get the whole play back as a run-through.
           </p>
           <Link className="btn btn-primary btn-lg" to="/app/new">
             Start a production <ArrowRight size={18} aria-hidden="true" />

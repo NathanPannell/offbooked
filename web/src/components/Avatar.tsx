@@ -12,11 +12,7 @@ export function initials(name: string): string {
 /** A round initials badge in a colour of its own. */
 export function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   return (
-    <span
-      className="avatar"
-      aria-hidden="true"
-      style={{ "--hue": characterHue(name), width: size, height: size, fontSize: size * 0.38 } as CSSProperties}
-    >
+    <span className="avatar" aria-hidden="true" style={{ "--hue": characterHue(name), width: size, height: size, fontSize: size * 0.38 } as CSSProperties}>
       {initials(name)}
     </span>
   );

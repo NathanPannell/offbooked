@@ -83,9 +83,7 @@ export function Wrapped({
           {failed.length > 0 ? (
             <>
               <h1 className="display">Almost there</h1>
-              <p>
-                {failed.length === 1 ? "One take" : `${failed.length} takes`} didn't upload. They're safe on this phone.
-              </p>
+              <p>{failed.length === 1 ? "One take" : `${failed.length} takes`} didn't upload. They're safe on this phone.</p>
               <button type="button" className="btn btn-primary" onClick={() => failed.forEach((f) => onRetry(f.takeId))}>
                 Try uploading again
               </button>
@@ -94,9 +92,7 @@ export function Wrapped({
             <>
               <div className="spinner" aria-hidden="true" />
               <h1 className="display">Saving your last takes…</h1>
-              <p className="muted">
-                {saving.length} to go. Keep this page open for a moment. If you lose signal, they'll upload when you're back.
-              </p>
+              <p className="muted">{saving.length} to go. Keep this page open for a moment. If you lose signal, they'll upload when you're back.</p>
             </>
           )}
         </div>
@@ -199,7 +195,11 @@ export function Wrapped({
         <h2 className="row" style={{ gap: 8 }}>
           <Plus size={20} aria-hidden="true" /> Pick up more lines
         </h2>
-        <PickUpParts api={api} onPicked={onPickedUp} intro="Got time for more? These parts are free. Lines nobody has recorded yet play in the computer voice." />
+        <PickUpParts
+          api={api}
+          onPicked={onPickedUp}
+          intro="Got time for more? These parts are free. Lines nobody has recorded yet play in the computer voice."
+        />
       </section>
 
       <div className="stack wrapped-actions">

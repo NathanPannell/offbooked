@@ -1,8 +1,6 @@
 import { readStorage, removeStorage, writeStorage } from "../lib/storage";
 
-export const API_URL = (
-  import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://api.offbooked.com" : "http://localhost:8080")
-).replace(/\/+$/, "");
+export const API_URL = (import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://api.offbooked.com" : "http://localhost:8080")).replace(/\/+$/, "");
 
 const SESSION_KEY = "offbooked.session";
 export const UNAUTHORIZED_EVENT = "offbooked:unauthorized";
@@ -90,12 +88,7 @@ export async function request<T>(path: string, options: RequestOptions): Promise
       session.clear();
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
-    throw new ApiError(
-      response.status,
-      error.code ?? "http_" + response.status,
-      error.message ?? defaultMessage(response.status),
-      data,
-    );
+    throw new ApiError(response.status, error.code ?? "http_" + response.status, error.message ?? defaultMessage(response.status), data);
   }
   return data as T;
 }

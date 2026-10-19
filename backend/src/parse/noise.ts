@@ -52,7 +52,10 @@ export function stripLineNumbers(text: string): { text: string; report: NoiseRep
 
 // Leading numbers that count up through the document are line numbers, not dialogue.
 function isMostlyIncreasing(lines: string[]): boolean {
-  const nums = lines.map((l) => /^\s*(\d{1,5})\s/.exec(l)?.[1]).filter((n): n is string => !!n).map(Number);
+  const nums = lines
+    .map((l) => /^\s*(\d{1,5})\s/.exec(l)?.[1])
+    .filter((n): n is string => !!n)
+    .map(Number);
   let up = 0;
   for (let i = 1; i < nums.length; i++) if (nums[i]! >= nums[i - 1]!) up++;
   return nums.length > 1 && up / (nums.length - 1) > 0.7;

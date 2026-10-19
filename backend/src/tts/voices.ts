@@ -57,7 +57,10 @@ const MALE = new Set(
 
 // A guess from words in the character's name ("LADY MACBETH", "FIRST SOLDIER"); null when unsure.
 export function guessGender(name: string): "f" | "m" | null {
-  const words = name.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const words = name
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
   if (words.some((w) => FEMALE.has(w))) return "f";
   if (words.some((w) => MALE.has(w))) return "m";
   return null;

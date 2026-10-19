@@ -1,8 +1,7 @@
 import { availableParallelism } from "node:os";
 
 export type StorageConfig =
-  | { driver: "local"; dir: string }
-  | { driver: "s3"; endpoint: string; bucket: string; region: string; accessKeyId: string; secretAccessKey: string };
+  { driver: "local"; dir: string } | { driver: "s3"; endpoint: string; bucket: string; region: string; accessKeyId: string; secretAccessKey: string };
 
 export interface TtsConfig {
   driver: "piper" | "off";
@@ -64,7 +63,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databaseUrl: required(env, "DATABASE_URL"),
     appUrl: trimSlash(env.APP_URL?.trim() || "http://localhost:5173"),
     apiUrl: trimSlash(env.API_URL?.trim() || `http://localhost:${port}`),
-    corsOrigins: (env.CORS_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    corsOrigins: (env.CORS_ORIGINS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
     sessionSecret: required(env, "SESSION_SECRET"),
     inviteSecret: required(env, "INVITE_TOKEN_SECRET"),
     anthropicApiKey: env.ANTHROPIC_API_KEY?.trim() || null,

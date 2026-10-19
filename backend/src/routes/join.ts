@@ -30,8 +30,13 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
       from productions p join users u on u.id = p.owner_id where p.id = ${parsed.productionId}`;
     if (!p || p.joinVersion !== parsed.version) throw invalid();
     const directorName = p.directorName || "Your director";
-    if (p.archivedAt) throw new HttpError(410, "invite_expired", "This production has wrapped, so this link no longer works.", { directorName, productionTitle: p.title });
-    if (p.scriptStatus !== "ready") throw new HttpError(409, "script_not_ready", "The script is still being prepared. Try this link again in a few minutes.", { directorName, productionTitle: p.title });
+    if (p.archivedAt)
+      throw new HttpError(410, "invite_expired", "This production has wrapped, so this link no longer works.", { directorName, productionTitle: p.title });
+    if (p.scriptStatus !== "ready")
+      throw new HttpError(409, "script_not_ready", "The script is still being prepared. Try this link again in a few minutes.", {
+        directorName,
+        productionTitle: p.title,
+      });
     return p;
   };
 

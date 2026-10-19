@@ -10,7 +10,8 @@ const isZip = (data: Buffer) => data[0] === 0x50 && data[1] === 0x4b && data[2] 
 export function detectSourceKind(data: Buffer, filename = ""): SourceKind {
   if (isPdf(data)) return "pdf";
   if (/\.pdf$/i.test(filename)) throw new ScriptInputError("That file isn't a readable PDF. Export it again, or upload a Word .docx or text file.");
-  if (/\.docx$/i.test(filename) && !isZip(data)) throw new ScriptInputError("That file isn't a readable Word document. Save it again as .docx, or upload a PDF.");
+  if (/\.docx$/i.test(filename) && !isZip(data))
+    throw new ScriptInputError("That file isn't a readable Word document. Save it again as .docx, or upload a PDF.");
   if (isZip(data)) {
     if (/\.docx$/i.test(filename) || data.includes("word/document.xml")) return "docx";
     throw new ScriptInputError("That file looks like a zip archive. Upload a PDF, a Word .docx file or plain text.");

@@ -48,8 +48,6 @@ export function learnCues(segments: Segment[], lines: string[] = []): CueBook {
   return { cues: [...speakerOf.keys()].sort((a, b) => b.length - a.length), speakerOf, lineOnly };
 }
 
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 // Returns the cue a line opens with, if it is a speaker cue rather than words that happen to
 // start the same way.
 export function lineCue(line: string, book: CueBook, prevLine: string | null): string | null {
@@ -68,7 +66,7 @@ export function lineCue(line: string, book: CueBook, prevLine: string | null): s
       continue;
     }
     // "BARNARDO Who's there?": a capitalised cue followed by a capitalised word.
-    if (isCaps(cue) && /^[\s.:]+["“‘'(\[]?[\p{Lu}]/u.test(rest)) return cue;
+    if (isCaps(cue) && /^[\s.:]+["“‘'([]?[\p{Lu}]/u.test(rest)) return cue;
     // "LORD FANCOURT (aside to JACK). You know…": a cue, a delivery note, then the speech.
     if (/^\s*[([][^)\]]{1,80}[)\]][\s.:,]+\S/.test(rest)) return cue;
   }
@@ -92,7 +90,8 @@ export function repairCues(segments: Segment[], lines: string[], book: CueBook):
       // A "continuation" that opens with a cue line is a new speech.
       if (seg.type === "continue") current = { ...current, type: "speech", speaker, cue: firstCue, flag: current.flag ?? REPAIR_NOTE };
       // Only a cue that cannot be this speaker overrides the model ("Hedda:" fits HEDDA TESMAN).
-      else if (speaker !== seg.speaker && !(seg.speaker && abbreviates(firstCue, seg.speaker))) current = { ...current, speaker, cue: firstCue, flag: current.flag ?? SPEAKER_NOTE };
+      else if (speaker !== seg.speaker && !(seg.speaker && abbreviates(firstCue, seg.speaker)))
+        current = { ...current, speaker, cue: firstCue, flag: current.flag ?? SPEAKER_NOTE };
     }
     for (let n = seg.from + 1; n <= seg.to; n++) {
       const cue = lineCue(lines[n - 1]!, book, lines[n - 2]!);

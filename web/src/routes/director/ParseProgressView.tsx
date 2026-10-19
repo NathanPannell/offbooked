@@ -23,9 +23,7 @@ export function ParseProgressView({ progress, fileName }: { progress: ParseProgr
     return () => clearInterval(id);
   }, [labelling]);
   const fraction =
-    labelling && startedAt !== null
-      ? displayFraction(view.fraction!, now - startedAt, estimateLabelMs(progress?.linesTotal ?? 0))
-      : view.fraction;
+    labelling && startedAt !== null ? displayFraction(view.fraction!, now - startedAt, estimateLabelMs(progress?.linesTotal ?? 0)) : view.fraction;
   const percent = fraction === null ? null : Math.round(fraction * 100);
 
   return (

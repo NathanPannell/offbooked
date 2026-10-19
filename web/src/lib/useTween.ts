@@ -13,7 +13,7 @@ export function useTweenedNumbers<T extends Record<string, number>>(target: T, d
 
   useEffect(() => {
     const from = shownRef.current;
-    const to = target;
+    const to = JSON.parse(key) as T;
     if (reducedMotion()) {
       shownRef.current = to;
       setShown(to);

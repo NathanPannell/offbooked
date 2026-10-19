@@ -407,7 +407,9 @@
   font-size: 14px;
   line-height: 1.35;
   color: var(--faint);
-  transition: color var(--medium) var(--ease), transform var(--medium) var(--ease);
+  transition:
+    color var(--medium) var(--ease),
+    transform var(--medium) var(--ease);
 }
 
 .hero-lyric.is-past {
@@ -581,7 +583,9 @@
   text-align: left;
   color: var(--muted);
   cursor: pointer;
-  transition: background var(--fast) var(--ease), color var(--medium) var(--ease);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--medium) var(--ease);
 }
 
 .demo-line-btn:hover {
@@ -616,7 +620,9 @@
 
 .demo-line.is-current.is-you .demo-line-btn {
   background: #fff;
-  box-shadow: inset 3px 0 0 var(--accent), var(--shadow);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    var(--shadow);
 }
 
 .demo-line.is-current .demo-text {
@@ -954,7 +960,9 @@
   color: var(--muted);
   font-family: var(--font-sans);
   font-weight: 400;
-  transition: transform var(--fast) var(--ease), background var(--fast);
+  transition:
+    transform var(--fast) var(--ease),
+    background var(--fast);
 }
 
 .faq-item[open] summary::after {
@@ -1278,7 +1286,9 @@
 .step[aria-current="page"] {
   background: #fff;
   color: var(--ink);
-  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-sm);
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    var(--shadow-sm);
 }
 
 .step-dot {
@@ -1730,7 +1740,9 @@
   padding: 0 26px 0 9px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2369645c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center;
+  background: #fff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2369645c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 8px center;
   font: 500 12.5px/1 var(--font-sans);
   color: var(--muted);
   cursor: pointer;
@@ -1996,7 +2008,9 @@
   color: inherit;
   cursor: pointer;
   box-shadow: inset 1px 0 0 transparent;
-  transition: background var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
 }
 
 .split-word:hover:not(:disabled),
@@ -3197,7 +3211,9 @@
 
 .line-card.is-recording {
   border-color: var(--rec);
-  box-shadow: 0 0 0 1px var(--rec), var(--shadow);
+  box-shadow:
+    0 0 0 1px var(--rec),
+    var(--shadow);
 }
 
 .line-card-top {
@@ -3633,7 +3649,9 @@
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
-  box-shadow: 0 0 0 6px var(--accent-soft), var(--shadow);
+  box-shadow:
+    0 0 0 6px var(--accent-soft),
+    var(--shadow);
   cursor: pointer;
   transition:
     transform var(--fast) var(--ease),
@@ -3651,7 +3669,9 @@
 }
 
 .record-button:focus-visible {
-  box-shadow: 0 0 0 6px var(--accent-soft), var(--focus-ring);
+  box-shadow:
+    0 0 0 6px var(--accent-soft),
+    var(--focus-ring);
 }
 
 .record-button:disabled {
@@ -3817,7 +3837,9 @@
   font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  transition:
+    border-color var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
 }
 
 .bar-select:hover {
@@ -3964,7 +3986,9 @@
 
 .lyric.is-current .lyric-button {
   background: #fff;
-  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow);
+  box-shadow:
+    0 0 0 1px var(--line-strong),
+    var(--shadow);
 }
 
 .lyric.is-current .lyric-text {
@@ -4144,7 +4168,9 @@
   font: 600 14px/1 var(--font-sans);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
-  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
 }
 
 .speed-btn:hover {
@@ -4448,7 +4474,9 @@
   border-radius: 999px;
   background: var(--line-strong);
   transform: translate(-50%, -50%);
-  transition: width var(--fast) var(--ease), background var(--fast) var(--ease);
+  transition:
+    width var(--fast) var(--ease),
+    background var(--fast) var(--ease);
 }
 
 .onboarding-dot.is-on::after {

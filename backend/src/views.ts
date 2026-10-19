@@ -26,7 +26,8 @@ export interface ProductionRow {
 // Progress counts a line as recorded once the cast has a take for each of its voices (one voice,
 // or every character who says a shared line). Stand-in takes and TTS fill the run-through but never
 // count. line_voices and voice_take are in migrations/011_shared_lines.sql.
-const lineRecorded = (sql: Sql) => sql`not exists (select 1 from line_voices v where v.line_id = l.id and voice_take(v.line_id, v.shared, v.character_id, true) is null)`;
+const lineRecorded = (sql: Sql) =>
+  sql`not exists (select 1 from line_voices v where v.line_id = l.id and voice_take(v.line_id, v.shared, v.character_id, true) is null)`;
 const voiceRecorded = (sql: Sql) => sql`voice_take(lv.line_id, lv.shared, lv.character_id, true) is not null`;
 
 export async function productionRows(sql: Sql, where: { ownerId: string; id?: string; includeArchived?: boolean }): Promise<ProductionRow[]> {

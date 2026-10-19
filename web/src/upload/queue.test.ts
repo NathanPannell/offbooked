@@ -1,14 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  backoffMs,
-  enqueue,
-  latestForLine,
-  MAX_AUTO_ATTEMPTS,
-  nextDue,
-  nextWakeAt,
-  transition,
-  type UploadItem,
-} from "./queue";
+import { backoffMs, enqueue, latestForLine, MAX_AUTO_ATTEMPTS, nextDue, nextWakeAt, transition, type UploadItem } from "./queue";
 
 function item(overrides: Partial<UploadItem> = {}): UploadItem {
   return {
@@ -102,29 +93,19 @@ describe("queue", () => {
   });
 
   it("uploads one at a time, oldest first, once due", () => {
-    const items = [
-      item({ takeId: "new", createdAt: 2 }),
-      item({ takeId: "old", createdAt: 1 }),
-      item({ takeId: "later", nextAttemptAt: 99 }),
-    ];
+    const items = [item({ takeId: "new", createdAt: 2 }), item({ takeId: "old", createdAt: 1 }), item({ takeId: "later", nextAttemptAt: 99 })];
     expect(nextDue(items, 10)?.takeId).toBe("old");
     expect(nextDue([...items, item({ takeId: "busy", status: "uploading" })], 10)).toBeNull();
     expect(nextDue([item({ nextAttemptAt: 99 })], 10)).toBeNull();
   });
 
   it("knows when to wake up next", () => {
-    expect(
-      nextWakeAt([item({ nextAttemptAt: 30 }), item({ nextAttemptAt: 20 }), item({ status: "failed", nextAttemptAt: 1 })]),
-    ).toBe(20);
+    expect(nextWakeAt([item({ nextAttemptAt: 30 }), item({ nextAttemptAt: 20 }), item({ status: "failed", nextAttemptAt: 1 })])).toBe(20);
     expect(nextWakeAt([item({ status: "saved" })])).toBeNull();
   });
 
   it("reports the newest take for a line", () => {
-    const items = [
-      item({ takeId: "a", createdAt: 1 }),
-      item({ takeId: "b", createdAt: 3 }),
-      item({ takeId: "c", lineId: "x", createdAt: 9 }),
-    ];
+    const items = [item({ takeId: "a", createdAt: 1 }), item({ takeId: "b", createdAt: 3 }), item({ takeId: "c", lineId: "x", createdAt: 9 })];
     expect(latestForLine(items, "tok", "l1")?.takeId).toBe("b");
     expect(latestForLine(items, "other", "l1")).toBeNull();
   });

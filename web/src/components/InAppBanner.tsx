@@ -27,8 +27,8 @@ export function InAppBanner() {
       <ExternalLink size={20} aria-hidden="true" />
       <div className="stack" style={{ gap: 10 }}>
         <p>
-          <strong>Open this in {info.browser}.</strong> {info.inApp.name === "this app" ? "This app's" : `${info.inApp.name}'s`} built-in browser
-          often can't use the microphone.
+          <strong>Open this in {info.browser}.</strong> {info.inApp.name === "this app" ? "This app's" : `${info.inApp.name}'s`} built-in browser often can't
+          use the microphone.
           {info.platform === "ios" ? " Tap ••• or the share icon, then “Open in Safari”, or copy the link and paste it into Safari." : ""}
         </p>
         <div className="row">

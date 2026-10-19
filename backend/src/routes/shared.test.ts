@@ -91,7 +91,12 @@ describe("shared lines", { skip: dbSkip }, () => {
     pid = made.id;
     // The backup parser doesn't read "ANGELO, ESCALUS." as a cue (Claude does): name the speakers
     // by hand, the way a director would in review.
-    const pair = await t.app.inject({ method: "POST", url: `/api/productions/${pid}/characters`, headers: bearer(director), payload: { name: "ANGELO, ESCALUS" } });
+    const pair = await t.app.inject({
+      method: "POST",
+      url: `/api/productions/${pid}/characters`,
+      headers: bearer(director),
+      payload: { name: "ANGELO, ESCALUS" },
+    });
     const benefactors = made.script.lines.find((l: Line) => l.text.includes("Benefactors"))!;
     const fixed = await t.app.inject({
       method: "PATCH",
@@ -123,7 +128,10 @@ describe("shared lines", { skip: dbSkip }, () => {
     assert.ok(asks.length >= 1);
     const ask = asks[0]!;
     assert.ok(ask.characters.includes("ELBOW") && !ask.characters.includes("ALL"), "groups aren't offered as speakers");
-    assert.ok(ask.scene.some((row) => row.includes("Exit ELBOW")), "the scene includes its directions");
+    assert.ok(
+      ask.scene.some((row) => row.includes("Exit ELBOW")),
+      "the scene includes its directions",
+    );
     assert.match(buildEnsemblePrompt(ask), /Target rows: \d+ \(ALL\)/);
     assert.deepEqual(byText("Be it as").voiceIds, [id("ANGELO"), id("ESCALUS")]);
   });
@@ -144,7 +152,10 @@ describe("shared lines", { skip: dbSkip }, () => {
     const mine = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: { authorization: `Invite ${angelo}` } })).json();
     const item = mine.lines.find((l: { line: { id: string } }) => l.line.id === shared.id);
     assert.ok(item, "the shared line is in each voice's list");
-    assert.deepEqual(item.together.map((x: { characterId: string; audioUrl: string | null }) => [x.characterId, x.audioUrl]), [[id("ESCALUS"), null]]);
+    assert.deepEqual(
+      item.together.map((x: { characterId: string; audioUrl: string | null }) => [x.characterId, x.audioUrl]),
+      [[id("ESCALUS"), null]],
+    );
 
     assert.equal((await upload(angelo, shared.id)).statusCode, 200);
     let sheet = (await get(`/api/productions/${pid}/call-sheet`)).json().characters as { name: string; linesRecorded: number }[];
@@ -179,8 +190,14 @@ describe("shared lines", { skip: dbSkip }, () => {
     assert.equal(shared.characterName, "ESCALUS");
     assert.equal(shared.voiceId, id("ESCALUS"));
     assert.ok(shared.take, "Escalus's own take");
-    assert.deepEqual(shared.together.map((x: { characterId: string }) => x.characterId), [id("ANGELO")]);
-    assert.ok(body.lines.every((l: { line: { text: string } }) => !l.line.text.startsWith("We must")), "only lines Escalus says");
+    assert.deepEqual(
+      shared.together.map((x: { characterId: string }) => x.characterId),
+      [id("ANGELO")],
+    );
+    assert.ok(
+      body.lines.every((l: { line: { text: string } }) => !l.line.text.startsWith("We must")),
+      "only lines Escalus says",
+    );
   });
 
   test("the director picks who says a line: several names make a group", async () => {
@@ -200,13 +217,23 @@ describe("shared lines", { skip: dbSkip }, () => {
 
     // On an ALL line the pick replaces Claude's guess.
     const all = byText("Be it as");
-    const pick = await t.app.inject({ method: "PATCH", url: `/api/lines/${all.id}`, headers: bearer(director), payload: { voiceIds: [id("ELBOW"), id("ANGELO")] } });
+    const pick = await t.app.inject({
+      method: "PATCH",
+      url: `/api/lines/${all.id}`,
+      headers: bearer(director),
+      payload: { voiceIds: [id("ELBOW"), id("ANGELO")] },
+    });
     assert.deepEqual(pick.json().line.voiceIds, [id("ELBOW"), id("ANGELO")]);
     assert.equal(pick.json().line.characterId, id("ALL"));
   });
 
   test("merging a character moves its shared lines and its part", async () => {
-    const res = await t.app.inject({ method: "POST", url: `/api/characters/${id("ELBOW")}/merge`, headers: bearer(director), payload: { intoId: id("ESCALUS") } });
+    const res = await t.app.inject({
+      method: "POST",
+      url: `/api/characters/${id("ELBOW")}/merge`,
+      headers: bearer(director),
+      payload: { intoId: id("ESCALUS") },
+    });
     assert.equal(res.statusCode, 200, res.body);
     const after = await script();
     const allLine = after.lines.find((l) => l.text.startsWith("Be it as"))!;
@@ -216,9 +243,15 @@ describe("shared lines", { skip: dbSkip }, () => {
   });
 
   test("an actor can fix their name", async () => {
-    const froth = (await t.app.inject({ method: "POST", url: `/api/productions/${pid}/characters`, headers: bearer(director), payload: { name: "FROTH" } })).json().character;
+    const froth = (
+      await t.app.inject({ method: "POST", url: `/api/productions/${pid}/characters`, headers: bearer(director), payload: { name: "FROTH" } })
+    ).json().character;
     const { joinUrl } = (await get(`/api/productions/${pid}/join-link`)).json();
-    const made = await t.app.inject({ method: "POST", url: `/api/join/${joinUrl.split("/join/")[1]}/claim`, payload: { firstName: "Mistyped", characterIds: [froth.id] } });
+    const made = await t.app.inject({
+      method: "POST",
+      url: `/api/join/${joinUrl.split("/join/")[1]}/claim`,
+      payload: { firstName: "Mistyped", characterIds: [froth.id] },
+    });
     const auth = { authorization: `Invite ${made.json().inviteToken}` };
     const res = await t.app.inject({ method: "PATCH", url: "/api/invite/me", headers: auth, payload: { name: "Frederica Smith" } });
     assert.equal(res.statusCode, 200, res.body);
@@ -239,7 +272,8 @@ describe("shared lines", { skip: dbSkip }, () => {
       });
     const first = (await standin()).json().take.id;
     const second = (await standin()).json().take.id;
-    const current = async () => (await t.ctx.sql<{ currentTakeId: string | null }[]>`select current_take_id from lines where id = ${line.id}`)[0]!.currentTakeId;
+    const current = async () =>
+      (await t.ctx.sql<{ currentTakeId: string | null }[]>`select current_take_id from lines where id = ${line.id}`)[0]!.currentTakeId;
     assert.equal(await current(), second);
     assert.equal((await t.app.inject({ method: "DELETE", url: `/api/takes/${second}`, headers: bearer(director) })).statusCode, 204);
     assert.equal(await current(), first);
@@ -252,7 +286,8 @@ describe("shared lines", { skip: dbSkip }, () => {
   test("an actor deletes their own take, and only their own", async () => {
     const shared = byText("Benefactors");
     const mine = async () =>
-      (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: { authorization: `Invite ${angeloToken}` } })).json()
+      (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: { authorization: `Invite ${angeloToken}` } }))
+        .json()
         .lines.find((l: { line: { id: string } }) => l.line.id === shared.id).take as { id: string } | null;
     const take = (await mine())!;
     const del = await t.app.inject({ method: "DELETE", url: `/api/invite/takes/${take.id}`, headers: { authorization: `Invite ${angeloToken}` } });

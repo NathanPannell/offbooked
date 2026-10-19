@@ -64,9 +64,7 @@ export function previousIndex(index: number, elapsedMs: number, restartAfterMs =
  * ("pause") or by the next line ("skip"). `recordedMs` is the line's take length when it has one,
  * which times the silence.
  */
-export type Step =
-  | { kind: "line"; index: number; mine: boolean }
-  | { kind: "speak"; index: number; durationMs: number; then: "read" | "next" };
+export type Step = { kind: "line"; index: number; mine: boolean } | { kind: "speak"; index: number; durationMs: number; then: "read" | "next" };
 
 export function stepFor(lines: QueueLine[], index: number, part: Part, recordedMs?: number | null): Step {
   const line = lines[index];

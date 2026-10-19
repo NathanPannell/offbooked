@@ -48,7 +48,12 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
     if (seg.type === "direction") {
       const pieces = pending ? splitDirections(text, seg.inlineDirections, parens, around).map(asDirectionIfWrapped) : [];
       if (pending && pieces.some((p) => !p.direction)) {
-        emitSpeech(out, [...takeLead(out, pending), ...pieces], { speaker: pending.speaker, cue: pending.cue, flag: pending.flag ?? seg.flag, continuation: false });
+        emitSpeech(out, [...takeLead(out, pending), ...pieces], {
+          speaker: pending.speaker,
+          cue: pending.cue,
+          flag: pending.flag ?? seg.flag,
+          continuation: false,
+        });
       } else if (!pending && lastSpeech && around.openedBefore && openDirectionAtEnd(out, lastSpeech.speaker)) {
         // "…Wykeham. (Blots and folds" / "letter.) Splendid, Jack!": the direction the speech left
         // open closes here, inside the speech's [brackets], and spoken words after it carry on.
@@ -107,7 +112,12 @@ export function assembleSegments(segments: Segment[], lines: string[], opts: { p
       const cueAsWritten: string | null = seg.type === "speech" ? (speaker ? (cue ?? speaker) : null) : (owner?.cue ?? null);
       const lead = owner ? takeLead(out, owner) : [];
       const emitted = out.length;
-      const spoke = emitSpeech(out, [...lead, ...pieces], { speaker, cue: cueAsWritten, flag: seg.flag ?? owner?.flag ?? null, continuation: seg.type === "continue" && !owner });
+      const spoke = emitSpeech(out, [...lead, ...pieces], {
+        speaker,
+        cue: cueAsWritten,
+        flag: seg.flag ?? owner?.flag ?? null,
+        continuation: seg.type === "continue" && !owner,
+      });
       if (!spoke && speaker) orphan = { speaker, cue: cueAsWritten ?? speaker, flag: seg.flag, lead: out.length - emitted };
     }
     for (let i = before; i < out.length; i++) out[i]!.sourceLine ??= seg.from;
@@ -148,7 +158,9 @@ export function bracketBalance(text: string, parens: boolean): { openAtEnd: bool
 }
 
 function spokenAfterClose(text: string, inline: string[], parens: boolean, around: { closesNext?: boolean; openedBefore?: boolean }): boolean {
-  return splitDirections(text, inline, parens, around).map(asDirectionIfWrapped).some((p) => !p.direction);
+  return splitDirections(text, inline, parens, around)
+    .map(asDirectionIfWrapped)
+    .some((p) => !p.direction);
 }
 
 // "(Aside)" alone is a direction even in scripts whose parentheses are otherwise spoken.
@@ -201,13 +213,19 @@ function joinPieces(pieces: Piece[]): string {
 
 // "(aside)", "_Knocking._", "He exits." and "[Exit.]" all become "[...]" inside a speech.
 export function bracketed(raw: string): string {
-  let t = raw.trim().replace(/^[_*]+|[_*]+$/g, "").trim().replace(/\(/g, "[").replace(/\)/g, "]");
+  let t = raw
+    .trim()
+    .replace(/^[_*]+|[_*]+$/g, "")
+    .trim()
+    .replace(/\(/g, "[")
+    .replace(/\)/g, "]");
   if (/^(?:\[[^[\]]*\][\s.,;:!?—–-]*)+$/.test(t)) return t;
   t = t.replace(/[[\]]/g, "").trim();
   return `[${t}]`;
 }
 
-const HAS_NUMBER = /\d|\b[IVXLC]+\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final)\b/i;
+const HAS_NUMBER =
+  /\d|\b[IVXLC]+\b|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final)\b/i;
 
 // An act or scene number heading ("ACT II", "FIRST ACT", "Scene 3"), not a slugline or a prologue.
 function actOrScene(text: string): { act: string | null; scene: string | null } | null {
@@ -256,7 +274,32 @@ export function tidyText(raw: string): string {
 
 // The model sometimes copies spoken words into the cue ("BARNARDO Long live the King!"). Keep only
 // the leading name part: capitalised words or an abbreviation ending in a full stop.
-const TITLES = new Set(["MR", "MRS", "MS", "MISS", "DR", "ST", "MME", "MLLE", "MONS", "M", "REV", "PROF", "CAPT", "COL", "GEN", "LT", "SGT", "GOV", "SEN", "FR", "SR", "SRA", "HERR", "FRAU"]);
+const TITLES = new Set([
+  "MR",
+  "MRS",
+  "MS",
+  "MISS",
+  "DR",
+  "ST",
+  "MME",
+  "MLLE",
+  "MONS",
+  "M",
+  "REV",
+  "PROF",
+  "CAPT",
+  "COL",
+  "GEN",
+  "LT",
+  "SGT",
+  "GOV",
+  "SEN",
+  "FR",
+  "SR",
+  "SRA",
+  "HERR",
+  "FRAU",
+]);
 
 export function cueName(cue: string | null): string | null {
   if (!cue) return null;
@@ -301,7 +344,13 @@ function preferSpeaker(cue: string | null, speaker: string | null): string | nul
   return c.startsWith(speaker.toUpperCase() + " ") ? speaker : cue;
 }
 
-const nameWords = (s: string) => s.toUpperCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(" ").filter(Boolean);
+const nameWords = (s: string) =>
+  s
+    .toUpperCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
 
 // The cue the model reports, if it can really be this speaker's cue. The model sometimes puts the
 // first spoken words in the cue field ("Yes, the principle"); those must not be stripped as a cue.
@@ -338,7 +387,11 @@ export function stripCue(text: string, cues: (string | null)[]): string {
     if (!bare) continue;
     // The cue ends at punctuation (even with no space after, as in "MRS LINDE.No."), a space or a dash.
     const m = new RegExp(`^\\s*${escape(bare)}(?:\\s*[.:,]\\s*|\\s+|\\s*$|(?=[([—–-]))`, "i").exec(text);
-    if (m) return text.slice(m[0].length).replace(/^\s*[.:,]\s*/, "").trim();
+    if (m)
+      return text
+        .slice(m[0].length)
+        .replace(/^\s*[.:,]\s*/, "")
+        .trim();
   }
   return text;
 }
@@ -442,7 +495,7 @@ function findLoose(text: string, needle: string, from: number): [number, number]
   if (exact >= 0) return [exact, exact + n.length];
   const pattern = n
     .split(/\s+/)
-    .map((w) => escape(w).replace(/['’‘]/g, "['’‘]").replace(/["“”]/g, "[\"“”]"))
+    .map((w) => escape(w).replace(/['’‘]/g, "['’‘]").replace(/["“”]/g, '["“”]'))
     .join("\\s+");
   const re = new RegExp(pattern, "gi");
   re.lastIndex = from;

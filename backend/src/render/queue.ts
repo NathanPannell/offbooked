@@ -195,7 +195,12 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
     } else {
       // Takes normalize while TTS synthesizes on its own worker pool.
       const [takeSamples, ttsSamples] = await Promise.all([
-        prepareTakes(ctx, job.productionId, lines.flatMap((l) => (l.takeId && !l.mixTakeIds ? [l.takeId] : [])), workDir).then(async (samples) => {
+        prepareTakes(
+          ctx,
+          job.productionId,
+          lines.flatMap((l) => (l.takeId && !l.mixTakeIds ? [l.takeId] : [])),
+          workDir,
+        ).then(async (samples) => {
           for (const [key, value] of await prepareMixes(ctx, job.productionId, lines, workDir)) samples.set(key, value);
           return samples;
         }),
@@ -272,14 +277,21 @@ async function prepareMixes(ctx: Ctx, productionId: string, lines: RenderInput[]
   if (!mixed.length) return result;
   const ids = [...new Set(mixed.flatMap((l) => l.mixTakeIds!))];
   const takes = new Map(
-    (await ctx.sql<TakeAudioRow[]>`select id, storage_key, normalized_key, normalized_samples, stream_key from takes where id = any(${ids}::uuid[])`).map((t) => [t.id, t]),
+    (await ctx.sql<TakeAudioRow[]>`select id, storage_key, normalized_key, normalized_samples, stream_key from takes where id = any(${ids}::uuid[])`).map(
+      (t) => [t.id, t],
+    ),
   );
   for (const l of mixed) {
     if (result.has(l.takeId!)) continue;
     try {
-      const clip = await mixedClip(ctx, productionId, l.mixTakeIds!.flatMap((id) => (takes.has(id) ? [takes.get(id)!] : [])), {
-        flacTo: path.join(workDir, `take-${l.takeId}.flac`),
-      });
+      const clip = await mixedClip(
+        ctx,
+        productionId,
+        l.mixTakeIds!.flatMap((id) => (takes.has(id) ? [takes.get(id)!] : [])),
+        {
+          flacTo: path.join(workDir, `take-${l.takeId}.flac`),
+        },
+      );
       result.set(l.takeId!, clip.samples);
     } catch (err) {
       ctx.log.warn({ err, lineId: l.lineId }, "mixing a shared line failed; rendering silence");

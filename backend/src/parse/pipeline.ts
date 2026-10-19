@@ -21,8 +21,8 @@ const GAP_NOTE = flag("text", "This line wasn't labelled by the parser");
 export function cleanScriptText(text: string): string {
   return text
     .replace(/\r\n?/g, "\n")
-    .replace(/[\t\xa0 -  ]/g, " ")
-    .replace(/[​﻿]/g, "")
+    .replace(/[\t\xa0\u2000-\u200a\u202f]/g, " ")
+    .replace(/[\u200b\ufeff]/g, "")
     .replace(/[ ]+$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -95,7 +95,8 @@ export async function parseScriptText(
           usage.cacheReadTokens += res.usage.cacheReadTokens;
           const prefix = validPrefix(res.segments, docLines, cursor, to);
           kept.push(...prefix.segments);
-          if (prefix.next <= to) opts.log.warn({ chunk: index, attempt, from: cursor, stoppedAt: prefix.next, to }, "chunk labels stopped early; relabelling the rest");
+          if (prefix.next <= to)
+            opts.log.warn({ chunk: index, attempt, from: cursor, stoppedAt: prefix.next, to }, "chunk labels stopped early; relabelling the rest");
           cursor = prefix.next;
         } catch (err) {
           opts.log.warn({ err: String(err), chunk: index, attempt }, "chunk labelling failed");
@@ -116,8 +117,14 @@ export async function parseScriptText(
       return { segments: kept, fallback };
     });
     // Cues are learnt across the whole script, then used to repair each chunk's blocks.
-    const book = learnCues(results.flatMap((r) => r.segments), docLines);
-    const parenDirections = usesParenDirections(results.flatMap((r) => r.segments), docLines);
+    const book = learnCues(
+      results.flatMap((r) => r.segments),
+      docLines,
+    );
+    const parenDirections = usesParenDirections(
+      results.flatMap((r) => r.segments),
+      docLines,
+    );
     const firstSpeechChunk = results.findIndex((r) => r.segments.some((sg) => sg.type === "speech"));
     const assembled = results.map((r, i) => {
       const reclaimed = reclaimSkips(r.segments, docLines, book, firstSpeechChunk >= 0 && i > firstSpeechChunk);
@@ -130,7 +137,8 @@ export async function parseScriptText(
   const structure = buildStructure(locateLines(lines, text.split("\n")));
   const pageOf = pageIndex(text.split("\n"));
   for (const l of structure.lines) l.page = l.sourceLine ? pageOf(l.sourceLine) : null;
-  if (!structure.lines.some((l) => l.kind === "dialogue")) throw new ScriptInputError("We couldn't find any dialogue in this file. Check it's a script, or paste the text instead.");
+  if (!structure.lines.some((l) => l.kind === "dialogue"))
+    throw new ScriptInputError("We couldn't find any dialogue in this file. Check it's a script, or paste the text instead.");
   const problems = validateStructure(structure);
   if (problems.length) throw new Error(`Parsed script failed validation: ${problems.slice(0, 5).join("; ")}`);
   return { structure, usage };
@@ -187,7 +195,9 @@ export function chunkRanges(lines: string[]): [number, number][] {
 // The longest run of rows that labels the range in order from its start. One or two unlabelled
 // lines are attached to the block before them (flagged); a bigger gap ends the run there.
 export function validPrefix(segments: Segment[], lines: string[], from: number, to: number): { segments: Segment[]; next: number } {
-  const sorted = [...segments].filter((s) => s.to >= s.from && s.from >= from && s.from <= to).sort((a, b) => a.from - b.from || (a.type === "skip" ? 1 : 0) - (b.type === "skip" ? 1 : 0));
+  const sorted = [...segments]
+    .filter((s) => s.to >= s.from && s.from >= from && s.from <= to)
+    .sort((a, b) => a.from - b.from || (a.type === "skip" ? 1 : 0) - (b.type === "skip" ? 1 : 0));
   const out: Segment[] = [];
   let next = from;
   const contentBetween = (a: number, b: number) => lines.slice(a - 1, b).filter((l) => l.trim()).length;
@@ -228,7 +238,7 @@ export function validPrefix(segments: Segment[], lines: string[], from: number, 
       out.splice(i--, 1);
     }
   }
-    // Trailing blank lines need no label.
+  // Trailing blank lines need no label.
   while (next <= to && !lines[next - 1]!.trim()) next++;
   if (next <= to && contentBetween(next, to) <= 2 && out.length) {
     const prev = out[out.length - 1]!;
@@ -282,7 +292,16 @@ export function usesParenDirections(segments: Segment[], lines: string[]): boole
   let marked = 0;
   let standalone = 0;
   for (const s of segments) {
-    if (s.type === "direction" && /^\(.*\)\.?$/.test(lines.slice(s.from - 1, s.to).join(" ").trim())) standalone++;
+    if (
+      s.type === "direction" &&
+      /^\(.*\)\.?$/.test(
+        lines
+          .slice(s.from - 1, s.to)
+          .join(" ")
+          .trim(),
+      )
+    )
+      standalone++;
     if (s.type !== "speech" && s.type !== "continue") continue;
     const text = lines.slice(s.from - 1, s.to).join(" ");
     for (const m of text.matchAll(PARENTHESES)) {

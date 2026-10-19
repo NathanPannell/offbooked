@@ -30,7 +30,11 @@ async function ownedCharacter(sql: Sql, user: Director, characterId: string): Pr
 }
 
 const selectLine = (sql: Sql, id: string) =>
-  sql<LineRow[]>`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page, voice_ids from lines where id = ${id}`.then((r) => lineView(r[0]!));
+  sql<
+    LineRow[]
+  >`select id, seq, section_id, kind, character_id, text, flagged, flag_code, flag_reason, current_take_id, source_line, source_page, voice_ids from lines where id = ${id}`.then(
+    (r) => lineView(r[0]!),
+  );
 
 // Drops sections left empty by an edit and renumbers the rest in script order.
 async function tidySections(sql: Tx, productionId: string): Promise<void> {
@@ -210,7 +214,9 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!locked) throw notFound("Line not found.");
       const [recorded] = await tx`select 1 from takes where line_id = ${line.id} limit 1`;
       if (recorded) throw conflict("has_recordings", "This line has recordings, so it can't be deleted.");
-      const [before] = await tx<{ id: string }[]>`select id from lines where production_id = ${line.productionId} and seq < ${line.seq} order by seq desc limit 1`;
+      const [before] = await tx<
+        { id: string }[]
+      >`select id from lines where production_id = ${line.productionId} and seq < ${line.seq} order by seq desc limit 1`;
       const [section] = await tx<SectionRow[]>`select id, seq, act, scene, title from sections where id = ${line.sectionId}`;
       await tx`delete from lines where id = ${line.id}`;
       await tx`update lines set seq = seq - 1 where production_id = ${line.productionId} and seq > ${line.seq}`;
@@ -337,7 +343,8 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
     const user = await requireDirector(ctx, req);
     const c = await ownedCharacter(sql, user, idOf(req.params));
     const name = requiredString(body(req.body), "name", 80);
-    const aliases = name.toLowerCase() === c.name.toLowerCase() ? c.aliases : [...new Set([...c.aliases, c.name])].filter((a) => a.toLowerCase() !== name.toLowerCase());
+    const aliases =
+      name.toLowerCase() === c.name.toLowerCase() ? c.aliases : [...new Set([...c.aliases, c.name])].filter((a) => a.toLowerCase() !== name.toLowerCase());
     try {
       await sql`update characters set name = ${name}, aliases = ${aliases} where id = ${c.id}`;
     } catch (err) {

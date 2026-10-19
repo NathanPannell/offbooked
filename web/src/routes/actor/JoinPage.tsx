@@ -70,9 +70,7 @@ function Join({ token }: { token: string }) {
     if (notReady) {
       return (
         <JoinMessage title={title ? `${title} is nearly ready` : "Nearly ready"}>
-          <p>
-            {director ?? "Your director"} is still preparing the script. This page checks again by itself, so you can leave it open.
-          </p>
+          <p>{director ?? "Your director"} is still preparing the script. This page checks again by itself, so you can leave it open.</p>
           <div className="row waiting" role="status">
             <span className="spinner" aria-hidden="true" /> Checking every few seconds…
           </div>

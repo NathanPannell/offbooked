@@ -20,8 +20,7 @@ export interface TakePart {
   total: number;
 }
 
-export const partHeaders = (part?: TakePart): Record<string, string> =>
-  part ? { "X-Take-Parts": String(part.total), "X-Take-Part": String(part.index) } : {};
+export const partHeaders = (part?: TakePart): Record<string, string> => (part ? { "X-Take-Parts": String(part.total), "X-Take-Part": String(part.index) } : {});
 
 /** All calls scoped to one actor's invite token. */
 export function actorApi(token: string) {
@@ -31,11 +30,9 @@ export function actorApi(token: string) {
     start: (firstName: string) => request<void>("/invite/start", { auth, json: { firstName } }),
     /** Free parts to pick up, and picking them up. */
     parts: () => request<{ parts: FreePart[] }>("/invite/parts", { auth }),
-    pickUp: (characterIds: string[]) =>
-      request<{ characters: { id: string; name: string }[] }>("/invite/parts", { auth, json: { characterIds } }),
+    pickUp: (characterIds: string[]) => request<{ characters: { id: string; name: string }[] }>("/invite/parts", { auth, json: { characterIds } }),
     /** Fixes the actor's name (it shows on the call sheet). */
-    rename: (name: string) =>
-      request<{ actor: { id: string; name: string; firstName: string } }>("/invite/me", { method: "PATCH", auth, json: { name } }),
+    rename: (name: string) => request<{ actor: { id: string; name: string; firstName: string } }>("/invite/me", { method: "PATCH", auth, json: { name } }),
     /** Deletes one of the actor's own takes; `restoreTake` is its Undo. */
     deleteTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}`, { method: "DELETE", auth }),
     restoreTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}/restore`, { method: "POST", auth }),
@@ -53,14 +50,12 @@ export function actorApi(token: string) {
           ...partHeaders(part),
         },
       }),
-    postStt: (takeId: string, result: SttResult) =>
-      request<void>(`/invite/takes/${takeId}/stt`, { auth, json: result }),
+    postStt: (takeId: string, result: SttResult) => request<void>(`/invite/takes/${takeId}/stt`, { auth, json: result }),
     contact: (email: string) => request<void>("/invite/contact", { auth, json: { email } }),
     runthrough: () => request<RunThrough>("/invite/runthrough", { auth }),
     /** Line-by-line audio for the run-through player, and for cues that aren't ready yet. */
     lineAudio: {
-      line: (lineId, opts = {}) =>
-        request<LineAudio>(`/invite/lines/${lineId}/audio${opts.prefetch ? "?prefetch=1" : ""}`, { auth, signal: opts.signal }),
+      line: (lineId, opts = {}) => request<LineAudio>(`/invite/lines/${lineId}/audio${opts.prefetch ? "?prefetch=1" : ""}`, { auth, signal: opts.signal }),
       warm: (lineIds) => request<{ lines: LineAudio[] }>("/invite/lines/audio/warm", { auth, json: { lineIds } }),
     } satisfies LineAudioApi as LineAudioApi,
     practice: (results: PracticeResult[]) =>

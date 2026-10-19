@@ -2,17 +2,7 @@ import { X } from "lucide-react";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 
 /** A modal built on <dialog>: focus trapping, Escape and the backdrop come from the browser. */
-export function Dialog({
-  open,
-  onClose,
-  title,
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  title: string;
-  children: ReactNode;
-}) {
+export function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 

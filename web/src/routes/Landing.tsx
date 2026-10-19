@@ -56,8 +56,8 @@ export function Landing() {
             Run lines with your <span className="marker">whole cast.</span> No rehearsal room required.
           </h1>
           <p className="hero-lede">
-            Upload the script, send one link, and everyone records their lines from their phone in a few minutes. Then the whole
-            play comes back as one run-through, with gaps where you speak.
+            Upload the script, send one link, and everyone records their lines from their phone in a few minutes. Then the whole play comes back as one
+            run-through, with gaps where you speak.
           </p>
           <div className="hero-ctas">
             <Link className="btn btn-primary btn-lg" to={startTo}>
@@ -77,9 +77,7 @@ export function Landing() {
           <h2 id="demo-title" className="section-title">
             Press play. You're Hamlet.
           </h2>
-          <p className="muted">
-            This is what your cast hears: the scene, line by line, like lyrics. Switch to “My part” and it stops for your lines.
-          </p>
+          <p className="muted">This is what your cast hears: the scene, line by line, like lyrics. Switch to “My part” and it stops for your lines.</p>
         </div>
         <Demo ref={demo} />
       </section>

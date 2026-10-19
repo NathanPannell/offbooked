@@ -20,15 +20,7 @@ import { suggestMerges } from "./duplicateCharacters";
  * The director's cast page. Two actions: share the cast link (the main one), and record some lines
  * yourself. Who has taken which part and what's recorded fold away below.
  */
-export function CastTab({
-  production,
-  onOpenScript,
-  onOpenPlay,
-}: {
-  production: Production;
-  onOpenScript: () => void;
-  onOpenPlay: () => void;
-}) {
+export function CastTab({ production, onOpenScript, onOpenPlay }: { production: Production; onOpenScript: () => void; onOpenPlay: () => void }) {
   const navigate = useNavigate();
   const toast = useToast();
   const sheet = useResource(() => castApi.callSheet(production.id).then((r) => r.characters), `sheet:${production.id}`);
@@ -250,17 +242,7 @@ function SheetRow({
  * Takes a part away from whoever has it, so someone else can pick it up. What they recorded stays
  * and keeps playing; the new person records the rest, or over it.
  */
-function UnassignForm({
-  productionId,
-  part,
-  onCancel,
-  onDone,
-}: {
-  productionId: string;
-  part: CallSheetCharacter;
-  onCancel: () => void;
-  onDone: () => void;
-}) {
+function UnassignForm({ productionId, part, onCancel, onDone }: { productionId: string; part: CallSheetCharacter; onCancel: () => void; onDone: () => void }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const who = part.mine ? "You" : part.takenBy;
@@ -352,8 +334,11 @@ function MergeForm({
         </select>
       </label>
       <p className="small muted">
-        {plural(part.lineCount, "line")} and {part.lineCount === 1 ? "its recording" : "their recordings"} move to {target ? titleCase(target.name) : "the part you keep"}.
-        {part.takenBy && target?.takenBy && part.actorId !== target.actorId ? ` ${part.takenBy} won't have this part any more; ${target.takenBy} keeps ${titleCase(target.name)}.` : ""}
+        {plural(part.lineCount, "line")} and {part.lineCount === 1 ? "its recording" : "their recordings"} move to{" "}
+        {target ? titleCase(target.name) : "the part you keep"}.
+        {part.takenBy && target?.takenBy && part.actorId !== target.actorId
+          ? ` ${part.takenBy} won't have this part any more; ${target.takenBy} keeps ${titleCase(target.name)}.`
+          : ""}
         {part.takenBy && target && !target.takenBy ? ` ${part.takenBy} takes ${titleCase(target.name)}.` : ""}
       </p>
       <div className="row">

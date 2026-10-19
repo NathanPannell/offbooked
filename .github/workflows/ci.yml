@@ -1,19 +1,48 @@
 name: CI
 
+# The gate for every PR into staging (and the staging → main release PR), and a re-run on each
+# push to staging and main. Nothing here deploys: production deploys only from main (deploy-backend.yml
+# and Vercel's Git integration).
 on:
   pull_request:
+    branches: [staging, main]
   push:
-    branches: [main]
+    branches: [staging, main]
+
+# A new push to a PR cancels its older run; runs for merge commits on staging and main always finish.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   backend:
+    name: Backend (format, lint, types, migrations, tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: backend
+    services:
+      # Throwaway Postgres for the migrations and the DB tests. CI never touches Neon.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: offbooked
+          POSTGRES_PASSWORD: offbooked
+          POSTGRES_DB: offbooked_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U offbooked" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://offbooked:offbooked@localhost:5432/offbooked_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: 24
           cache: npm
@@ -21,35 +50,145 @@ jobs:
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
+      - name: Apply migrations to a fresh database, twice (the second run must be a no-op)
+        run: |
+          node src/migrate.ts
+          node src/migrate.ts | tee /tmp/second.txt
+          grep -qx "already up to date" /tmp/second.txt
+      # Includes the render worker's idle test: an idle worker sends no queries (render/worker.test.ts).
+      - name: Tests with coverage floor
+        run: npm run test:coverage
 
   web:
+    name: Web (format, lint, types, tests, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
         with:
-          node-version: 22
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
-      - run: npm run build
+      - name: Tests with coverage floor
+        run: npm run test:coverage
+      - name: Production build
+        run: npm run build
+
+  e2e:
+    name: E2E (Playwright against the built app)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: offbooked
+          POSTGRES_PASSWORD: offbooked
+          POSTGRES_DB: offbooked_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U offbooked" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://offbooked:offbooked@localhost:5432/offbooked_e2e
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            web/package-lock.json
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npm ci
+        working-directory: backend
+      - run: npm ci
+        working-directory: web
+      - name: Build the web app against the local API
+        run: npm run build
+        working-directory: web
+        env:
+          VITE_API_URL: http://localhost:8080
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+      - name: Run the journeys
+        run: npm run test:e2e
+        working-directory: web
+      - name: Upload the Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report/
+            web/test-results/
+          retention-days: 14
 
   docker:
+    name: Docker image (build, Piper speaks)
     # Builds the Railway image and checks Piper can synthesize inside it, since the TTS
     # binary and voices are only exercised in the container.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - name: Build the backend image
         run: docker build -f backend/Dockerfile -t offbooked-api .
       - name: Piper speaks inside the image
         run: |
           docker run --rm --entrypoint sh offbooked-api -c \
             'echo "To be, or not to be." | /opt/piper/piper -q -m /opt/piper/voices/en_GB-alan-medium.onnx -f /tmp/t.wav && test -s /tmp/t.wav && ls -la /tmp/t.wav && ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/t.wav'
+
+  security:
+    name: Security (audit, secrets, no .env)
+    # backend/bench/tools is offline Python for the parser benchmark: it is never deployed or run in
+    # CI, so it has no pip-audit or ruff step.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - name: npm audit (backend)
+        run: npm audit --audit-level=high
+        working-directory: backend
+      - name: npm audit (web)
+        run: npm audit --audit-level=high
+        working-directory: web
+      - name: No committed .env files
+        run: |
+          found=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.env\.example$' || true)
+          if [ -n "$found" ]; then echo "Committed env files:"; echo "$found"; exit 1; fi
+      - name: Install gitleaks
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+      - name: Secret scan (full history)
+        run: /tmp/gitleaks git . --redact --no-banner --exit-code 1
