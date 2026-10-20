@@ -141,12 +141,13 @@ export function tokenStarts(clock: WordClock, stretches: readonly Stretch[], tok
 }
 
 /**
- * One start per spoken piece of the line, as the run-through tokenizes it (`lineTokens`: each
- * printed word the character says, [bracketed] directions and {notes} left out), from the starts
- * of the live tracker's tokens. A piece with no tokens of its own (a dash) sits halfway between
- * its neighbours.
+ * One start per piece of the line as the run-through tokenizes it (`lineTokens`, in order: each
+ * printed word, and the words of a [bracketed] direction; {notes} have none), from the starts of
+ * the live tracker's tokens. A piece the character says but the tracker has no tokens for (a dash)
+ * sits halfway between its neighbours. A direction isn't said in a take, so it takes no time: it
+ * starts with the next word the character says, or at `endMs` when nothing follows it.
  */
-export function pieceStarts(text: string, starts: readonly number[]): number[] {
+export function pieceStarts(text: string, starts: readonly number[], endMs: number): number[] {
   // Character offsets of the tracker's word pieces.
   const words: { from: number; to: number; token: number }[] = [];
   let at = 0;
@@ -154,29 +155,39 @@ export function pieceStarts(text: string, starts: readonly number[]): number[] {
     if (p.kind === "word" && p.tokenEnd > p.tokenStart) words.push({ from: at, to: at + p.text.length, token: p.tokenStart });
     at += p.text.length;
   }
-  const spoken = lineTokens(text).flatMap((t) => (t.narrator ? [] : t.pieces.map(() => t)));
-  const out: (number | null)[] = spoken.map((t) => {
+  const pieces = lineTokens(text).flatMap((t) => t.pieces.map(() => t));
+  const said = pieces.map((t) => !t.narrator);
+  const out: (number | null)[] = pieces.map((t) => {
+    if (t.narrator) return null;
     const w = words.find((x) => x.to > t.start && x.from < t.end);
     return w && w.token < starts.length ? starts[w.token]! : null;
   });
+  // The character's own pieces without a start of their own: between their said neighbours.
+  const known = (i: number) => said[i] && out[i] !== null;
   for (let i = 0; i < out.length; i++) {
-    if (out[i] !== null) continue;
+    if (!said[i] || out[i] !== null) continue;
     let prev = i - 1;
-    while (prev >= 0 && out[prev] === null) prev--;
+    while (prev >= 0 && !known(prev)) prev--;
     let next = i + 1;
-    while (next < out.length && out[next] === null) next++;
+    while (next < out.length && !known(next)) next++;
     const a = prev >= 0 ? out[prev]! : null;
     const b = next < out.length ? out[next]! : null;
     out[i] = a !== null && b !== null ? Math.round((a + b) / 2) : (a ?? b ?? 0);
+  }
+  // Directions: with the next said piece, or at the end.
+  let following: number | null = null;
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (said[i]) following = out[i]!;
+    else out[i] = following ?? Math.round(endMs);
   }
   // Never earlier than the piece before.
   let floor = 0;
   return out.map((v) => (floor = Math.max(floor, v!)));
 }
 
-/** How many starts a line needs: one per spoken piece (see `pieceStarts`). */
-export function spokenPieceCount(text: string): number {
-  return lineTokens(text).reduce((n, t) => n + (t.narrator ? 0 : t.pieces.length), 0);
+/** How many starts a line needs: one per piece of `lineTokens` (see `pieceStarts`). */
+export function pieceCount(text: string): number {
+  return lineTokens(text).reduce((n, t) => n + t.pieces.length, 0);
 }
 
 /** Everything the live take keeps for timing its words, in ms of the take. */
@@ -195,6 +206,8 @@ export function takeWordStarts(timing: TakeTiming | null, lineId: string, durati
   const { tokens } = segmentLine(timing.text);
   const starts = tokenStarts(timing.clock, timing.stretches, tokens, durationMs - timing.offsetMs);
   if (!starts) return null;
-  const pieces = pieceStarts(timing.text, starts).map((ms) => Math.max(0, Math.min(Math.round(durationMs), ms + Math.round(timing.offsetMs))));
-  return pieces.length === spokenPieceCount(timing.text) && pieces.length > 0 ? pieces : null;
+  const pieces = pieceStarts(timing.text, starts, durationMs - timing.offsetMs).map((ms) =>
+    Math.max(0, Math.min(Math.round(durationMs), ms + Math.round(timing.offsetMs))),
+  );
+  return pieces.length === pieceCount(timing.text) && pieces.length > 0 ? pieces : null;
 }

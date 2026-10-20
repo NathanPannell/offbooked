@@ -16,15 +16,16 @@ export const MAX_WORD_STARTS = 2000;
 const HAS_WORD = /[\p{L}\p{N}]/u;
 
 /**
- * How many words a character says in a line, counted as the web player tokenizes it
- * (`lineTokens` in web/src/player/words.ts): each printed word outside [bracketed] directions (a
- * bracket closes at the next "]", or unclosed at the end of its printed line), not a {note}, not
- * only markup (`_`, `*`), on a printed line that has a letter or digit somewhere. Keep the two in step.
+ * How many word starts a line's take carries: its pieces as the web player tokenizes it
+ * (`lineTokens` in web/src/player/words.ts). Each printed word of the character's is one, unless
+ * it is a {note} or only markup (`_`, `*`); a [bracketed] direction (closed at the next "]", or
+ * unclosed at the end of its printed line) counts each of its words; a printed stretch with no
+ * letter or digit in it has none. Keep the two in step.
  */
-export function spokenPieceCount(text: string): number {
+export function pieceCount(text: string): number {
   const braces = new Array<boolean>(text.length).fill(false);
   for (const m of text.matchAll(/\{[^}]*\}/g)) for (let i = m.index; i < m.index + m[0].length; i++) braces[i] = true;
-  // The character's own stretches: everything outside the brackets.
+  // The character's own stretches and the narrator's [bracketed] ones.
   const regions: { from: number; to: number; narrator: boolean }[] = [];
   let at = 0;
   for (let open = text.indexOf("[", at); open !== -1; open = text.indexOf("[", at)) {
@@ -57,7 +58,7 @@ export function spokenPieceCount(text: string): number {
       const pieces = said.replace(/[_*]+/g, "").split(/\s+/).filter(Boolean);
       const key = `${r}:${line}`;
       const g = groups.get(key) ?? { pieces: 0, wordy: false };
-      if (!region.narrator) g.pieces += pieces.length;
+      g.pieces += pieces.length;
       g.wordy ||= pieces.some((p) => HAS_WORD.test(p));
       groups.set(key, g);
     }
@@ -83,17 +84,12 @@ export function parseWordStarts(header: unknown, text: string, durationMs: numbe
     if (ms > durationMs + 1000 || (starts.length && ms < starts[starts.length - 1]!)) return null;
     starts.push(ms);
   }
-  return starts.length === spokenPieceCount(text) ? starts : null;
+  return starts.length === pieceCount(text) ? starts : null;
 }
 
 /** Word starts in ms of the clip as served: moved by where the trim cut it, kept inside the clip. Undefined when they don't fit the line any more (it was edited). */
-export function servedWordStarts(
-  raw: readonly number[] | null,
-  trimStartMs: number | null,
-  durationMs: number,
-  text: string,
-): number[] | undefined {
-  if (!raw?.length || trimStartMs === null || raw.length !== spokenPieceCount(text)) return undefined;
+export function servedWordStarts(raw: readonly number[] | null, trimStartMs: number | null, durationMs: number, text: string): number[] | undefined {
+  if (!raw?.length || trimStartMs === null || raw.length !== pieceCount(text)) return undefined;
   return raw.map((ms) => Math.max(0, Math.min(durationMs, ms - trimStartMs)));
 }
 

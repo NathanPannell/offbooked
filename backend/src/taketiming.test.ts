@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { shiftStretches, speechStretches, TRIM } from "./render/trim.ts";
-import { MAX_WORD_STARTS, parseWordStarts, servedSpeech, servedWordStarts, spokenPieceCount } from "./taketiming.ts";
+import { MAX_WORD_STARTS, parseWordStarts, servedSpeech, servedWordStarts, pieceCount } from "./taketiming.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "./test/helpers.ts";
 
 // Frame levels: `ms` of each level in turn, in 10 ms frames.
@@ -10,15 +10,16 @@ const levels = (...parts: [number, number][]) => parts.flatMap(([db, ms]) => Arr
 
 test("counts the words a character says as the web player does", () => {
   // The same lines as web/src/player/words.test.ts (lineTokens) and web/src/stt/wordTiming.test.ts.
-  assert.equal(spokenPieceCount("Is this a dagger\nwhich I see?"), 7);
-  assert.equal(spokenPieceCount("Now go. [To the Servant.] Was it not"), 5, "a [direction] is the narrator's");
-  assert.equal(spokenPieceCount("Away![Exit.]"), 1);
-  assert.equal(spokenPieceCount("Stay [aside\nand hear"), 3, "an unclosed bracket runs to the end of its printed line");
-  assert.equal(spokenPieceCount("Go {beat} now\n—"), 2, "notes and wordless lines aren't said");
-  assert.equal(spokenPieceCount("Stay — go"), 3, "a dash among words is a piece");
-  assert.equal(spokenPieceCount("I *will* go _now_ **"), 4, "markup alone isn't a word");
-  assert.equal(spokenPieceCount("Now go. [Exit.] Was it {beat} not"), 5);
-  assert.equal(spokenPieceCount(""), 0);
+  assert.equal(pieceCount("Is this a dagger\nwhich I see?"), 7);
+  assert.equal(pieceCount("Now go. [To the Servant.] Was it not"), 8, "a [direction]'s words count too");
+  assert.equal(pieceCount("Away![Exit.]"), 2);
+  assert.equal(pieceCount("Stay [aside\nand hear"), 4, "an unclosed bracket runs to the end of its printed line");
+  assert.equal(pieceCount("Go {beat} now\n—"), 2, "notes and wordless lines aren't said");
+  assert.equal(pieceCount("Stay — go"), 3, "a dash among words is a piece");
+  assert.equal(pieceCount("I *will* go _now_ **"), 4, "markup alone isn't a word");
+  assert.equal(pieceCount("Now go. [Exit.] Was it {beat} not"), 6);
+  assert.equal(pieceCount("Go [—] now"), 2, "a direction with no words in it has none");
+  assert.equal(pieceCount(""), 0);
 });
 
 test("reads X-Word-Starts only when it fits the line", () => {
@@ -57,10 +58,20 @@ test("finds stretches of speech, split on pauses of 150 ms or more", () => {
   assert.deepEqual(speechStretches(levels([-70, 500], [-20, 300], [-70, 150], [-20, 300], [-70, 500])).length, 2);
   assert.deepEqual(speechStretches(levels([-70, 300], [-5, 20], [-70, 500], [-20, 600], [-70, 400])), [{ startMs: 820, endMs: 1420 }], "a click isn't speech");
   assert.deepEqual(speechStretches(levels([-20, 1000])), [], "no floor to tell speech from");
-  assert.deepEqual(shiftStretches([{ startMs: 500, endMs: 1200 }, { startMs: 1500, endMs: 1900 }], 380, 1300), [
-    { startMs: 120, endMs: 820 },
-    { startMs: 1120, endMs: 1300 },
-  ]);
+  assert.deepEqual(
+    shiftStretches(
+      [
+        { startMs: 500, endMs: 1200 },
+        { startMs: 1500, endMs: 1900 },
+      ],
+      380,
+      1300,
+    ),
+    [
+      { startMs: 120, endMs: 820 },
+      { startMs: 1120, endMs: 1300 },
+    ],
+  );
   assert.deepEqual(servedSpeech([120, 820, 1120, 1700], 1300), [
     { startMs: 120, endMs: 820 },
     { startMs: 1120, endMs: 1300 },
@@ -72,7 +83,9 @@ test("finds stretches of speech, split on pauses of 150 ms or more", () => {
 // A 16 kHz mono WAV: silence and tones (`[tone?, ms]`), so the voice is exactly where the tones are.
 function wav(...parts: [boolean, number][]): Buffer {
   const rate = 16_000;
-  const samples = parts.flatMap(([tone, ms]) => Array.from({ length: (rate * ms) / 1000 }, (_, i) => (tone ? Math.round(9000 * Math.sin((2 * Math.PI * 220 * i) / rate)) : 0)));
+  const samples = parts.flatMap(([tone, ms]) =>
+    Array.from({ length: (rate * ms) / 1000 }, (_, i) => (tone ? Math.round(9000 * Math.sin((2 * Math.PI * 220 * i) / rate)) : 0)),
+  );
   const data = Buffer.alloc(samples.length * 2);
   samples.forEach((v, i) => data.writeInt16LE(v, i * 2));
   const header = Buffer.alloc(44);
@@ -123,7 +136,8 @@ describe("take word timing", { skip: dbSkip }, () => {
       },
       payload: audio,
     });
-  const near = (actual: number, expected: number, what: string) => assert.ok(Math.abs(actual - expected) <= 30, `${what}: ${actual}, expected about ${expected}`);
+  const near = (actual: number, expected: number, what: string) =>
+    assert.ok(Math.abs(actual - expected) <= 30, `${what}: ${actual}, expected about ${expected}`);
 
   before(async () => {
     t = await createTestApp();
@@ -132,8 +146,9 @@ describe("take word timing", { skip: dbSkip }, () => {
     pid = made.id;
     lines = made.script.lines.filter((l: Line) => l.kind === "dialogue");
     const anna = made.script.characters.find((c: { name: string }) => c.name === "ANNA").id;
-    riz = (await t.app.inject({ method: "POST", url: `/api/productions/${pid}/cast`, headers: bearer(alice), payload: { name: "Riz", characterIds: [anna] } }))
-      .json().member;
+    riz = (
+      await t.app.inject({ method: "POST", url: `/api/productions/${pid}/cast`, headers: bearer(alice), payload: { name: "Riz", characterIds: [anna] } })
+    ).json().member;
   });
   after(() => t.close());
 
@@ -208,7 +223,11 @@ describe("take word timing", { skip: dbSkip }, () => {
     const res = await t.app.inject({
       method: "OPTIONS",
       url: `/api/lines/${lines[0]!.id}/take`,
-      headers: { origin: "https://app.test", "access-control-request-method": "PUT", "access-control-request-headers": "x-word-starts,x-take-parts,x-take-part" },
+      headers: {
+        origin: "https://app.test",
+        "access-control-request-method": "PUT",
+        "access-control-request-headers": "x-word-starts,x-take-parts,x-take-part",
+      },
     });
     const allowed = String(res.headers["access-control-allow-headers"]).toLowerCase();
     for (const h of ["x-word-starts", "x-take-parts", "x-take-part"]) assert.ok(allowed.includes(h), allowed);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { lineTokens, wordAt, wordTimes } from "../player/words";
 import { applyPass, segmentLine, startProgress, startVad, VAD_MIN_RUN_MS, vadStep } from "./live";
-import { addVoiced, notePass, pieceStarts, spokenPieceCount, startWordClock, takeWordStarts, tokenStarts, type Stretch, type TakeTiming } from "./wordTiming";
+import { addVoiced, notePass, pieceCount, pieceStarts, startWordClock, takeWordStarts, tokenStarts, type Stretch, type TakeTiming } from "./wordTiming";
 
 /** Stretches from a list of [start, end] pairs. */
 const voiced = (...pairs: [number, number][]): Stretch[] => pairs.map(([startMs, endMs]) => ({ startMs, endMs }));
@@ -103,32 +104,38 @@ describe("tokenStarts", () => {
 });
 
 describe("pieceStarts", () => {
-  it("gives one start per printed word the character says, leaving [directions] and {notes} out", () => {
+  it("gives one start per piece of lineTokens; a [direction] takes no time, starting with the next word", () => {
     const text = "Now go. [To the Servant.] Was it {beat} not";
-    expect(spokenPieceCount(text)).toBe(5);
+    expect(pieceCount(text)).toBe(8);
     const { tokens } = segmentLine(text);
     // The tracker listens for the note's word too (it may be said); the player never lights it.
     expect(tokens).toEqual(["now", "go", "was", "it", "beat", "not"]);
-    expect(pieceStarts(text, [100, 300, 900, 1100, 1200, 1300])).toEqual([100, 300, 900, 1100, 1300]);
+    expect(pieceStarts(text, [100, 300, 900, 1100, 1200, 1300], 2000)).toEqual([100, 300, 900, 900, 900, 900, 1100, 1300]);
+  });
+
+  it("puts a direction that closes the line at the end of the take", () => {
+    const text = "Away! [Exit.]";
+    expect(pieceCount(text)).toBe(2);
+    expect(pieceStarts(text, [200], 1500)).toEqual([200, 1500]);
   });
 
   it("starts a word said as several tokens with its first", () => {
     const text = "I'm 21 today";
     expect(segmentLine(text).tokens).toEqual(["i", "am", "twenty", "one", "today"]);
-    expect(pieceStarts(text, [0, 100, 300, 500, 800])).toEqual([0, 300, 800]);
+    expect(pieceStarts(text, [0, 100, 300, 500, 800], 1000)).toEqual([0, 300, 800]);
   });
 
   it("puts a dash halfway between its neighbours, and never goes back", () => {
     const text = "Stay — go";
-    expect(spokenPieceCount(text)).toBe(3);
-    expect(pieceStarts(text, [200, 1000])).toEqual([200, 600, 1000]);
-    expect(pieceStarts(text, [900, 400])).toEqual([900, 900, 900]);
+    expect(pieceCount(text)).toBe(3);
+    expect(pieceStarts(text, [200, 1000], 1200)).toEqual([200, 600, 1000]);
+    expect(pieceStarts(text, [900, 400], 1200)).toEqual([900, 900, 900]);
   });
 
   it("covers a line opened by a (parenthesised) direction the tracker skips", () => {
     const text = "(aside) Well then";
-    expect(spokenPieceCount(text)).toBe(3);
-    expect(pieceStarts(text, [500, 800])).toEqual([500, 500, 800]);
+    expect(pieceCount(text)).toBe(3);
+    expect(pieceStarts(text, [500, 800], 1000)).toEqual([500, 500, 800]);
   });
 });
 
@@ -163,5 +170,17 @@ describe("takeWordStarts", () => {
     expect(takeWordStarts(timing, "other", 2440)).toBeNull();
     expect(takeWordStarts(null, "l1", 2440)).toBeNull();
     expect(takeWordStarts({ ...timing, clock: startWordClock() }, "l1", 2440)).toBeNull();
+  });
+});
+
+describe("what the run-through does with them", () => {
+  it("takes the starts as they are, one per piece, and never lights the direction", () => {
+    const text = "Now go. [To the Servant.] Was it not";
+    const starts = pieceStarts(text, [100, 400, 900, 1100, 1300], 1800);
+    const tokens = lineTokens(text);
+    const times = wordTimes(tokens, { durationMs: 1800, wordStartsMs: starts });
+    expect(times.map((t) => Math.round(t.startMs))).toEqual(starts);
+    // At 950 ms "Was" is being said, not the direction that starts with it.
+    expect(text.slice(tokens[wordAt(times, 950)]!.start).startsWith("Was")).toBe(true);
   });
 });

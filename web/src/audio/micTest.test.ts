@@ -19,15 +19,35 @@ describe("when the mic check has heard enough", () => {
 
   it("plays back once someone has spoken and then stopped for a moment", () => {
     // Quiet, "hello there" for a second, then quiet: done 0.7 s after they stop.
-    expect(feed([[-70, 500], [-22, 1000], [-70, 2000]])).toBe(2200);
+    expect(
+      feed([
+        [-70, 500],
+        [-22, 1000],
+        [-70, 2000],
+      ]),
+    ).toBe(2200);
   });
 
   it("waits through the short gaps between words", () => {
-    expect(feed([[-70, 300], [-22, 600], [-70, 300], [-22, 600], [-70, 2000]])).toBe(2500);
+    expect(
+      feed([
+        [-70, 300],
+        [-22, 600],
+        [-70, 300],
+        [-22, 600],
+        [-70, 2000],
+      ]),
+    ).toBe(2500);
   });
 
   it("doesn't play back on a cough or a tap", () => {
-    expect(feed([[-70, 500], [-10, 100], [-70, 2000]])).toBeNull();
+    expect(
+      feed([
+        [-70, 500],
+        [-10, 100],
+        [-70, 2000],
+      ]),
+    ).toBeNull();
   });
 
   it("plays back after a few seconds whatever it heard", () => {
