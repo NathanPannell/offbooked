@@ -47,7 +47,8 @@ const none: Auth = { kind: "none" };
 
 export const auth = {
   /** Returns a dev sign-in link when the backend logs emails instead of sending them. */
-  request: (email: string) => request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: { email } }),
+  request: (email: string, next?: string | null) =>
+    request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: next ? { email, next } : { email } }),
   verify: (token: string) => request<{ sessionToken: string; user: User }>("/auth/verify", { auth: none, json: { token } }),
   me: () => request<{ user: User }>("/me", { auth: director }),
   updateMe: (name: string) => request<{ user: User }>("/me", { method: "PATCH", auth: director, json: { name } }),

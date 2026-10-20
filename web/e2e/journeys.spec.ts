@@ -19,7 +19,8 @@ async function signInAsDirector(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Email me a sign-in link" }).click();
   // The backend runs with EMAIL_DRIVER=log, so the sign-in link comes back on the page.
   await page.getByRole("link", { name: "Use dev sign-in link" }).click();
-  await expect(page).toHaveURL(/\/app$/);
+  // A new director has no productions yet, so signing in goes straight to setting one up.
+  await expect(page).toHaveURL(/\/app\/new$/);
 }
 
 async function createProduction(page: Page, title: string): Promise<void> {

@@ -15,6 +15,7 @@ const InvitePage = lazy(() => import("./routes/actor/InvitePage"));
 const InvitePlay = lazy(() => import("./routes/actor/InvitePlay"));
 const JoinPage = lazy(() => import("./routes/actor/JoinPage"));
 const SceneRecorder = lazy(() => import("./routes/director/SceneRecorder"));
+const Account = lazy(() => import("./routes/director/Account"));
 
 export function App() {
   return (
@@ -30,6 +31,7 @@ export function App() {
               <Route path="new" element={<NewProduction />} />
               <Route path="p/:id" element={<ProductionPage />} />
               <Route path="p/:id/record" element={<SceneRecorder />} />
+              <Route path="account" element={<Account />} />
             </Route>
             <Route path="/join/:token" element={<JoinPage />} />
             <Route path="/i/:token" element={<InvitePage />} />

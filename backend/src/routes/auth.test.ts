@@ -40,6 +40,18 @@ describe("director auth", { skip: dbSkip }, () => {
     assert.equal((await t.app.inject({ method: "GET", url: "/api/me", headers: bearer(sessionToken) })).statusCode, 401);
   });
 
+  test("the sign-in link carries where to go next, only inside the director app", async () => {
+    const linkFor = async (next: unknown) => {
+      const res = await t.app.inject({ method: "POST", url: "/api/auth/request", payload: { email: "next@example.test", next } });
+      assert.equal(res.statusCode, 200);
+      return new URL(res.json().devLink);
+    };
+    const kept = await linkFor("/app/p/abc?tab=cast");
+    assert.equal(kept.searchParams.get("next"), "/app/p/abc?tab=cast");
+    assert.ok(kept.searchParams.get("token"));
+    for (const bad of ["https://evil.test/app", "//evil.test", "/i/abc", 7]) assert.equal((await linkFor(bad)).searchParams.has("next"), false);
+  });
+
   test("missing or bad credentials get the error shape", async () => {
     const res = await t.app.inject({ method: "GET", url: "/api/productions" });
     assert.equal(res.statusCode, 401);

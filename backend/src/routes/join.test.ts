@@ -30,6 +30,7 @@ describe("cast join link and script source", { skip: dbSkip }, () => {
 
     const open = (await get(`/api/join/${token}`)).json();
     assert.equal(open.production.title, "Hamlet");
+    assert.equal(open.production.directorName, "Alice", "with no name set, the cast sees the start of the email, never the address");
     assert.ok(open.characters.every((c: { lineCount: number; takenBy: string | null }) => c.lineCount > 0 && c.takenBy === null));
 
     const hamlet = characters.find((c) => c.name === "HAMLET")!;
@@ -39,6 +40,7 @@ describe("cast join link and script source", { skip: dbSkip }, () => {
     const { inviteToken } = claim.json();
     const invite = await t.app.inject({ method: "GET", url: "/api/invite", headers: { authorization: `Invite ${inviteToken}` } });
     assert.equal(invite.statusCode, 200);
+    assert.equal(invite.json().production.directorName, "Alice");
     assert.deepEqual(
       invite
         .json()

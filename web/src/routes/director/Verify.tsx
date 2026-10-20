@@ -1,47 +1,53 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { errorMessage, session } from "../../api/client";
-import { auth } from "../../api/director";
+import { session } from "../../api/client";
+import { auth, productions } from "../../api/director";
 import { Brand } from "../../components/Brand";
 import { Loading } from "../../components/Loading";
+import { safeNext } from "../../lib/names";
 
 // Sign-in tokens are single use. Share one request per token so a double render can't spend it twice.
 const attempts = new Map<string, ReturnType<typeof auth.verify>>();
 
+/** Back where you were, else straight to a new production when there are none yet. */
+async function landing(next: string | null): Promise<string> {
+  if (next) return next;
+  const list = await productions.list().catch(() => null);
+  return list && list.productions.length === 0 ? "/app/new" : "/app";
+}
+
 export default function Verify() {
   const [params] = useSearchParams();
   const token = params.get("token") ?? "";
+  const next = safeNext(params.get("next"));
   const navigate = useNavigate();
-  const [error, setError] = useState<string | null>(null);
+  const [failed, setFailed] = useState(!token);
 
   useEffect(() => {
-    if (!token) {
-      setError("This sign-in link is missing its code.");
-      return;
-    }
+    if (!token) return;
     let attempt = attempts.get(token);
     if (!attempt) {
       attempt = auth.verify(token);
       attempts.set(token, attempt);
     }
     attempt.then(
-      ({ sessionToken }) => {
+      async ({ sessionToken }) => {
         session.set(sessionToken);
-        navigate("/app", { replace: true });
+        navigate(await landing(next), { replace: true });
       },
-      (err) => setError(errorMessage(err)),
+      () => setFailed(true),
     );
-  }, [token, navigate]);
+  }, [token, next, navigate]);
 
-  if (!error) return <Loading label="Signing you in" />;
+  if (!failed) return <Loading label="Signing you in" />;
   return (
     <main className="page page-narrow center-page">
       <Brand />
       <div className="raised message-card stack">
-        <h1 className="display">That link didn't work</h1>
-        <p className="muted">{error} Sign-in links work once and expire after 15 minutes.</p>
-        <Link className="btn btn-primary" to="/signin">
-          Send a new link
+        <h1 className="display">That link has expired</h1>
+        <p className="muted">Sign-in links work once, for 15 minutes.</p>
+        <Link className="btn btn-primary" to={next ? `/signin?next=${encodeURIComponent(next)}` : "/signin"}>
+          Email me a new link
         </Link>
       </div>
     </main>

@@ -64,10 +64,10 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
-| POST | `/api/auth/request` | `{ email }` | `204`. Sends a sign-in link `${APP_URL}/auth/verify?token=…` (single use, 15 min). When `EMAIL_DRIVER=log`, the response is `200 { devLink }` instead so local testing works. |
+| POST | `/api/auth/request` | `{ email, next? }` | `204`. Sends a sign-in link `${APP_URL}/auth/verify?token=…&next=…` (single use, 15 min). `next` is where the app goes after signing in; only a path inside the director app (`/app`, `/app/…`, `/app?…`) is kept, anything else is dropped without an error. When `EMAIL_DRIVER=log`, the response is `200 { devLink }` instead so local testing works. |
 | POST | `/api/auth/verify` | `{ token }` | `{ sessionToken, user: { id, email, name } }` (session lasts 30 days) |
 | GET | `/api/me` | | `{ user }` |
-| PATCH | `/api/me` | `{ name }` | `{ user }`. The director's name shows on invites ("Sam invited you"). |
+| PATCH | `/api/me` | `{ name }` | `{ user }`. The director's name shows on invites ("Sam invited you"). Until it is set, the cast sees the part of the email before the @, capitalised (`sam.ortiz@…` is "Sam Ortiz"); the cast never sees the email address. |
 | POST | `/api/auth/logout` | | `204` |
 
 ## Productions and script (director)
@@ -165,8 +165,8 @@ interface RunThrough {
 ## Web routes
 
 - `/`: landing page with director sign-in.
-- `/signin`, `/auth/verify?token=`
-- `/app`: productions list. `/app/new`. `/app/p/:id` (tabs: Script, Cast & progress, Run-through).
+- `/signin?next=`, `/auth/verify?token=&next=`: after signing in the app goes to `next` when it is a path inside `/app`, else to `/app`.
+- `/app`: productions list (with none yet, it opens `/app/new`). `/app/new`. `/app/account`: email, name (what the cast calls you) and sign out. `/app/p/:id` (tabs: Script, Cast & progress, Run-through).
 - `/i/:token`: actor welcome, then recording, then wrapped. `/i/:token/play`: run-through for the actor.
 
 ---

@@ -90,11 +90,44 @@
   justify-content: space-between;
 }
 
-.header-user {
-  max-width: 40vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* The account button: initials in a circle, with an ochre dot until the director has a name. */
+.account-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 50%;
+  text-decoration: none;
+}
+
+.account-btn:hover .avatar {
+  box-shadow: 0 0 0 2px var(--line-strong);
+}
+
+.account-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--sun);
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.account-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+.account-actions {
+  gap: var(--s-3);
+}
+
+.account-signout {
+  align-self: flex-start;
 }
 
 .accent-icon {
@@ -1024,20 +1057,6 @@
 /* ======================================================================
    Director: productions
    ====================================================================== */
-
-.welcome-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s-4);
-  padding: var(--s-10) 0;
-}
-
-.welcome-empty h1 {
-  font-size: var(--text-3xl);
-  font-weight: 400;
-  line-height: 1.04;
-}
 
 .name-prompt {
   display: flex;

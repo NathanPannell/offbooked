@@ -10,7 +10,11 @@ const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce
 const FAQ: { q: string; a: string }[] = [
   {
     q: "Does the cast need an account?",
-    a: "No. Your cast opens one link, picks their character, types a first name and starts recording. Only the director signs in, with a link we email you. No passwords.",
+    a: "No. Your cast opens one link, picks their character, types a first name and starts recording. Only whoever sets up the production signs in, with a link we email you. No passwords.",
+  },
+  {
+    q: "Do I have to be the director?",
+    a: "No. Anyone with the script can set up a production: a director, a stage manager, or an actor who wants the whole cast running lines.",
   },
   {
     q: "What scripts work?",
@@ -22,7 +26,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Are the recordings private to my cast?",
-    a: "Yes. Nothing is public. Recordings only play through your production's own links, for your cast and you. Archive the production and every link stops working.",
+    a: "Yes. Nothing is public. Recordings only play through your production's own links, for your cast and you. Seven days after your final performance date, the script and every recording are deleted.",
   },
   {
     q: "Does it work on iPhone?",
@@ -32,7 +36,8 @@ const FAQ: { q: string; a: string }[] = [
 
 export function Landing() {
   const signedIn = !!session.get();
-  const startTo = signedIn ? "/app/new" : "/signin?next=%2Fapp%2Fnew";
+  // One call to action everywhere on the page, so the corner, the hero and the closing band agree.
+  const cta = signedIn ? { to: "/app", label: "Your productions" } : { to: "/signin", label: "Get off book together" };
   const demo = useRef<DemoHandle>(null);
 
   const hearDemo = () => {
@@ -44,8 +49,8 @@ export function Landing() {
     <div className="landing">
       <nav className="landing-nav" aria-label="Main">
         <Brand to="/" />
-        <Link className="btn btn-ghost btn-sm" to={signedIn ? "/app" : "/signin"}>
-          {signedIn ? "Your productions" : "Sign in"}
+        <Link className="btn btn-primary btn-sm" to={cta.to}>
+          {cta.label} <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </nav>
 
@@ -60,12 +65,9 @@ export function Landing() {
             run-through, with gaps where you speak.
           </p>
           <div className="hero-ctas">
-            <Link className="btn btn-primary btn-lg" to={startTo}>
-              Start a production <ArrowRight size={18} aria-hidden="true" />
+            <Link className="btn btn-primary btn-lg" to={cta.to}>
+              {cta.label} <ArrowRight size={18} aria-hidden="true" />
             </Link>
-            <button type="button" className="btn btn-secondary btn-lg" onClick={hearDemo}>
-              <Play size={17} fill="currentColor" aria-hidden="true" /> Hear a demo
-            </button>
           </div>
         </div>
         <HeroScene />
@@ -78,6 +80,11 @@ export function Landing() {
             Press play. You're Hamlet.
           </h2>
           <p className="muted">This is what your cast hears: the scene, line by line, like lyrics. Switch to “My part” and it stops for your lines.</p>
+          <div>
+            <button type="button" className="btn btn-secondary" onClick={hearDemo}>
+              <Play size={17} fill="currentColor" aria-hidden="true" /> Hear a demo
+            </button>
+          </div>
         </div>
         <Demo ref={demo} />
       </section>
@@ -188,8 +195,8 @@ export function Landing() {
           Places, everyone.
         </h2>
         <p>Add your script tonight, drop one link in the cast chat, and wake up to a run-through.</p>
-        <Link className="btn btn-primary btn-lg" to={startTo}>
-          Start a production <ArrowRight size={18} aria-hidden="true" />
+        <Link className="btn btn-primary btn-lg" to={cta.to}>
+          {cta.label} <ArrowRight size={18} aria-hidden="true" />
         </Link>
       </section>
 
