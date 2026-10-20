@@ -360,7 +360,10 @@ export function noSpeechResult(expectedText: string): SttResult {
   return { transcript: "", accuracy: 0, ops: normalizeWords(expectedText).map((w) => ({ op: "del", expected: w })) };
 }
 
-/** complete: the line was said. partial: a real chunk is missing. unattempted: nothing of it was heard. */
+/**
+ * complete: the line was said. partial (shown as "Incomplete"): a real chunk is missing. unattempted:
+ * nothing of it was heard.
+ */
 export type Verdict = "complete" | "partial" | "unattempted";
 
 /** Expected words in the ops, and how many of them were attempted (matched or misheard). */
@@ -390,7 +393,7 @@ export function verdict(result: Pick<SttResult, "ops" | "transcript">): Verdict 
 
 export const VERDICT_LABEL: Record<Verdict, string> = {
   complete: "Complete",
-  partial: "Partial",
+  partial: "Incomplete",
   unattempted: "Not attempted",
 };
 
@@ -400,7 +403,7 @@ export const VERDICT_MESSAGE: Record<Verdict, string> = {
   unattempted: "We couldn't hear this line. Listen back or record again.",
 };
 
-/** Short chip label: Complete, Partial or Not attempted. */
+/** Short chip label: Complete, Incomplete or Not attempted. */
 export function scoreLabel(result: Pick<SttResult, "ops" | "transcript">): string {
   return VERDICT_LABEL[verdict(result)];
 }
@@ -416,7 +419,7 @@ export function verdictCounts(results: Pick<SttResult, "ops" | "transcript">[]):
   return counts;
 }
 
-/** "12 complete · 2 partial · 1 not attempted", leaving out zeros. */
+/** "12 complete · 2 incomplete · 1 not attempted", leaving out zeros. */
 export function formatVerdictCounts(counts: VerdictCounts): string {
   return (["complete", "partial", "unattempted"] as Verdict[])
     .filter((v) => counts[v] > 0)

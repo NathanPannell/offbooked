@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
 import { errorMessage } from "../../api/client";
-import type { ActorLine, Invite, SttResult } from "../../api/types";
+import type { ActorLine, EmailState, Invite, SttResult } from "../../api/types";
 import { useAccompaniment, usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { Brand } from "../../components/Brand";
 import { CharacterName } from "../../components/CharacterName";
@@ -45,15 +45,15 @@ export function RecordSession({
   api,
   invite,
   onRenamed,
-  onEmailSaved,
+  onEmailChanged,
   onPartsChanged,
 }: {
   token: string;
   api: ActorApi;
   invite: Invite;
   onRenamed: (actor: { name: string; firstName: string }) => void;
-  /** The actor left an email in their profile. */
-  onEmailSaved: () => void;
+  /** The actor asked for a verification link in their profile: where their email stands now. */
+  onEmailChanged: (state: { hasEmail: boolean; pendingEmail: boolean }) => void;
   /** The actor picked up more parts: their parts now. */
   onPartsChanged: (characters: { id: string; name: string }[]) => void;
 }) {
@@ -97,6 +97,8 @@ export function RecordSession({
   /** Client take ids deleted on this screen, so their upload no longer counts as the line's take. */
   const [deleted, setDeleted] = useState(new Set<string>());
   const [pickingUp, setPickingUp] = useState(false);
+  /** The profile dialog, opened by the initials or by the wrapped screen's email prompt. */
+  const [profileOpen, setProfileOpen] = useState(false);
   /** The one hint on the device's first take, shown while it records. */
   const [firstTakeHint, setFirstTakeHint] = useState(false);
 
@@ -420,7 +422,7 @@ export function RecordSession({
     setLinesData(fresh);
     setView("lines");
     setCurrentId(null);
-    toast("Picked up. Your new lines are in the list.");
+    toast("Added. Your new lines are in the list.");
   };
 
   if (lines.loading) return <Loading />;
@@ -448,12 +450,28 @@ export function RecordSession({
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
   const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
   const failed = unsaved.filter((i) => i.status === "failed");
+  const profile = (
+    <CastProfile
+      name={invite.actor.name}
+      hasEmail={invite.hasEmail}
+      pendingEmail={invite.pendingEmail}
+      open={profileOpen}
+      onOpenChange={setProfileOpen}
+      onRename={async (name) => onRenamed((await api.rename(name)).actor)}
+      onEmail={async (email?: string): Promise<EmailState> => {
+        const state = await api.contact(email);
+        onEmailChanged({ hasEmail: state.hasEmail, pendingEmail: state.pendingEmail });
+        return state;
+      }}
+    />
+  );
 
   if (view === "wrapped") {
     return (
       <div className="actor-shell">
         <header className="actor-header">
           <Brand to={`/i/${token}`} />
+          {profile}
         </header>
         <Wrapped
           token={token}
@@ -469,6 +487,7 @@ export function RecordSession({
           partId={activePart}
           otherParts={otherParts}
           onSwitchPart={switchPart}
+          onOpenProfile={() => setProfileOpen(true)}
           onReview={(lineId) => {
             setView("lines");
             setCurrentId(lineId);
@@ -496,7 +515,13 @@ export function RecordSession({
             </h1>
           </div>
           <SttChip state={sttState} onEnable={() => stt.enable()} />
-          <button type="button" className="icon-btn" onClick={() => setPickingUp(true)} aria-label="Pick up more lines" title="Pick up more lines">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setPickingUp(true)}
+            aria-label="Record lines for another character"
+            title="Record lines for another character"
+          >
             <Plus size={22} />
           </button>
           {recordedCount > 0 && (
@@ -504,15 +529,7 @@ export function RecordSession({
               <Headphones size={22} />
             </Link>
           )}
-          <CastProfile
-            name={invite.actor.name}
-            hasEmail={invite.hasEmail}
-            onRename={async (name) => onRenamed((await api.rename(name)).actor)}
-            onEmail={async (email) => {
-              await api.contact(email);
-              onEmailSaved();
-            }}
-          />
+          {profile}
         </div>
         {total > 0 && <PartProgress total={total} recorded={recordedCount} label={partName ? `${partName}'s lines recorded` : "Lines recorded"} />}
         {activePart && (
@@ -557,8 +574,8 @@ export function RecordSession({
         )}
         {total === 0 && (
           <section className="card stack empty-parts">
-            <h2 className="display">No lines right now</h2>
-            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Pick up a part to keep recording." />
+            <h2 className="display">Record lines for another character</h2>
+            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} />
             <Link className="btn btn-ghost" to={`/i/${token}/play`}>
               <Headphones size={18} aria-hidden="true" /> Just listen through the play
             </Link>
@@ -641,7 +658,7 @@ export function RecordSession({
           </RecordOptions>
         }
       />
-      <Dialog open={pickingUp} onClose={() => setPickingUp(false)} title="Pick up more lines">
+      <Dialog open={pickingUp} onClose={() => setPickingUp(false)} title="Record lines for another character">
         {pickingUp && <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} />}
       </Dialog>
       <p className="sr-only" aria-live="assertive">

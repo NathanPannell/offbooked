@@ -50,9 +50,8 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
     const phone = optionalString(b, "phone", 40) ?? null;
     const characterIds = uuidList(b, "characterIds", true)!;
     const actorId = await sql.begin(async (tx) => {
-      const [row] = await tx<
-        { id: string }[]
-      >`insert into actors (production_id, name, email, phone) values (${p.id}, ${name}, ${email}, ${phone}) returning id`;
+      const [row] = await tx<{ id: string }[]>`insert into actors (production_id, name, email, email_verified_at, phone)
+        values (${p.id}, ${name}, ${email}, ${email ? new Date() : null}, ${phone}) returning id`;
       await assignCharacters(tx, p.id, row!.id, characterIds);
       return row!.id;
     });
@@ -69,7 +68,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
     const characterIds = uuidList(b, "characterIds", false);
     await sql.begin(async (tx) => {
       if (name !== undefined) await tx`update actors set name = ${name} where id = ${actor.id}`;
-      if (email !== undefined) await tx`update actors set email = ${email} where id = ${actor.id}`;
+      if (email !== undefined) await tx`update actors set email = ${email}, email_verified_at = ${email ? new Date() : null} where id = ${actor.id}`;
       if (phone !== undefined) await tx`update actors set phone = ${phone} where id = ${actor.id}`;
       if (characterIds) await assignCharacters(tx, actor.productionId, actor.id, characterIds);
     });

@@ -91,7 +91,8 @@ export async function notifyCastComplete(ctx: Ctx, productionId: string): Promis
     castCompleteEmail(to, { title: p.title, url: `${ctx.config.appUrl}/app/p/${productionId}` }),
   );
   const actors = await ctx.sql<{ id: string; email: string | null; tokenVersion: number }[]>`
-    select id, email, token_version from actors where production_id = ${productionId} and email is not null`;
+    select id, email, token_version from actors
+    where production_id = ${productionId} and email_verified_at is not null and coalesce(btrim(email), '') <> ''`;
   for (const a of actors) {
     await sendOnce(ctx, { kind: "runthrough_ready", productionId, actorId: a.id, to: a.email }, (to) =>
       runthroughReadyEmail(to, {

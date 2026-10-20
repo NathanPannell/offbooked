@@ -1,12 +1,12 @@
 # On-device speech-to-text for take scoring
 
-Status: research and recommendation, 2026-10-13, now implemented in `web/src/stt/`. Changed 2026-10-15 for load time: the model is self-hosted, uses an fp16 encoder, and starts loading when an actor page opens (see "Load time"). Changed 2026-10-17: takes are judged Complete, Partial or Not attempted instead of by percentage (see "Accuracy and verdict"), and live auto-advance always moves on after a pause (see the "Web" section of `AGENTS.md`).
+Status: research and recommendation, 2026-10-13, now implemented in `web/src/stt/`. Changed 2026-10-15 for load time: the model is self-hosted, uses an fp16 encoder, and starts loading when an actor page opens (see "Load time"). Changed 2026-10-17: takes are judged Complete, Partial or Not attempted instead of by percentage (see "Accuracy and verdict"), and live auto-advance always moves on after a pause (see the "Web" section of `AGENTS.md`). Changed 2026-10-20: the app shows Partial as "Incomplete" (the code key stays `partial`), and Wrapped lists the lines to review under their scenes.
 
 ## Goal
 
 After each take, transcribe the recording on the actor's own device and compare it with the known script line. From that comparison we show:
 
-- per line, whether it was said (Complete, Partial or Not attempted), with missed, substituted and extra words highlighted on tap
+- per line, whether it was said (Complete, Incomplete or Not attempted), with missed, substituted and extra words highlighted on tap
 - a gentle "part of the line seems missing" hint that suggests listening back or recording again
 - a summary of those counts at the end of recording and after a "my part" run-through practice
 
@@ -365,15 +365,15 @@ A display word is highlighted if any normalized token from it is `sub` or `del`.
 - Accuracy is still computed and posted with the take, but not shown (changed 2026-10-17). Phone audio and a tiny model mishear too many words of a perfect take for a percentage to mean much to an actor.
 - The verdict asks whether the line was said, from attempted coverage: expected words that came out `ok` or `sub` (a mishearing counts as attempted), over N.
 - **Not attempted**: no speech (`noSpeech` or an empty transcript), nothing attempted, or (N ≥ 4) words heard but none matching the line.
-- N ≥ 4: coverage **≥ 70% is Complete**, less is **Partial** (a real chunk is missing, for example the actor stopped half way).
-- N ≤ 3 (for example "Yes, my lord."): at most one missing word is Complete, more is Partial.
-- The chip shows the verdict; tapping it shows the word-by-word diff. A Partial or Not attempted line gets a gentle hint under it ("Part of the line seems missing. Listen back or record again.").
+- N ≥ 4: coverage **≥ 70% is Complete**, less is **Incomplete** (`partial` in code; a real chunk is missing, for example the actor stopped half way).
+- N ≤ 3 (for example "Yes, my lord."): at most one missing word is Complete, more is Incomplete.
+- The chip shows the verdict; tapping it shows the word-by-word diff. An Incomplete or Not attempted line gets a gentle hint under it ("Part of the line seems missing. Listen back or record again.").
 - `COMPLETE_COVERAGE` and `SHORT_LINE_WORDS` in `score.ts` are the knobs; check them against pilot takes.
 - Live auto-advance (`stt/live.ts`) doesn't judge the take either: after real speech a pause always ends it and moves on, and the live cursor only sets how long that pause is (0.7 s near the end of the line, 1.5 s when the words weren't heard but enough was said, 3 s clearly mid-line).
 
 **5. Summaries**
 
-- End of recording and after practice: the verdict counts ("12 complete · 2 partial") over the scored takes, and a tappable list of the Not attempted, then Partial, lines to review. Takes still in the queue show as "still checking (n)". Wait up to about 10 s for them, then show the partial summary and update it live. Unscored takes show as "accuracy unavailable" and are left out of the counts.
+- End of recording and after practice: the verdict counts ("12 complete · 2 incomplete") over the scored takes, and a tappable list of the Incomplete and Not attempted lines to review ("Tap a line to re-record it"; on Wrapped, under their scenes in script order). Takes still in the queue show as "still checking (n)". Wait up to about 10 s for them, then show the partial summary and update it live. Unscored takes show as "accuracy unavailable" and are left out of the counts.
 - "My part" practice: record each of the actor's gaps as its own clip, or one continuous recording cut at the known gap boundaries, and run the same pipeline. Use `getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })` and cut strictly to the gap windows. Otherwise the run-through playback leaking into the microphone shows up as insertions. Suggest headphones in the practice screen copy.
 - Optionally send `{ accuracy, verdict, transcript, model }` with the take to the API so directors can see it later. The audio is uploaded anyway, so this adds no new privacy exposure. That is a separate backend change and not required for the MVP.
 

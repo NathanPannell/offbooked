@@ -10,18 +10,10 @@ import { recorderLabel } from "../../lib/recorders";
 import { useResource } from "../../lib/useResource";
 
 /**
- * Parts the actor can pick up to record more lines: every part they haven't picked, whoever else
- * has. Lines nobody has recorded play in the computer voice; the ones that need a voice come first.
+ * "Record lines for another character": every part the actor hasn't picked, whoever else has.
+ * Lines nobody has recorded play in the computer voice; the parts that need a voice come first.
  */
-export function PickUpParts({
-  api,
-  onPicked,
-  intro = "Pick up a part and its lines join yours. You can record over anyone's take.",
-}: {
-  api: ActorApi;
-  onPicked: (characters: { id: string; name: string }[]) => void;
-  intro?: string;
-}) {
+export function PickUpParts({ api, onPicked }: { api: ActorApi; onPicked: (characters: { id: string; name: string }[]) => void }) {
   const toast = useToast();
   const parts = useResource(() => api.parts().then((r) => r.parts), "pick-up-parts");
   const [chosen, setChosen] = useState(new Set<string>());
@@ -56,7 +48,6 @@ export function PickUpParts({
 
   return (
     <div className="pick-up">
-      <p className="small muted">{intro}</p>
       <ul className="pick-up-list">
         {list.map((p) => {
           const by = recorderLabel(p.topRecorder);
@@ -83,7 +74,8 @@ export function PickUpParts({
         })}
       </ul>
       <button type="button" className="btn btn-primary btn-sm" disabled={busy || chosen.size === 0} onClick={() => void pick()}>
-        <Plus size={16} aria-hidden="true" /> {busy ? "Adding…" : chosen.size > 1 ? `Pick up ${chosen.size} parts` : "Pick up this part"}
+        <Plus size={16} aria-hidden="true" />{" "}
+        {busy ? "Adding…" : chosen.size > 1 ? `Record lines for ${chosen.size} characters` : "Record lines for this character"}
       </button>
     </div>
   );

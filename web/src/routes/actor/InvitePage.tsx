@@ -67,7 +67,7 @@ export default function InvitePage() {
       api={api}
       invite={data}
       onRenamed={(actor) => invite.setData({ ...data, actor: { ...data.actor, name: actor.name, firstName: actor.firstName } })}
-      onEmailSaved={() => invite.setData({ ...data, hasEmail: true })}
+      onEmailChanged={(email) => invite.setData({ ...data, ...email })}
       onPartsChanged={(characters) => invite.setData({ ...data, characters })}
     />
   );

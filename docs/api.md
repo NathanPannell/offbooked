@@ -104,7 +104,7 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 
 - Storage: everything under `productions/<id>/`: takes as uploaded, normalized FLACs and stream `.m4a`s, shared-line mixes, the uploaded script file and renders.
 - Rows: scripts (with their raw text), sections, characters, lines, takes, renders, take mixes, practice runs and part assignments.
-- Cast details: a cast member's name, first name and phone are cleared unless they left an email (`POST /api/invite/contact`); details tied to an email are kept, and so is a director's own cast row.
+- Cast details: a cast member's name, first name and phone are cleared unless they verified an email (`POST /api/invite/contact`, then the link sent to it); details tied to a verified email are kept, and so is a director's own cast row. Unverified addresses (`pending_email`) are cleared for everyone.
 - Kept: the production row as an archived tombstone (title kept, `content_deleted_at` set), the actor rows (so their links answer 410 "This production has wrapped" instead of looking forged), notification records, and TTS clips, which are shared across productions by hash.
 
 Cast and join links return 410 `invite_expired` afterwards, and the production drops out of `GET /api/productions`. The job is idempotent: a failure leaves `content_deleted_at` unset and the next pass finishes it. A take upload, normalization, mix, render or script upload that finishes after the deletion sweeps the folder again and fails (a take or script upload with 410 `content_deleted`).
@@ -125,12 +125,12 @@ Invite tokens are derived, not stored: `token = base64url(actorId bytes) + "." +
 
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
-| GET | `/api/invite` | | `{ production: { id, title, directorName }, actor: { id, name, firstName }, characters: { id, name }[], linesTotal, linesRecorded, hasEmail }`. Expired or revoked links return 410 with `{ error, directorName, productionTitle }`. |
+| GET | `/api/invite` | | `{ production: { id, title, directorName }, actor: { id, name, firstName }, characters: { id, name }[], linesTotal, linesRecorded, hasEmail, pendingEmail }`. `hasEmail`: a verified email; `pendingEmail`: an address waiting for its verification link. Expired or revoked links return 410 with `{ error, directorName, productionTitle }`. |
 | POST | `/api/invite/start` | `{ firstName }` | `204`. Sets `firstName` and `openedAt`. |
 | GET | `/api/invite/lines` | | `{ sections: Section[], lines: ActorLine[] }` |
 | PUT | `/api/invite/lines/:lineId/take` | raw audio body (`audio/webm`, `audio/mp4`, `audio/ogg`, `audio/wav`; ≤ 8 MB), headers `X-Take-Id` (client UUID, idempotency key) and `X-Duration-Ms` | `{ take: Take, linesRecorded, linesTotal }`. A repeated `X-Take-Id` returns the same take. The new take becomes current; old takes are kept until the production's content is deleted. |
 | POST | `/api/invite/takes/:takeId/stt` | `{ transcript, accuracy, ops }` | `204` |
-| POST | `/api/invite/contact` | `{ email }` | `204`. Email used only for the ready-to-listen-through email. |
+| POST | `/api/invite/contact` | `{ email? }` | `{ hasEmail, pendingEmail }`. Sends a verification link to `email` and keeps it as pending until the link is opened; without `email`, sends it again to the address waiting (400 when there is none). The verified address, if any, stays until then; giving the verified address again clears the pending one and sends nothing. With `EMAIL_DRIVER=log` the answer also carries `devLink`. Rate limited (429): 5 sends an hour per cast member, 5 a day per address. A failed send is 502 `email_failed`. Only a verified email gets the ready-to-listen-through email or keeps the cast member's details after the show. |
 | GET | `/api/invite/runthrough` | | `RunThrough` with `myCharacterIds` set |
 | POST | `/api/invite/practice` | `{ mode: "my_part", results: { lineId, transcript, accuracy, ops }[] }` | `{ practice: { id, avgAccuracy, createdAt } }` |
 
@@ -177,7 +177,8 @@ interface RunThrough {
 ## Notifications (Resend, completion only)
 
 - To the director: "{firstName or name} finished all {n} lines" when an actor's last line lands, and "Cast complete — run-through ready" when the full-cast render finishes.
-- To actors with an email: "The run-through for {title} is ready", linking to `${APP_URL}/i/{token}/play`.
+- To actors with a verified email: "{title} is ready to listen through", linking to `${APP_URL}/i/{token}/play`.
+- The one other email: the verification link a cast member asks for in their profile (`POST /api/invite/contact`), "Confirm your email for Offbooked".
 - Each sends once (unique on kind + production + actor). With `EMAIL_DRIVER=log` emails are logged, not sent. Nothing ever emails invites or reminders.
 
 ## Web routes
@@ -186,6 +187,13 @@ interface RunThrough {
 - `/signin?next=`, `/auth/verify?token=&next=`: after signing in the app goes to `next` when it is a path inside `/app`, else to `/app`.
 - `/app`: productions list (with none yet, it opens `/app/new`). `/app/new`. `/app/account`: email, name (what the cast calls you) and sign out. `/app/p/:id` (tabs: Script, Cast & progress, Run-through).
 - `/i/:token`: actor welcome, then recording, then wrapped. `/i/:token/play`: run-through for the actor.
+
+## Email links (served by the API, plain HTML pages)
+
+| Method | Path | Response |
+| --- | --- | --- |
+| GET, POST | `/api/email/unsubscribe?e=&s=` | Adds the address to `email_unsubscribes` (no more ready-to-listen-through emails). POST is the one-click `List-Unsubscribe` form. 404 when the signature is wrong. |
+| GET | `/api/email/verify?a=&e=&t=&s=` | The link in the verification email: `a` the actor, `e` the address (base64url), `t` when it was sent (Unix seconds), `s` an HMAC with `SESSION_SECRET`, like the unsubscribe link. Valid for 7 days while that address is still the one waiting: it becomes the actor's verified `email` (`email_verified_at`), and any unsubscribe for it is lifted. Opening it again still confirms. 200 "Email confirmed", else 410 "This link has expired". 30 opens per 15 minutes per IP. |
 
 ---
 

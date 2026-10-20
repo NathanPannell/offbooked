@@ -32,7 +32,7 @@ export async function dueContent(sql: Sql): Promise<{ dueIds: string[]; nextMs: 
 // as an archived tombstone (title kept, content_deleted_at set). Cast and join links then return
 // 410. TTS clips are shared across productions by hash and are kept. Actor rows stay, so their invite
 // links still resolve to the wrapped production (410) rather than looking forged (401); the names and
-// phones of cast members who left no email are cleared.
+// phones of cast members who verified no email are cleared.
 //
 // Idempotent: storage first, then one transaction for the rows, then storage again for anything
 // written while the rows went (an upload already past its auth check). A failure anywhere leaves
@@ -66,13 +66,16 @@ export async function deleteProductionContent(ctx: Ctx, productionId: string): P
     await tx`delete from characters where production_id = ${productionId}`;
     await tx`delete from sections where production_id = ${productionId}`;
     await tx`delete from scripts where production_id = ${productionId}`;
-    // Cast details go too unless they're tied to an email: someone who left an email (to hear when
-    // the play is ready) keeps their name with it; everyone else's name and phone are cleared. The
+    // Cast details go too unless they're tied to a verified email: someone who verified an email (to
+    // hear when the play is ready) keeps their name with it; everyone else's name, phone and any
+    // unverified address are cleared. Addresses still waiting for their link go for everyone. The
     // rows stay so their invite links still answer 410. A director's own cast row is tied to their
     // account's email and is kept.
     await tx`
-      update actors set name = '', first_name = null, phone = null
-      where production_id = ${productionId} and director_user_id is null and coalesce(btrim(email), '') = ''`;
+      update actors set name = '', first_name = null, phone = null, email = null, email_verified_at = null
+      where production_id = ${productionId} and director_user_id is null
+        and (email_verified_at is null or coalesce(btrim(email), '') = '')`;
+    await tx`update actors set pending_email = null, pending_email_sent_at = null where production_id = ${productionId} and pending_email is not null`;
     await tx`update productions set content_deleted_at = now(), script_status = 'none', script_error = null where id = ${productionId}`;
   });
   objects += await storage.deletePrefix(prefix);
