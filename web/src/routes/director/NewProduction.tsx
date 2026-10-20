@@ -71,6 +71,10 @@ export default function NewProduction() {
     if (screen !== "form") document.getElementById("parse-title")?.focus();
   }, [screen]);
 
+  const clearDatesIfValid = (starts: string, ends: string) => {
+    if (!performanceDatesProblem(starts, ends, today)) setErrors((er) => (er.dates ? { ...er, dates: undefined } : er));
+  };
+
   const start = async (script: File) => {
     setErrors({});
     setFailure(null);
@@ -180,7 +184,11 @@ export default function NewProduction() {
             value={title}
             aria-invalid={!!errors.title || undefined}
             aria-describedby={errors.title ? "np-title-error" : undefined}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              // An error goes as soon as its field is right, not on the next submit.
+              if (e.target.value.trim()) setErrors((er) => (er.title ? { ...er, title: undefined } : er));
+            }}
             placeholder="e.g. Hamlet, or Our Town (spring)"
           />
           {errors.title && (
@@ -210,7 +218,9 @@ export default function NewProduction() {
                   const value = e.target.value;
                   setStartsOn(value);
                   // Keep the range whole: a final performance before the new first one moves with it.
-                  if (value && (!endsOn || endsOn < value)) setEndsOn(value < today ? today : value);
+                  const end = value && (!endsOn || endsOn < value) ? (value < today ? today : value) : endsOn;
+                  if (end !== endsOn) setEndsOn(end);
+                  clearDatesIfValid(value, end);
                 }}
               />
             </label>
@@ -228,7 +238,10 @@ export default function NewProduction() {
                 value={endsOn}
                 aria-invalid={(!!errors.dates && !!startsOn) || undefined}
                 aria-describedby={errors.dates ? "np-dates-error" : undefined}
-                onChange={(e) => setEndsOn(e.target.value)}
+                onChange={(e) => {
+                  setEndsOn(e.target.value);
+                  clearDatesIfValid(startsOn, e.target.value);
+                }}
               />
             </label>
           </div>

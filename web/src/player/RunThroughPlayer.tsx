@@ -4,6 +4,7 @@ import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
 import { useWakeLock } from "../audio/wakeLock";
 import { CharacterName } from "../components/CharacterName";
+import { repeatsSceneTitle } from "../routes/director/lineText";
 import { Dialog } from "../components/Dialog";
 import { Loading } from "../components/Loading";
 import { MicHelp } from "../components/MicHelp";
@@ -368,7 +369,8 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
             <h3 className="lyric-section-title">{section.title}</h3>
             <ol>
               {lines
-                .filter((l) => l.sectionId === section.id)
+                // A heading that only repeats the scene title above it isn't shown twice (unless it plays).
+                .filter((l) => l.sectionId === section.id && !(repeatsSceneTitle(l, section.title) && !segmentByLine.has(l.id)))
                 .map((line) => {
                   const segment = segmentByLine.get(line.id);
                   const isCurrent = segment !== undefined && segment === state.index;

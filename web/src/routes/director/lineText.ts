@@ -65,3 +65,39 @@ export function caretOffsetAt(container: HTMLElement, x: number, y: number): num
   }
   return null;
 }
+
+const ROMAN: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100 };
+
+/** "iv" is 4, "12" is 12, anything else stays a word. */
+function headingToken(word: string): string {
+  if (/^\d+$/.test(word)) return String(Number(word));
+  if (/^[ivxlc]+$/.test(word)) {
+    let n = 0;
+    for (let i = 0; i < word.length; i++) {
+      const v = ROMAN[word[i]!]!;
+      const next = ROMAN[word[i + 1] ?? ""] ?? 0;
+      n += v < next ? -v : v;
+    }
+    return String(n);
+  }
+  return word;
+}
+
+const headingTokens = (text: string) =>
+  text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map(headingToken);
+
+/**
+ * A heading line that only repeats what its scene title already says ("ACT 1" and "SCENE I" under
+ * "Act 1, Scene 1"). Pages showing the script hide these under the title; the line itself is kept.
+ */
+export function repeatsSceneTitle(line: { kind: LineKind; text: string }, sceneTitle: string): boolean {
+  if (line.kind !== "heading") return false;
+  const words = headingTokens(line.text);
+  if (words.length === 0) return false;
+  const title = new Set(headingTokens(sceneTitle));
+  return words.every((w) => title.has(w));
+}

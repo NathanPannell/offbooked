@@ -48,7 +48,7 @@ export function ParseProgressView({
     const id = setInterval(() => setTick(Date.now()), 500);
     return () => clearInterval(id);
   }, []);
-  const line = readingLine(view.stage, fileName ?? null, Math.max(0, tick - stageSince.at));
+  const line = readingLine(view.stage, Math.max(0, tick - stageSince.at));
   const Heading = headingLevel === 1 ? "h1" : "h2";
 
   return (
@@ -90,9 +90,12 @@ export function ParseProgressView({
         <span style={percent === null ? undefined : { width: `${Math.max(3, percent)}%` }} />
       </div>
 
-      <p className="parse-counts mono nums" aria-hidden="true">
-        {view.counts.length ? view.counts.join(" · ") : "Opening the file…"}
-      </p>
+      {/* Counts only once there are some; before that the friendly line says what is happening. */}
+      {view.counts.length > 0 && (
+        <p className="parse-counts mono nums" aria-hidden="true">
+          {view.counts.join(" · ")}
+        </p>
+      )}
     </section>
   );
 }

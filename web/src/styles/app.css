@@ -1477,10 +1477,28 @@
 
 .date-range-legend {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
+  width: 100%;
   padding: 0;
   margin-bottom: 2px;
+}
+
+/* In a form the (i)'s text opens in the flow under its label, pushing the fields down rather than
+   covering the date boxes it explains. */
+.date-range-legend .info-tip {
+  display: contents;
+}
+
+.date-range-legend .info-tip-text {
+  position: static;
+  flex-basis: 100%;
+  max-width: none;
+  margin: 6px 0 4px;
+  box-shadow: none;
+  background: var(--paper);
+  font-weight: 400;
 }
 
 .date-range-inputs {

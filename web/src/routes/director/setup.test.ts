@@ -39,19 +39,19 @@ describe("performanceDatesProblem", () => {
 });
 
 describe("reading lines", () => {
-  it("follow the real stage, starting with the file name", () => {
-    expect(readingLine(0, "hamlet.pdf", 0)).toBe("Reading through hamlet.pdf…");
-    expect(readingLine(0, null, 0)).toBe("Reading through your script…");
-    expect(readingLine(1, "hamlet.pdf", 0)).toBe("Separating characters…");
-    expect(readingLines(1, null)).toContain("Double-checking stage directions…");
-    expect(readingLine(2, null, 0)).toBe("Setting out the parts…");
+  it("follow the real stage, and leave the file name to the heading", () => {
+    expect(readingLine(0, 0)).toBe("Opening the file…");
+    expect(readingLines(0).join(" ")).not.toMatch(/\.pdf|\.docx/);
+    expect(readingLine(1, 0)).toBe("Separating characters…");
+    expect(readingLines(1)).toContain("Double-checking stage directions…");
+    expect(readingLine(2, 0)).toBe("Setting out the parts…");
   });
 
   it("move on every few seconds and stay on the last line", () => {
-    expect(readingLine(1, null, 3499)).toBe("Separating characters…");
-    expect(readingLine(1, null, 3500)).toBe("Finding the scenes…");
-    expect(readingLine(1, null, 999_999)).toBe(readingLines(1, null).at(-1));
-    expect(readingLine(1, null, -50)).toBe("Separating characters…");
+    expect(readingLine(1, 3499)).toBe("Separating characters…");
+    expect(readingLine(1, 3500)).toBe("Finding the scenes…");
+    expect(readingLine(1, 999_999)).toBe(readingLines(1).at(-1));
+    expect(readingLine(1, -50)).toBe("Separating characters…");
   });
 });
 

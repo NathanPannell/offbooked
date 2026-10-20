@@ -21,16 +21,16 @@ export function performanceDatesProblem(start: string, end: string, today: strin
   return null;
 }
 
-/** The friendly lines that rotate under the heading while the script is read, one set per real stage. */
-export function readingLines(stage: 0 | 1 | 2, fileName: string | null): string[] {
-  if (stage === 0) return [`Reading through ${fileName ?? "your script"}…`, "Turning the pages…", "Finding where the play starts…"];
+/** The friendly lines that rotate under the heading while the script is read, one set per real stage. The heading already names the file, so they never repeat it. */
+export function readingLines(stage: 0 | 1 | 2): string[] {
+  if (stage === 0) return ["Opening the file…", "Turning the pages…", "Finding where the play starts…"];
   if (stage === 1) return ["Separating characters…", "Finding the scenes…", "Double-checking stage directions…", "Matching each speech to its speaker…"];
   return ["Setting out the parts…", "Saving your script…"];
 }
 
 /** The line to show `elapsedMs` into a stage, moving on every `everyMs` and staying on the last one. */
-export function readingLine(stage: 0 | 1 | 2, fileName: string | null, elapsedMs: number, everyMs = 3500): string {
-  const lines = readingLines(stage, fileName);
+export function readingLine(stage: 0 | 1 | 2, elapsedMs: number, everyMs = 3500): string {
+  const lines = readingLines(stage);
   return lines[Math.min(lines.length - 1, Math.max(0, Math.floor(elapsedMs / everyMs)))]!;
 }
 
