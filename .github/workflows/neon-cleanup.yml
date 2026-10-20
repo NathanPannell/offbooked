@@ -1,0 +1,60 @@
+# Deletes a PR's own Neon branch when the PR merges or closes, so throwaway branches never pile
+# up (each one can hold a compute). A PR's branch is named `dev-<head branch>`, lowercased, with
+# anything other than a-z, 0-9 and - turned into - (`fix/smooth-staging` → `dev-fix-smooth-staging`).
+# It only ever deletes a branch with that exact name: never production, dev, the default branch or
+# anything not starting with `dev-`. A PR without a Neon branch is a no-op.
+name: Neon cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+concurrency:
+  group: neon-cleanup-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  delete-branch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Forks get no secrets, and their branches aren't ours to delete.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Delete the PR's Neon branch
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEON_API_KEY:-}" ] || [ -z "${NEON_PROJECT_ID:-}" ]; then
+            echo "NEON_API_KEY or NEON_PROJECT_ID isn't set; nothing to do."
+            exit 0
+          fi
+          slug=$(printf '%s' "$HEAD_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9-]+/-/g; s/^-+//; s/-+$//')
+          name="dev-${slug}"
+          case "$name" in
+            dev-|dev-production|dev-main|dev-staging) echo "Refusing to touch '$name'."; exit 0 ;;
+          esac
+          api="https://console.neon.tech/api/v2/projects/${NEON_PROJECT_ID}"
+          auth=(-H "Authorization: Bearer ${NEON_API_KEY}" -H "Accept: application/json")
+          branches=$(curl -fsS "${auth[@]}" "${api}/branches?search=$(jq -rn --arg n "$name" '$n|@uri')")
+          match=$(printf '%s' "$branches" | jq -c --arg n "$name" '[.branches[] | select(.name == $n)]')
+          count=$(printf '%s' "$match" | jq 'length')
+          if [ "$count" = "0" ]; then
+            echo "No Neon branch named $name; nothing to delete."
+            exit 0
+          fi
+          if [ "$count" != "1" ]; then
+            echo "More than one branch is named $name; leaving them for a person to sort out."
+            exit 1
+          fi
+          id=$(printf '%s' "$match" | jq -r '.[0].id')
+          if [ "$(printf '%s' "$match" | jq -r '.[0].primary or .[0].default or .[0].protected')" = "true" ]; then
+            echo "$name is the default or a protected branch; not deleting it."
+            exit 1
+          fi
+          curl -fsS -X DELETE "${auth[@]}" "${api}/branches/${id}" > /dev/null
+          echo "Deleted Neon branch $name."
