@@ -18,9 +18,13 @@ export interface PlayerSettings {
 const MODES: MyLineMode[] = ["read", "skip", "pause"];
 const key = (productionId: string) => `offbooked.runthrough.${productionId}`;
 
-/** Actors start on their own part; directors with no role. `?mode=mine` opens "Pause, then read". */
+/**
+ * A cast member with a part starts on it, their lines on "Pause, then read" (listening through is
+ * practising); anyone else (a listener with no part, the director) just listens, and a part they
+ * pick reads out. `?mode=mine` opens "Pause, then read" either way.
+ */
 export function defaultSettings(isActor: boolean, initialMode: "full" | "mine"): PlayerSettings {
-  return { role: isActor ? MY_PART : "", mode: initialMode === "mine" ? "pause" : "read", speed: 1 };
+  return { role: isActor ? MY_PART : "", mode: isActor || initialMode === "mine" ? "pause" : "read", speed: 1 };
 }
 
 /** Stored settings, checked against what this production and listener allow. */

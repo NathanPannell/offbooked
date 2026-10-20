@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { afterTakeDelta, anchorDelta, anchorTop, FOLLOW_ANCHOR, followDelta, followTarget, LOOKAHEAD_ROWS, ROW_SLACK, TAKE_BAR_MARGIN } from "./follow";
+import {
+  afterTakeDelta,
+  anchorDelta,
+  anchorTop,
+  CUE_ROWS,
+  FOLLOW_ANCHOR,
+  followDelta,
+  followTarget,
+  lineDelta,
+  LOOKAHEAD_ROWS,
+  ROW_SLACK,
+  TAKE_BAR_MARGIN,
+} from "./follow";
 
 // A phone: pinned row ends at 52 px, player bar starts at 720 px (band 668 px tall).
 const band = { top: 52, bottom: 720 };
@@ -132,5 +144,87 @@ describe("afterTakeDelta", () => {
 
   it("just centres when there is no take on screen", () => {
     expect(afterTakeDelta(null, { top: 600, bottom: 800 }, band)).toBe(300);
+  });
+});
+
+describe("lineDelta (the run-through's current line)", () => {
+  // A word on the line's first row, and a line `rows` rows tall starting at `top`.
+  const lineAt = (top: number, rows: number) => ({ top, bottom: top + rows * ROW });
+  const wordOn = (top: number) => ({ top, bottom: top + ROW });
+  const start = anchorTop(band, ROW);
+
+  it("places a short line at the anchor as it starts", () => {
+    const line = lineAt(900, 2);
+    const cue = lineAt(830, 2);
+    expect(lineDelta({ line, cue, word: null }, band, true, false)).toBeCloseTo(900 - start, 5);
+  });
+
+  it("keeps a short line still while it plays, whichever row is being read", () => {
+    const line = lineAt(start, 3);
+    const cue = lineAt(start - 70, 2);
+    for (let r = 0; r < 3; r++) expect(lineDelta({ line, cue, word: wordOn(start + r * ROW) }, band, false, false)).toBe(0);
+  });
+
+  it("moves a short line mid-way only when it no longer fits where it is", () => {
+    // It grew (its type gets bigger as it becomes current) and now crowds the player bar.
+    const line = lineAt(560, 3);
+    const delta = lineDelta({ line, cue: lineAt(480, 2), word: wordOn(560) }, band, false, false);
+    expect(line.bottom + LOOKAHEAD_ROWS * ROW - delta).toBeCloseTo(band.bottom, 5);
+  });
+
+  it("counts a line as long when it doesn't fit with its cue and the lookahead", () => {
+    // 15 rows: with 3 rows of cue and 3 below, 21 rows (693 px) don't fit in 668 px, so it follows rows.
+    const line = lineAt(start, 15);
+    const cue = lineAt(start - 3 * ROW, 3);
+    expect(lineDelta({ line, cue, word: wordOn(start + 2 * ROW) }, band, false, false)).toBeCloseTo(2 * ROW, 5);
+    // 13 rows (19 with cue and lookahead) still fit: it stays put mid-line.
+    const fits = lineAt(band.top + 3 * ROW, 13);
+    expect(lineDelta({ line: fits, cue: lineAt(band.top, 3), word: wordOn(fits.top + 5 * ROW) }, band, false, false)).toBe(0);
+  });
+
+  it("keeps the end of the cue in view above a short line", () => {
+    const line = lineAt(400, 6);
+    const cue = lineAt(400 - 2 * ROW, 2);
+    const delta = lineDelta({ line, cue, word: null }, band, true, false);
+    expect(cue.top - delta).toBeGreaterThanOrEqual(band.top);
+    expect(line.bottom + LOOKAHEAD_ROWS * ROW - delta).toBeLessThanOrEqual(band.bottom);
+  });
+
+  it("only needs the last rows of a long cue", () => {
+    const line = lineAt(1000, 4);
+    const cue = lineAt(1000 - 30 * ROW, 30); // a long speech before a short reply
+    const delta = lineDelta({ line, cue, word: null }, band, true, false);
+    expect(delta).not.toBe(0);
+    expect(cue.bottom - CUE_ROWS * ROW - delta).toBeGreaterThanOrEqual(band.top - 0.001);
+    // And it stays put while it plays.
+    expect(lineDelta({ line: lineAt(1000 - delta, 4), cue: lineAt(1000 - 30 * ROW - delta, 30), word: wordOn(1000 - delta + ROW) }, band, false, false)).toBe(
+      0,
+    );
+  });
+
+  it("follows a long line row by row, as anchorDelta does", () => {
+    const line = lineAt(start, 20);
+    expect(lineDelta({ line, cue: null, word: wordOn(start) }, band, false, false)).toBe(0);
+    expect(lineDelta({ line, cue: null, word: wordOn(start + ROW) }, band, false, false)).toBeCloseTo(ROW, 5);
+    // Starting, it puts the first row at the anchor.
+    expect(lineDelta({ line: lineAt(900, 20), cue: null, word: null }, band, true, false)).toBeCloseTo(anchorDelta(wordOn(900), band), 5);
+  });
+
+  it("always leaves the lookahead rows in view below a short line", () => {
+    const short = { top: 100, bottom: 400 };
+    const line = lineAt(250, 2);
+    const delta = lineDelta({ line, cue: null, word: null }, short, true, false);
+    expect(line.bottom + LOOKAHEAD_ROWS * ROW - delta).toBeLessThanOrEqual(short.bottom);
+  });
+
+  it("with reduced motion, places a short line in the comfort band once", () => {
+    expect(lineDelta({ line: lineAt(300, 2), cue: lineAt(230, 2), word: null }, band, true, true)).toBe(0);
+    const delta = lineDelta({ line: lineAt(900, 2), cue: lineAt(830, 2), word: null }, band, true, true);
+    expect(delta).toBeCloseTo(followDelta(lineAt(900, 2), band), 5);
+    expect(lineDelta({ line: lineAt(900 - delta, 2), cue: null, word: wordOn(900 - delta + ROW) }, band, false, true)).toBe(0);
+  });
+
+  it("does nothing without a band", () => {
+    expect(lineDelta({ line: lineAt(500, 2), cue: null, word: null }, { top: 100, bottom: 100 }, true, false)).toBe(0);
   });
 });
