@@ -13,14 +13,15 @@ import { RecordDock } from "../../components/RecordDock";
 import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions } from "../../components/RecordOptions";
 import { useToast } from "../../components/Toast";
 import { useResource } from "../../lib/useResource";
-import { keepInView, recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
+import { takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "../actor/LineCard";
 import { takeAuthor } from "../actor/recordedBy";
+import { revealAfterTakeIn, studioBand, useFollowWhileRecording } from "../actor/recorderFollow";
 
 /**
  * The director records lines, scene by scene and partner by partner, or one part's lines across
@@ -170,6 +171,8 @@ function SceneLines({
   const options = useRecordOptions();
   const { autoAdvance, keepRecording } = options;
   const [firstTakeHint, setFirstTakeHint] = useState(false);
+  /** What timing the take's words needs, filled by the live take. */
+  const timingRef = useRef<TakeTiming | null>(null);
 
   const all = useMemo(() => (data.data?.lines ?? []).filter((l) => l.line.kind === "dialogue"), [data.data]);
   const speakers = useMemo(() => {
@@ -192,32 +195,16 @@ function SceneLines({
     text: all.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
     autoAdvance,
     onAdvance: (_lineId, mode) => stopRef.current({ recordNext: keepRecording && mode === "live" }),
+    timingRef,
   });
 
   useEffect(() => {
     void stt.start();
   }, [stt]);
 
-  // The next word to say stays in view while a take records; a scroll by hand pauses that a moment.
-  const scrolledAt = useRef(0);
-  useEffect(() => {
-    const mark = () => (scrolledAt.current = performance.now());
-    window.addEventListener("touchmove", mark, { passive: true });
-    window.addEventListener("wheel", mark, { passive: true });
-    return () => {
-      window.removeEventListener("touchmove", mark);
-      window.removeEventListener("wheel", mark);
-    };
-  }, []);
-  const liveLine = live?.lineId;
-  const liveCursor = live?.mode === "live" ? live.cursor : null;
-  useEffect(() => {
-    if (!recorder.recording || !liveLine || liveCursor === null) return;
-    if (performance.now() - scrolledAt.current < 2500) return;
-    const card = cardRefs.current.get(liveLine);
-    const el = card?.querySelector(".lw-next") ?? [...(card?.querySelectorAll(".lw-lit") ?? [])].pop();
-    if (el) keepInView(el, null, recorderBand);
-  }, [recorder.recording, liveLine, liveCursor]);
+  // The next word to say stays near the middle while a take records, between the app's pinned
+  // header (the studio's own title scrolls away) and the dock; a scroll by hand pauses that a moment.
+  useFollowWhileRecording({ recordingLineId: recorder.recording?.lineId ?? null, live, cardRefs, band: studioBand });
 
   useEffect(() => {
     if (!currentId && shown.length) setCurrentId((shown.find((l) => !l.take) ?? shown[0]!).line.id);
@@ -266,6 +253,7 @@ function SceneLines({
         characterId: voiceId,
         audio: take.blob,
         durationMs: take.durationMs,
+        wordStartsMs: takeWordStarts(timingRef.current, lineId, take.durationMs),
       });
       setLocalTakes((m) => {
         const next = new Map(m);
@@ -288,7 +276,7 @@ function SceneLines({
         advanceTimer.current = null;
         setCurrentId(next.line.id);
         const card = cardRefs.current.get(next.line.id);
-        if (card) revealAfterTake(cardRefs.current.get(lineId) ?? null, card);
+        if (card) revealAfterTakeIn(cardRefs.current.get(lineId) ?? null, card, studioBand());
         if (recordNext && unrecorded) void startRef.current(next.line.id);
       }, 600);
     }

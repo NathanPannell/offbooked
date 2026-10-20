@@ -141,7 +141,7 @@ export function LineCard({
             </span>
           )}
         </span>
-        <LineText text={line.text} cursor={recording ? liveCursor : null} />
+        <LineText text={line.text} cursor={recording ? liveCursor : null} tracked={recording} />
       </button>
       {recording && liveHint && <p className="live-hint">{liveHint}</p>}
 
@@ -204,13 +204,14 @@ const formatSeconds = (ms: number) => {
 
 /**
  * The line as written, with [directions] muted. While a take records with live transcription, words
- * already said are lit and the next word is hinted.
+ * already said are lit and the next word is hinted. While it records at all (`tracked`), each word
+ * carries its tokens (`data-tok-start`, `data-tok-end`) so the recorder can keep it in view.
  */
-function LineText({ text, cursor }: { text: string; cursor: number | null }) {
+function LineText({ text, cursor, tracked = false }: { text: string; cursor: number | null; tracked?: boolean }) {
   const { pieces } = useMemo(() => segmentLine(text), [text]);
   const live = cursor !== null;
   const states = useMemo(() => pieceStates(pieces, cursor ?? 0), [pieces, cursor]);
-  if (!pieces.some((p) => p.kind === "direction") && !live) return <span className="my-text">{text}</span>;
+  if (!pieces.some((p) => p.kind === "direction") && !live && !tracked) return <span className="my-text">{text}</span>;
   return (
     <span className={`my-text${live ? " is-live" : ""}`}>
       {pieces.map((piece, i) => {
@@ -223,7 +224,12 @@ function LineText({ text, cursor }: { text: string; cursor: number | null }) {
             </span>
           );
         return (
-          <span key={i} className={live ? `lw lw-${state}` : undefined}>
+          <span
+            key={i}
+            className={live ? `lw lw-${state}` : undefined}
+            data-tok-start={tracked ? piece.tokenStart : undefined}
+            data-tok-end={tracked ? piece.tokenEnd : undefined}
+          >
             {piece.text}
           </span>
         );

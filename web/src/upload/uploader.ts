@@ -15,6 +15,8 @@ export interface NewTake {
   characterId?: string | null;
   audio: Blob;
   durationMs: number;
+  /** When each spoken word starts, in ms of the recording (from `takeWordStarts`), if the live take heard them. */
+  wordStartsMs?: number[] | null;
 }
 
 /** A take bigger than this goes up in parts (the server takes up to 8 MB a request). */
@@ -105,6 +107,7 @@ export class Uploader {
       characterId: take.characterId ?? null,
       mime: take.audio.type,
       durationMs: take.durationMs,
+      wordStartsMs: take.wordStartsMs ?? null,
       createdAt: Date.now(),
       status: "queued",
       attempts: 0,
@@ -162,8 +165,8 @@ export class Uploader {
       const blob = new Blob([audio], { type: item.mime });
       const send = (body: Blob, part?: TakePart) =>
         item.kind === "director"
-          ? standins.putTake(item.lineId, body, item.takeId, item.durationMs, undefined, item.characterId, part)
-          : actorApi(item.token).putTake(item.lineId, body, item.takeId, item.durationMs, undefined, part);
+          ? standins.putTake(item.lineId, body, item.takeId, item.durationMs, undefined, item.characterId, part, item.wordStartsMs)
+          : actorApi(item.token).putTake(item.lineId, body, item.takeId, item.durationMs, undefined, part, item.wordStartsMs);
       const result = await sendInParts(blob, send);
       const saved = this.apply(item.takeId, { type: "succeeded" });
       if (saved) this.savedListeners.forEach((l) => l(saved, result));

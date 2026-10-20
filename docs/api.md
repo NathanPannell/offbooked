@@ -9,7 +9,7 @@ The backend (`backend/`, Railway, `https://api.offbooked.com`) and the web app (
 - Auth is header based, not cookies (the web app and API are on different origins):
   - Director: `Authorization: Bearer <sessionToken>`.
   - Actor: `Authorization: Invite <inviteToken>`.
-- CORS: allow origins from `CORS_ORIGINS` (comma list, `*` wildcards in a host allowed), the methods used here, and the headers `Authorization, Content-Type, X-Take-Id, X-Duration-Ms`.
+- CORS: allow origins from `CORS_ORIGINS` (comma list, `*` wildcards in a host allowed), the methods used here, and the headers `Authorization, Content-Type, X-Take-Id, X-Duration-Ms, X-Take-Parts, X-Take-Part, X-Word-Starts, Range`.
 - Audio URLs returned by the API are short-lived signed URLs (about 1 hour) that a plain `<audio src>` can load without headers. They must support HTTP `Range` requests (Safari needs this to play or seek). Send `Cross-Origin-Resource-Policy: cross-origin` on audio responses.
 - Rate limits return 429 with `error.code = "rate_limited"`.
 
@@ -128,7 +128,7 @@ Invite tokens are derived, not stored: `token = base64url(actorId bytes) + "." +
 | GET | `/api/invite` | | `{ production: { id, title, directorName }, actor: { id, name, firstName }, characters: { id, name }[], linesTotal, linesRecorded, hasEmail, pendingEmail }`. `hasEmail`: a verified email; `pendingEmail`: an address waiting for its verification link. Expired or revoked links return 410 with `{ error, directorName, productionTitle }`. |
 | POST | `/api/invite/start` | `{ firstName }` | `204`. Sets `firstName` and `openedAt`. |
 | GET | `/api/invite/lines` | | `{ sections: Section[], lines: ActorLine[] }` |
-| PUT | `/api/invite/lines/:lineId/take` | raw audio body (`audio/webm`, `audio/mp4`, `audio/ogg`, `audio/wav`; ≤ 8 MB), headers `X-Take-Id` (client UUID, idempotency key) and `X-Duration-Ms` | `{ take: Take, linesRecorded, linesTotal }`. A repeated `X-Take-Id` returns the same take. The new take becomes current; old takes are kept until the production's content is deleted. |
+| PUT | `/api/invite/lines/:lineId/take` | raw audio body (`audio/webm`, `audio/mp4`, `audio/ogg`, `audio/wav`; ≤ 8 MB), headers `X-Take-Id` (client UUID, idempotency key) and `X-Duration-Ms`, optional `X-Word-Starts` (see "Take word timing") | `{ take: Take, linesRecorded, linesTotal }`. A repeated `X-Take-Id` returns the same take. The new take becomes current; old takes are kept until the production's content is deleted. |
 | POST | `/api/invite/takes/:takeId/stt` | `{ transcript, accuracy, ops }` | `204` |
 | POST | `/api/invite/contact` | `{ email? }` | `{ hasEmail, pendingEmail, sent }`. Sends a verification link to `email` and keeps it as pending until it is confirmed; without `email`, sends it again to the address waiting. The verified address, if any, stays until then. Nothing to send (no `email` and nothing waiting, or `email` is the verified address, which also clears any pending one) answers 200 with the current state and `sent: false`, no email. With `EMAIL_DRIVER=log` the answer also carries `devLink`. Rate limited (429): 5 sends an hour per cast member, 5 a day per address, 20 an hour per production, 10 an hour per IP. A failed send is 502 `email_failed`. The email's subject never names the production; its body does (escaped). Only a verified email gets the ready-to-listen-through email or keeps the cast member's details after the show. |
 | GET | `/api/invite/runthrough` | | `RunThrough` with `myCharacterIds` set |
@@ -285,6 +285,9 @@ interface LineAudio {
   durationMs: number;       // the clip's length; for a silent line, the render's placeholder silence
   source: AudioSource;      // "actor" | "director" | "tts" | "none"
   ready: boolean;           // false while the clip is still being made: ask again
+  segments?: SpokenSegment[]; // a synthesized clip: when each printed line (and narrated direction) is said
+  speech?: { startMs: number; endMs: number }[]; // a take: where the voice is (see "Take word timing")
+  wordStartsMs?: number[];  // a take: when each word starts (see "Take word timing")
 }
 
 interface RunThrough {
@@ -303,6 +306,15 @@ interface RunThrough {
 - `[Bracketed]` directions inside a dialogue line are not read at all: the character's TTS voice leaves them out (as before; an unclosed `[` now runs to the end of its line), and a recorded take is played as recorded.
 - A GET with `?prefetch=1` now waits at most 8 s (a play GET still waits 20 s); the player asks for a prefetched line again from the next line instead of retrying.
 - Takes are cut to their speech when normalized (`render/trim.ts`): leading and trailing silence and room noise go, with 120 ms kept before the first sound and 200 ms after the last; nothing inside the speech is cut. `LineAudio.durationMs` is the trimmed length. Takes normalized before this are trimmed again on first use (the normalized key now ends in `.t2.flac`/`.t2.m4a`), and `RENDER_SETTINGS.version` is 3, so renders made before are stale.
+
+### Take word timing (2026-10-20)
+
+So the run-through can light up a take's words as they are really said, instead of spreading them evenly over the clip, `LineAudio` for a take (one take playing alone, not a mix of a shared line's voices) carries two optional fields. Both are in ms of the clip as served (the normalized, trimmed `.m4a`), and both are absent for TTS and silent lines.
+
+- `speech?: { startMs, endMs }[]`: the stretches of the clip with voice in them, in order. Worked out on the server from the clip's own 10 ms frame levels when the take is normalized, judged like the trim (`render/trim.ts`: the clip's own noise floor and speech level, sound under 40 ms isn't speech) and split wherever the voice stops for 150 ms or more, so the short gaps between words don't split it and a pause does. Stored with the take (`takes.speech_ms`, migration `016_take_timing.sql`), so it is never worked out per request; takes normalized before this get it once, in the background, on their next playback (that answer comes without it). Absent when the clip has no clear speech.
+- `wordStartsMs?: number[]`: when each word of the line starts, one per piece of the line's text as the web player tokenizes it (`lineTokens` in `web/src/player/words.ts`, in order: each printed word, and each word of a `[bracketed]` direction; `{notes}`, markup-only words and printed lines with no letter or digit have none). A take doesn't say its directions, so a direction's pieces take no time: they start with the next word the character says, or at the end of the clip when nothing follows. The app works these out while the take records (from the live word tracker, then refined against the take's voiced stretches) and sends them with the upload; the server moves them by where the trim cut the recording (`takes.trim_start_ms`) and keeps them inside the clip. Absent when the app didn't hear the words (no speech model on the device, nothing recognised), when the take was normalized before the cut was known, or when the line's text has changed since so the count no longer matches.
+
+Take uploads (`PUT /api/invite/lines/:lineId/take`, `PUT /api/lines/:lineId/take`) accept an optional header `X-Word-Starts`: comma-separated whole ms of the recording as uploaded, one per piece as above, never going back. A header that is malformed, has the wrong count for the line, goes back, or runs more than a second past the recording's end is dropped; the take is saved either way. On a take sent in parts, the part that completes it carries it (the web app sends it on every part). The web app leaves it out past 2,000 starts or 8 KB, so the header can never get a take refused. CORS now allows `X-Word-Starts`, `X-Take-Parts` and `X-Take-Part`.
 
 ### Joining lines (2026-10-15)
 

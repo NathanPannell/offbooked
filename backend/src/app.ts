@@ -74,7 +74,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
   app.register(cors, {
     origin: (origin, cb) => cb(null, !origin || allowed(origin)),
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Take-Id", "X-Duration-Ms", "Range"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Take-Id", "X-Duration-Ms", "X-Take-Parts", "X-Take-Part", "X-Word-Starts", "Range"],
     exposedHeaders: ["Content-Range", "Accept-Ranges", "Content-Length"],
     maxAge: 600,
   });

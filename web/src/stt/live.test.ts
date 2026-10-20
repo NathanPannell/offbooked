@@ -5,8 +5,8 @@ import {
   decideAdvance,
   END_SILENCE_MS,
   endPauseMs,
-  ENERGY_LONG_SILENCE_MS,
   ENERGY_SILENCE_MS,
+  LONG_SILENCE_MS,
   matchedCount,
   MID_LINE_SILENCE_MS,
   nextPassInterval,
@@ -179,38 +179,52 @@ describe("alignPartial", () => {
 });
 
 describe("decideAdvance", () => {
-  // 10 words: about 3 s of voiced speech for the whole line, so 1.8 s counts as having said it.
+  // A 10-word line read through: the cursor at its end, about 2 s of voiced speech.
   const base: AdvanceInput = { mode: "live", totalTokens: 10, cursor: 10, speechMs: 2000, silenceMs: 0, caughtUp: true };
 
   it("waits while the actor is still speaking", () => {
     expect(decideAdvance({ ...base, silenceMs: 200 })).toBe("wait");
   });
 
-  it("moves on after a short pause once the cursor is in the last 30% of the line", () => {
-    expect(decideAdvance({ ...base, silenceMs: 700 })).toBe("advance");
-    expect(decideAdvance({ ...base, cursor: 7, silenceMs: 600 })).toBe("wait");
-    expect(decideAdvance({ ...base, cursor: 7, silenceMs: 700 })).toBe("advance");
-    expect(endPauseMs({ ...base, cursor: 8 })).toBe(END_SILENCE_MS);
+  it("moves on after a 1.2 s pause once the cursor reaches the end of the line", () => {
+    expect(decideAdvance({ ...base, silenceMs: END_SILENCE_MS - 100 })).toBe("wait");
+    expect(decideAdvance({ ...base, silenceMs: END_SILENCE_MS })).toBe("advance");
+    expect(END_SILENCE_MS).toBe(1200);
   });
 
-  it("moves on after a moderate pause when enough was said but the words weren't heard", () => {
-    const missed = { ...base, cursor: 3, speechMs: 3000 };
-    expect(decideAdvance({ ...missed, silenceMs: 1400 })).toBe("wait");
-    expect(decideAdvance({ ...missed, silenceMs: 1500 })).toBe("advance");
-    expect(decideAdvance({ ...base, cursor: 0, silenceMs: 1500 })).toBe("advance");
+  it("counts a cursor one word from the end as the end (the last word is often missed)", () => {
+    expect(endPauseMs({ ...base, cursor: 9 })).toBe(END_SILENCE_MS);
+    expect(decideAdvance({ ...base, cursor: 9, silenceMs: END_SILENCE_MS })).toBe("advance");
+    expect(endPauseMs({ ...base, cursor: 8 })).not.toBe(END_SILENCE_MS);
   });
 
-  it("moves on after a moderate pause when the transcript lags behind the speech", () => {
-    const lagging = { ...base, cursor: 5, caughtUp: false };
-    expect(decideAdvance({ ...lagging, silenceMs: 1500 })).toBe("advance");
-    expect(decideAdvance({ ...lagging, caughtUp: true, silenceMs: 1500 })).toBe("wait");
+  it("never ends on speech time alone: words not heard wait for a long pause", () => {
+    // Plenty of speech for the line (5 s), but the recogniser heard three words.
+    const missed = { ...base, cursor: 3, speechMs: 5000 };
+    expect(decideAdvance({ ...missed, silenceMs: 1500 })).toBe("wait");
+    expect(decideAdvance({ ...missed, silenceMs: LONG_SILENCE_MS - 100 })).toBe("wait");
+    expect(decideAdvance({ ...missed, silenceMs: LONG_SILENCE_MS })).toBe("advance");
+    expect(decideAdvance({ ...base, cursor: 0, silenceMs: 2000 })).toBe("wait");
+    expect(decideAdvance({ ...base, cursor: 0, silenceMs: LONG_SILENCE_MS })).toBe("advance");
+  });
+
+  it("waits a long pause when the transcript lags behind the speech", () => {
+    const lagging = { ...base, cursor: 5, speechMs: 1200, caughtUp: false };
+    expect(decideAdvance({ ...lagging, silenceMs: 1500 })).toBe("wait");
+    expect(decideAdvance({ ...lagging, silenceMs: LONG_SILENCE_MS })).toBe("advance");
+  });
+
+  it("moves on soon after a lagging transcript catches up with the end", () => {
+    const lagging = { ...base, cursor: 6, caughtUp: false, silenceMs: 1400 };
+    expect(decideAdvance(lagging)).toBe("wait");
+    expect(decideAdvance({ ...lagging, cursor: 10, caughtUp: true })).toBe("advance");
   });
 
   it("waits longer through a pause mid-line, then still moves on", () => {
     const mid = { ...base, cursor: 5, speechMs: 1500 };
     expect(decideAdvance({ ...mid, silenceMs: 2900 })).toBe("wait");
     expect(decideAdvance({ ...mid, silenceMs: 3000 })).toBe("advance");
-    expect(endPauseMs({ ...base, cursor: 5 })).toBe(MID_LINE_SILENCE_MS);
+    expect(endPauseMs(mid)).toBe(MID_LINE_SILENCE_MS);
   });
 
   it("never holds a take that had speech", () => {
@@ -228,19 +242,25 @@ describe("decideAdvance", () => {
     expect(decideAdvance({ ...base, cursor: 0, speechMs: 200, silenceMs: 10_000 })).toBe("wait");
   });
 
-  it("ends a short line quickly when its last word is missed", () => {
+  it("ends a short line soon when its last word is missed", () => {
     const short = { ...base, totalTokens: 3, speechMs: 800 };
-    expect(decideAdvance({ ...short, cursor: 3, silenceMs: 700 })).toBe("advance");
-    expect(decideAdvance({ ...short, cursor: 2, silenceMs: 800 })).toBe("wait");
-    expect(decideAdvance({ ...short, cursor: 2, silenceMs: 1500 })).toBe("advance");
+    expect(decideAdvance({ ...short, cursor: 3, silenceMs: END_SILENCE_MS })).toBe("advance");
+    expect(decideAdvance({ ...short, cursor: 2, silenceMs: END_SILENCE_MS })).toBe("advance");
+    expect(decideAdvance({ ...short, cursor: 1, silenceMs: END_SILENCE_MS })).toBe("wait");
   });
 
-  it("without a transcript, uses speech time for the line to pick the pause", () => {
+  it("ends a one-word line, or one with nothing to say, on the short pause", () => {
+    expect(endPauseMs({ ...base, totalTokens: 1, cursor: 0 })).toBe(END_SILENCE_MS);
+    expect(endPauseMs({ ...base, totalTokens: 0, cursor: 0 })).toBe(END_SILENCE_MS);
+  });
+
+  it("without a transcript, only a long pause after real speech ends the take", () => {
     const energy = { ...base, mode: "energy" as const, cursor: 0 };
-    expect(decideAdvance({ ...energy, silenceMs: ENERGY_SILENCE_MS - 100 })).toBe("wait");
-    expect(decideAdvance({ ...energy, silenceMs: ENERGY_SILENCE_MS })).toBe("advance");
-    expect(decideAdvance({ ...energy, speechMs: 600, silenceMs: ENERGY_LONG_SILENCE_MS - 100 })).toBe("wait");
-    expect(decideAdvance({ ...energy, speechMs: 600, silenceMs: ENERGY_LONG_SILENCE_MS })).toBe("advance");
+    for (const speechMs of [600, 3000, 20_000]) {
+      expect(decideAdvance({ ...energy, speechMs, silenceMs: ENERGY_SILENCE_MS - 100 })).toBe("wait");
+      expect(decideAdvance({ ...energy, speechMs, silenceMs: ENERGY_SILENCE_MS })).toBe("advance");
+    }
+    expect(ENERGY_SILENCE_MS).toBe(2500);
     expect(decideAdvance({ ...energy, speechMs: 100, silenceMs: 5000 })).toBe("wait");
   });
 
@@ -257,7 +277,7 @@ describe("decideAdvance", () => {
       [1600, "get thee to a nun"],
       [2000, "get thee to a nunnery"],
     ]);
-    for (let t = 100; t <= 3000; t += 100) {
+    for (let t = 100; t <= 4000; t += 100) {
       vad = vadStep(vad, t > 300 && t <= 1800 ? -22 : -70, 100);
       const heard = transcripts.get(t);
       if (heard) progress = applyPass(progress, tokens, heard);
@@ -267,16 +287,40 @@ describe("decideAdvance", () => {
     }
     const first = decisions.indexOf("advance");
     expect(decisions.slice(0, first).every((d) => d === "wait")).toBe(true);
-    // Speech ends at 1.8 s; the move comes 0.7 s later.
-    expect((first + 1) * 100).toBe(2500);
+    // Speech ends at 1.8 s; the move comes 1.2 s later.
+    expect((first + 1) * 100).toBe(3000);
   });
 
-  it("replays a take the model didn't understand: it still moves on after a pause", () => {
+  it("replays a slow reading: a breath mid-line never ends the take", () => {
+    const { tokens } = segmentLine("To be, or not to be, that is the question.");
+    let progress = startProgress(tokens.length);
+    let vad = startVad();
+    let first = -1;
+    // Speaks 0.3 to 1.5 s, breathes for 2 s, speaks again 3.5 to 5 s.
+    const speaking = (t: number) => (t > 300 && t <= 1500) || (t > 3500 && t <= 5000);
+    for (let t = 100; t <= 8000 && first < 0; t += 100) {
+      vad = vadStep(vad, speaking(t) ? -22 : -70, 100);
+      if (t === 1600) progress = applyPass(progress, tokens, "to be or not to be");
+      if (t === 5200) progress = applyPass(progress, tokens, "to be or not to be that is the question");
+      const d = decideAdvance({
+        mode: "live",
+        totalTokens: tokens.length,
+        cursor: progress.cursor,
+        speechMs: vad.speechMs,
+        silenceMs: vad.silenceMs,
+        caughtUp: true,
+      });
+      if (d === "advance") first = t;
+    }
+    expect(first).toBe(6200);
+  });
+
+  it("replays a take the model misheard: it still moves on, after a long pause", () => {
     const { tokens } = segmentLine("Get thee to a nunnery.");
     let progress = startProgress(tokens.length);
     let vad = startVad();
     let first = -1;
-    for (let t = 100; t <= 4000 && first < 0; t += 100) {
+    for (let t = 100; t <= 6000 && first < 0; t += 100) {
       vad = vadStep(vad, t > 300 && t <= 1800 ? -22 : -70, 100);
       if (t === 1200) progress = applyPass(progress, tokens, "kept her");
       if (t === 2000) progress = applyPass(progress, tokens, "kept her through ornery");
@@ -290,9 +334,9 @@ describe("decideAdvance", () => {
       });
       if (d === "advance") first = t;
     }
-    expect(progress.cursor).toBeLessThan(tokens.length * 0.7);
-    // Speech ends at 1.8 s; 1.5 s of speech is enough for five words, so the move comes 1.5 s later.
-    expect(first).toBe(3300);
+    expect(progress.cursor).toBeLessThan(tokens.length - 1);
+    // Speech ends at 1.8 s; the words weren't heard, so the move waits the long pause: 2.5 s later.
+    expect(first).toBe(4300);
   });
 });
 

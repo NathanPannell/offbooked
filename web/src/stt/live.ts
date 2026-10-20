@@ -223,7 +223,8 @@ export interface VadState {
 
 export const VAD_FLOOR_DB = -50;
 const VAD_ABOVE_FLOOR_DB = 12;
-const VAD_MIN_RUN_MS = 60;
+/** Voiced this long without a break, sound counts as speech (a click doesn't). */
+export const VAD_MIN_RUN_MS = 60;
 const VAD_FLOOR_RISE_DB_PER_S = 3;
 
 export function startVad(): VadState {
@@ -259,24 +260,24 @@ export function rmsDb(samples: Float32Array, start = 0, end = samples.length): n
 }
 
 // ---------------------------------------------------------------------------------------------
-// When to stop a take by itself. A take with real speech always ends after a pause and moves on;
-// the transcript only decides how long that pause is, because recognition misses words.
+// When to stop a take by itself. A take with real speech always ends after a pause and moves on,
+// so it never records forever, but how much of the line has been said never comes from how long
+// the actor has spoken: only the words heard say the line is done. Until they do, the pause that
+// ends the take is long, so a slow reading, a pause for effect or a transcript running behind is
+// never cut off.
 
-/** The last share of the line: once the cursor is in it, a short pause ends the take. */
-export const END_ZONE = 0.7;
-/** Pause that ends a take once the cursor is near the end of the line. */
-export const END_SILENCE_MS = 700;
-/** Voiced time per word in an average reading of a line (the VAD leaves out the gaps between words). */
-export const SPEECH_MS_PER_WORD = 300;
-/** Share of the line's expected speech time that counts as having said the line, heard or not. */
-export const SPOKEN_SHARE = 0.6;
-/** Pause that ends a take whose words weren't heard (or not yet) after enough speech. */
-export const PAUSE_SILENCE_MS = 1500;
+/** Words left after the cursor that still count as the end of the line (the last word is often missed). */
+export const END_WORDS = 1;
+/** Pause that ends a take once the cursor is at (or a word from) the end of the line. */
+export const END_SILENCE_MS = 1200;
+/** Pause that ends a take whose words weren't heard, or whose transcript lags: long, rather than guessing. */
+export const LONG_SILENCE_MS = 2500;
 /** Pause that ends a take whose cursor is clearly mid-line: the actor may be pausing for effect. */
 export const MID_LINE_SILENCE_MS = 3000;
-/** Without a transcript: the pause after enough speech for the line, and after less. */
-export const ENERGY_SILENCE_MS = 1500;
-export const ENERGY_LONG_SILENCE_MS = 2500;
+/** Without a transcript: only a long pause after real speech ends the take. */
+export const ENERGY_SILENCE_MS = 2500;
+/** Voiced time per word in an average reading of a line (the VAD leaves out the gaps between words). */
+export const SPEECH_MS_PER_WORD = 300;
 const MIN_SPEECH_MS = 300;
 const ENERGY_MIN_SPEECH_MS = 400;
 /** Heard words account for the speech when it is at most this much voiced time per word up to the cursor. */
@@ -299,18 +300,14 @@ export type AdvanceDecision = "wait" | "advance";
 /** The pause that ends this take now, or null before any real speech. */
 export function endPauseMs(input: AdvanceInput): number | null {
   const { mode, totalTokens, cursor, speechMs, caughtUp } = input;
-  const spokeEnough = speechMs >= SPOKEN_SHARE * totalTokens * SPEECH_MS_PER_WORD;
-  if (mode === "energy") {
-    if (speechMs < ENERGY_MIN_SPEECH_MS) return null;
-    return spokeEnough ? ENERGY_SILENCE_MS : ENERGY_LONG_SILENCE_MS;
-  }
+  if (mode === "energy") return speechMs < ENERGY_MIN_SPEECH_MS ? null : ENERGY_SILENCE_MS;
   if (speechMs < MIN_SPEECH_MS) return null;
-  if (totalTokens === 0 || cursor >= totalTokens * END_ZONE) return END_SILENCE_MS;
-  // Clearly mid-line: the transcript is current, the words heard explain the speech so far, and
-  // more than a word is left. Otherwise the words were missed (or the transcript lags) and speech
-  // time decides.
-  const midLine = caughtUp && totalTokens - cursor >= 2 && speechMs <= cursor * TRACKED_MS_PER_WORD;
-  return spokeEnough && !midLine ? PAUSE_SILENCE_MS : MID_LINE_SILENCE_MS;
+  if (totalTokens - cursor <= END_WORDS) return END_SILENCE_MS;
+  // Clearly mid-line: the transcript is current and the words heard explain the speech so far, so
+  // the actor is pausing inside the line. Otherwise the words were missed or the transcript lags:
+  // wait a long pause rather than guess from speech time.
+  const midLine = caughtUp && speechMs <= cursor * TRACKED_MS_PER_WORD;
+  return midLine ? MID_LINE_SILENCE_MS : LONG_SILENCE_MS;
 }
 
 export function decideAdvance(input: AdvanceInput): AdvanceDecision {
