@@ -4,14 +4,20 @@ import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError, errorMessage } from "../../api/client";
 import { productions, script as scriptApi, standins } from "../../api/director";
 import type { ActorLine, Section, SectionLine } from "../../api/types";
+import { claimFirstTakeHint } from "../../audio/micPrefs";
 import { usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { CharacterName } from "../../components/CharacterName";
 import { Loading } from "../../components/Loading";
 import { PartProgress } from "../../components/PartProgress";
 import { RecordDock } from "../../components/RecordDock";
+import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions } from "../../components/RecordOptions";
 import { useToast } from "../../components/Toast";
 import { useResource } from "../../lib/useResource";
+import { keepInView, recorderBand } from "../../player/follow";
+import { useLiveTake } from "../../stt/useLiveTake";
+import { useSttSession } from "../../stt/useStt";
 import { latestForLine } from "../../upload/queue";
+import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "../actor/LineCard";
 import { takeAuthor } from "../actor/recordedBy";
@@ -49,16 +55,14 @@ export default function SceneRecorder() {
     return (
       <div className="scene-recorder">
         <div className="page scene-head">
-          <Link className="back-link" to={`/app/p/${id}?tab=script`}>
-            <ArrowLeft size={16} aria-hidden="true" /> Back to script
+          <Link className="back-link" to={`/app/p/${id}?tab=cast`}>
+            <ArrowLeft size={16} aria-hidden="true" /> Back to cast
           </Link>
-          <div className="spread scene-title-row">
+          <div className="scene-title-row">
             <h1 className="display part-title">
               Recording for <CharacterName name={character?.name ?? "this part"} />
             </h1>
-            <Link className="btn btn-ghost btn-sm" to={`/app/p/${id}?tab=play`}>
-              <Headphones size={16} aria-hidden="true" /> Listen through
-            </Link>
+            <ListenThrough productionId={id} />
           </div>
         </div>
         <SceneLines
@@ -79,11 +83,9 @@ export default function SceneRecorder() {
         <Link className="back-link" to={`/app/p/${id}?tab=script`}>
           <ArrowLeft size={16} aria-hidden="true" /> Back to script
         </Link>
-        <div className="spread scene-title-row">
+        <div className="scene-title-row">
           <h1 className="display">Read in for your cast</h1>
-          <Link className="btn btn-ghost btn-sm" to={`/app/p/${id}?tab=play`}>
-            <Headphones size={16} aria-hidden="true" /> Listen through
-          </Link>
+          <ListenThrough productionId={id} />
         </div>
         <label className="field scene-picker">
           <span>Scene</span>
@@ -112,6 +114,16 @@ export default function SceneRecorder() {
   );
 }
 
+/** Beside the studio's title: the label goes on a phone, the headphones stay. */
+function ListenThrough({ productionId }: { productionId: string }) {
+  return (
+    <Link className="btn btn-ghost btn-sm scene-listen" to={`/app/p/${productionId}?tab=play`} aria-label="Listen through the play">
+      <Headphones size={18} aria-hidden="true" />
+      <span className="scene-listen-label">Listen through</span>
+    </Link>
+  );
+}
+
 function SceneLines({
   productionId,
   cacheKey,
@@ -137,13 +149,21 @@ function SceneLines({
   const serverTakeIds = useRef(new Map<string, string>());
   const [deleted, setDeleted] = useState(new Set<string>());
   const cardRefs = useRef(new Map<string, HTMLElement>());
-  const stopRef = useRef<() => void>(() => {});
+  const stopRef = useRef<(opts?: { recordNext?: boolean }) => void>(() => {});
+  /** The latest start, for the timer that records the next line. */
+  const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
   const recorder = useTakeRecorder({
     onLimit: () => {
       onError("That take ran for an hour, so we stopped and kept it.");
       stopRef.current();
     },
   });
+  // Hands-free like the cast's recorder: words light up as they're heard, and a pause at the end of
+  // the line stops the take and moves on (mic settings turn that off, or record the next line too).
+  const { session: stt } = useSttSession();
+  const options = useRecordOptions();
+  const { autoAdvance, keepRecording } = options;
+  const [firstTakeHint, setFirstTakeHint] = useState(false);
 
   const all = useMemo(() => (data.data?.lines ?? []).filter((l) => l.line.kind === "dialogue"), [data.data]);
   const speakers = useMemo(() => {
@@ -158,6 +178,40 @@ function SceneLines({
   }, [all]);
   const shown = who === "all" ? all : all.filter((l) => (l.line.characterId ?? l.characterName) === who);
   const myItems = useMemo(() => items.filter((i) => i.kind === "director" && i.token === productionId), [items, productionId]);
+  const live = useLiveTake({
+    recording: recorder.recording,
+    capture: recorder.capture,
+    analyser: recorder.analyser,
+    stt,
+    text: all.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
+    autoAdvance,
+    onAdvance: (_lineId, mode) => stopRef.current({ recordNext: keepRecording && mode === "live" }),
+  });
+
+  useEffect(() => {
+    void stt.start();
+  }, [stt]);
+
+  // The next word to say stays in view while a take records; a scroll by hand pauses that a moment.
+  const scrolledAt = useRef(0);
+  useEffect(() => {
+    const mark = () => (scrolledAt.current = performance.now());
+    window.addEventListener("touchmove", mark, { passive: true });
+    window.addEventListener("wheel", mark, { passive: true });
+    return () => {
+      window.removeEventListener("touchmove", mark);
+      window.removeEventListener("wheel", mark);
+    };
+  }, []);
+  const liveLine = live?.lineId;
+  const liveCursor = live?.mode === "live" ? live.cursor : null;
+  useEffect(() => {
+    if (!recorder.recording || !liveLine || liveCursor === null) return;
+    if (performance.now() - scrolledAt.current < 2500) return;
+    const card = cardRefs.current.get(liveLine);
+    const el = card?.querySelector(".lw-next") ?? [...(card?.querySelectorAll(".lw-lit") ?? [])].pop();
+    if (el) keepInView(el, null, recorderBand);
+  }, [recorder.recording, liveLine, liveCursor]);
 
   useEffect(() => {
     if (!currentId && shown.length) setCurrentId((shown.find((l) => !l.take) ?? shown[0]!).line.id);
@@ -188,11 +242,15 @@ function SceneLines({
     if (recorder.recording) return;
     playback.pause();
     setCurrentId(lineId);
-    await recorder.start(lineId);
+    if (!(await recorder.start(lineId))) return;
+    if (autoAdvance && claimFirstTakeHint()) setFirstTakeHint(true);
   };
+  startRef.current = start;
 
-  const stop = async () => {
+  /** Stops and keeps the take, then moves to the next line; with "Keep recording" it records that one too. */
+  const stop = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
     const lineId = recorder.recording?.lineId;
+    setFirstTakeHint(false);
     const take = await recorder.stop();
     if (!take || !lineId) return;
     if (take.tooShort) return onError("Too short. Tap record, read the line, then tap stop.");
@@ -225,15 +283,18 @@ function SceneLines({
       setTimeout(() => {
         setCurrentId(next.line.id);
         scrollTo(next.line.id);
+        if (recordNext) void startRef.current(next.line.id);
       }, 600);
     }
   };
-  stopRef.current = () => void stop();
+  stopRef.current = (opts) => void stop(opts);
 
-  /** Deletes the take shown on a line (anyone's), with Undo. */
-  const remove = async (lineId: string, takeId: string) => {
+  /** Deletes the take shown on a line (anyone's), with Undo. One kept a moment ago is deleted once it lands. */
+  const remove = async (lineId: string) => {
     playback.pause();
     const local = localTakes.get(lineId);
+    const takeId = local ? await savedTakeId(uploader, serverTakeIds.current, local.clientTakeId) : (all.find((l) => l.line.id === lineId)?.take?.id ?? null);
+    if (!takeId) return onError("That take is still saving. Try again once it's saved.");
     try {
       await standins.deleteTake(takeId);
     } catch (err) {
@@ -299,11 +360,6 @@ function SceneLines({
     const item = latestForLine(myItems, productionId, lineId);
     return item && item.status !== "saved" && !deleted.has(item.takeId) ? item : null;
   };
-  const shownTake = (l: SectionLine): string | null => {
-    const local = localTakes.get(l.line.id);
-    if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
-    return l.take?.id ?? null;
-  };
   const isRecorded = (l: SectionLine) => !!l.take || localTakes.has(l.line.id) || !!uploadFor(l.line.id);
   const recordedCount = all.filter(isRecorded).length;
 
@@ -330,7 +386,6 @@ function SceneLines({
             const actorLine: ActorLine = { line: l.line, sectionTitle: "", cue: l.cue, directions: [], take: l.take, together: l.together };
             const heading =
               sectionTitles.size > 0 && (i === 0 || shown[i - 1]!.line.sectionId !== l.line.sectionId) ? sectionTitles.get(l.line.sectionId) : null;
-            const takeId = shownTake(l);
             return (
               <li
                 key={l.line.id}
@@ -351,12 +406,14 @@ function SceneLines({
                   upload={uploadFor(l.line.id)}
                   score={null}
                   playing={playback.playing}
+                  liveCursor={live?.lineId === l.line.id && live.mode === "live" ? live.cursor : null}
+                  liveHint={live?.lineId === l.line.id && !autoAdvance && live.mode === "live" ? "Tap stop when you're done." : undefined}
                   noCueLabel="Opens the scene"
                   author={l.take ? takeAuthor(l.take) : null}
                   progress={playback.progress}
                   onPlay={playback.play}
                   onPlayTogether={playback.playTogether}
-                  onDelete={takeId ? () => void remove(l.line.id, takeId) : undefined}
+                  onDelete={l.take || localTakes.has(l.line.id) ? () => void remove(l.line.id) : undefined}
                   onSelect={() => !recorder.recording && setCurrentId(l.line.id)}
                   onRerecord={() => void start(l.line.id)}
                   onRetry={(takeId) => uploader.retry(takeId)}
@@ -372,11 +429,13 @@ function SceneLines({
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
+        note={recorder.recording && firstTakeHint ? FIRST_TAKE_HINT : undefined}
         disabled={!current}
         label={current ? `Record ${current.characterName}'s line` : "Record"}
         onToggle={() => (recorder.recording ? void stop() : current && void start(current.line.id))}
         onRetry={() => currentId && void start(currentId)}
         onDeviceChange={recorder.setDevice}
+        settings={<RecordOptions options={options} />}
       />
     </>
   );

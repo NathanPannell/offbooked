@@ -153,13 +153,9 @@ export function Onboarding({
           <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => (last ? finish() : go(index + 1))}>
             {last ? finishLabel : "Next"} <ArrowRight size={18} aria-hidden="true" />
           </button>
-          {index > 0 ? (
+          {index > 0 && (
             <button type="button" className="btn btn-ghost" onClick={() => go(index - 1)}>
               <ArrowLeft size={18} aria-hidden="true" /> Back
-            </button>
-          ) : (
-            <button type="button" className="btn btn-ghost" onClick={finish}>
-              I've used Offbooked before
             </button>
           )}
         </div>

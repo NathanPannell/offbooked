@@ -1,6 +1,6 @@
 import { Mic, Settings, Square } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { markMicChecked, needsMicCheck } from "../audio/micPrefs";
+import { needsMicCheck } from "../audio/micPrefs";
 import type { MicError } from "../audio/recorder";
 import { type MicStatus } from "../audio/useTakeRecorder";
 import { Waveform } from "../audio/Waveform";
@@ -11,7 +11,7 @@ import { FirstMicCheck, MicSettings } from "./MicSettings";
 /**
  * The big record button pinned to the bottom of the screen, with the level meter and timer while
  * recording, and mic settings behind the gear beside it. Before the first take on a device it
- * offers a quick mic check.
+ * asks for a quick mic check (or a skip) first.
  */
 export function RecordDock({
   recording,
@@ -47,6 +47,9 @@ export function RecordDock({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [micCheck, setMicCheck] = useState(needsMicCheck);
   const message = micStatus === "requesting" ? "Allow the microphone when your browser asks." : note;
+  // The first-run mic check is the only thing to do until it's done or skipped: the record button
+  // waits behind it, so there's one filled button on screen.
+  const checking = micCheck && !recording && !micError;
   const dockRef = useRef<HTMLDivElement>(null);
   useDockHeight(dockRef);
 
@@ -57,7 +60,7 @@ export function RecordDock({
           <MicHelp kind={micError.kind} onRetry={onRetry} />
         </div>
       )}
-      {micCheck && !recording && !micError && <FirstMicCheck onDone={() => setMicCheck(false)} />}
+      {checking && <FirstMicCheck onDone={() => setMicCheck(false)} />}
       {recording && (
         <div className="dock-meta">
           <span className="rec-dot" aria-hidden="true" />
@@ -70,20 +73,13 @@ export function RecordDock({
           {message}
         </p>
       )}
-      <div className="dock-row">
+      <div className="dock-row" hidden={checking}>
         <span className="dock-side" aria-hidden="true" />
         <button
           type="button"
           className={`record-button ${recording ? "is-recording" : ""}`}
           disabled={disabled || micStatus === "requesting"}
-          onClick={() => {
-            // Recording straight away counts as having checked the mic.
-            if (micCheck) {
-              markMicChecked();
-              setMicCheck(false);
-            }
-            onToggle();
-          }}
+          onClick={onToggle}
           aria-label={recording ? "Stop recording" : label}
         >
           {recording ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}

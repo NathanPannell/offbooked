@@ -240,6 +240,7 @@
 
 .landing {
   overflow-x: hidden;
+  overflow-x: clip; /* clip, not hidden, so the phone's sticky corner bar still sticks */
 }
 
 .landing-nav {
@@ -250,6 +251,29 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--s-3);
+}
+
+/* On a phone the corner bar stays at the top, and its call to action only shows once the hero's
+   own button has scrolled away, so there's one red button on screen at a time. */
+@media (max-width: 640px) {
+  .landing-nav {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    padding-bottom: var(--s-3);
+    background: var(--bg);
+  }
+
+  .landing-nav .btn {
+    transition:
+      opacity var(--fast) var(--ease),
+      visibility var(--fast);
+  }
+
+  .landing-nav .btn.is-waiting {
+    opacity: 0;
+    visibility: hidden;
+  }
 }
 
 /* The corner call to action keeps its 44px height and fits beside the brand on the narrowest phones. */
@@ -2978,11 +3002,25 @@
 }
 
 .scene-title-row {
-  flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
 }
 
 .scene-title-row h1 {
+  flex: 1;
+  min-width: 0;
   font-size: clamp(28px, 6vw, 40px);
+}
+
+.scene-listen {
+  flex-shrink: 0;
+}
+
+@media (max-width: 520px) {
+  .scene-listen-label {
+    display: none;
+  }
 }
 
 .scene-head .back-link {
@@ -3155,7 +3193,7 @@
   gap: var(--s-3);
   margin: 0 calc(-1 * var(--s-4));
   padding: var(--s-4) var(--s-4) calc(var(--s-4) + var(--safe-bottom));
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg);
   border-top: 1px solid var(--line);
   box-shadow: 0 -8px 24px rgba(29, 28, 26, 0.05);
 }
@@ -3902,6 +3940,10 @@
   width: min(420px, 100%);
 }
 
+.dock-row[hidden] {
+  display: none;
+}
+
 .dock-side {
   display: flex;
   padding-left: var(--s-5);
@@ -4587,7 +4629,7 @@
   justify-content: center;
   gap: 18px;
   padding: var(--s-3) var(--s-4) calc(14px + var(--safe-bottom));
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg);
   border-top: 1px solid var(--line);
 }
 
@@ -4619,6 +4661,23 @@
 .controls-spacer {
   flex: none;
   width: var(--tap);
+}
+
+/* "Score me", said under its mic so it isn't a mystery icon. */
+.score-btn {
+  align-content: center;
+  gap: 3px;
+  width: auto;
+  min-width: var(--tap);
+  height: auto;
+  min-height: var(--tap);
+  padding: 4px 8px;
+  border-radius: var(--radius);
+}
+
+.score-btn-label {
+  font: 600 11px/1 var(--font-sans);
+  white-space: nowrap;
 }
 
 .score-btn[aria-pressed="true"] {

@@ -39,6 +39,16 @@ export function Landing() {
   // One call to action everywhere on the page, so the corner, the hero and the closing band agree.
   const cta = signedIn ? { to: "/app", label: "Your productions" } : { to: "/signin", label: "Get off book together" };
   const demo = useRef<DemoHandle>(null);
+  // While the hero's button is on screen, the corner one waits (on a phone; see .is-waiting).
+  const heroCta = useRef<HTMLAnchorElement>(null);
+  const [heroCtaVisible, setHeroCtaVisible] = useState(true);
+  useEffect(() => {
+    const el = heroCta.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setHeroCtaVisible(!!entry?.isIntersecting));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const hearDemo = () => {
     document.getElementById("demo")?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center" });
@@ -49,7 +59,7 @@ export function Landing() {
     <div className="landing">
       <nav className="landing-nav" aria-label="Main">
         <Brand to="/" />
-        <Link className="btn btn-primary" to={cta.to}>
+        <Link className={`btn btn-primary${heroCtaVisible ? " is-waiting" : ""}`} to={cta.to}>
           {cta.label} <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </nav>
@@ -65,7 +75,7 @@ export function Landing() {
             where you speak.
           </p>
           <div className="hero-ctas">
-            <Link className="btn btn-primary btn-lg" to={cta.to}>
+            <Link className="btn btn-primary btn-lg" to={cta.to} ref={heroCta}>
               {cta.label} <ArrowRight size={18} aria-hidden="true" />
             </Link>
           </div>
