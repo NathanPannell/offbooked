@@ -10,6 +10,7 @@ test("the cast sees the director's name, or the start of their email, never the 
   assert.equal(castFacingName("   ", "sam.ortiz+shows@example.test"), "Sam Ortiz");
   assert.equal(castFacingName(undefined, "jo_ann-lee@example.test"), "Jo Ann Lee");
   assert.equal(castFacingName("pat@example.test", "pat@example.test"), "Pat", "a name that is an email is treated as one");
+  assert.equal(castFacingName("Sam @ Globe Rep", "sam@example.test"), "Sam @ Globe Rep", "only a whole email address is replaced");
   assert.equal(castFacingName(null, "+tag@example.test"), "Your director");
   for (const shown of [castFacingName(null, "nathan@example.test"), castFacingName("x@y.test", "x@y.test")]) assert.ok(!shown.includes("@"));
 });

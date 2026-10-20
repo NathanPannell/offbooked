@@ -2,7 +2,7 @@
 // their email before the @, capitalised. The cast never sees the address itself.
 export function castFacingName(name: string | null | undefined, email: string): string {
   const given = name?.trim();
-  if (given && !given.includes("@")) return given;
+  if (given && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(given)) return given;
   const local = (given || email).split("@")[0]!.split("+")[0]!;
   const words = local
     .split(/[._\-\s]+/)

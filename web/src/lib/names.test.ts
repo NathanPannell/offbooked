@@ -11,6 +11,7 @@ describe("castFacingName", () => {
     expect(castFacingName(null, "nathan@example.test")).toBe("Nathan");
     expect(castFacingName("", "sam.ortiz+shows@example.test")).toBe("Sam Ortiz");
     expect(castFacingName("pat@example.test", "pat@example.test")).toBe("Pat");
+    expect(castFacingName("Sam @ Globe Rep", "sam@example.test")).toBe("Sam @ Globe Rep");
     expect(castFacingName(null, "+x@example.test")).toBe("Your director");
   });
 });

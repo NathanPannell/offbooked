@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { session } from "../../api/client";
+import { ApiError, errorMessage, session } from "../../api/client";
 import { auth, productions } from "../../api/director";
 import { Brand } from "../../components/Brand";
 import { Loading } from "../../components/Loading";
@@ -21,7 +21,9 @@ export default function Verify() {
   const token = params.get("token") ?? "";
   const next = safeNext(params.get("next"));
   const navigate = useNavigate();
-  const [failed, setFailed] = useState(!token);
+  // "expired" for a spent, expired or missing token; any other failure (offline, rate limited) may
+  // leave the link still good, so it says so and offers a retry.
+  const [failure, setFailure] = useState<{ expired: true } | { expired: false; message: string } | null>(token ? null : { expired: true });
 
   useEffect(() => {
     if (!token) return;
@@ -35,11 +37,27 @@ export default function Verify() {
         session.set(sessionToken);
         navigate(await landing(next), { replace: true });
       },
-      () => setFailed(true),
+      (err) => {
+        setFailure(err instanceof ApiError && err.status === 401 ? { expired: true } : { expired: false, message: errorMessage(err) });
+      },
     );
   }, [token, next, navigate]);
 
-  if (!failed) return <Loading label="Signing you in" />;
+  if (!failure) return <Loading label="Signing you in" />;
+  if (!failure.expired) {
+    return (
+      <main className="page page-narrow center-page">
+        <Brand />
+        <div className="raised message-card stack">
+          <h1 className="display">We couldn't sign you in</h1>
+          <p className="muted">{failure.message}</p>
+          <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
+            Try again
+          </button>
+        </div>
+      </main>
+    );
+  }
   return (
     <main className="page page-narrow center-page">
       <Brand />
