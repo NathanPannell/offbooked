@@ -3,6 +3,7 @@ import type { Ctx } from "./context.ts";
 import { sha256 } from "./crypto.ts";
 import { HttpError, notFound, unauthorized } from "./errors.ts";
 import { inviteExpiresAt, parseInviteToken } from "./invite.ts";
+import { castFacingName } from "./names.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
 import { productionRows, type ProductionRow } from "./views.ts";
 
@@ -64,14 +65,16 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
       performanceEndsOn: string | null;
       archivedAt: Date | null;
       directorName: string | null;
+      directorEmail: string;
     }[]
   >`
     select a.id, a.name, a.first_name, a.email, a.token_version, a.created_at, p.id as production_id, p.title,
-      p.performance_ends_on::text as performance_ends_on, p.archived_at, u.name as director_name
+      p.performance_ends_on::text as performance_ends_on, p.archived_at, u.name as director_name,
+      u.email as director_email
     from actors a join productions p on p.id = a.production_id join users u on u.id = p.owner_id
     where a.id = ${parsed.actorId}`;
   if (!row) throw unauthorized("This link isn't valid. Ask your director for a new one.");
-  const directorName = row.directorName || "Your director";
+  const directorName = castFacingName(row.directorName, row.directorEmail);
   const gone = (message: string) => new HttpError(410, "invite_expired", message, { directorName, productionTitle: row.title });
   if (row.archivedAt) throw gone("This production has wrapped, so this link no longer works.");
   if (parsed.tokenVersion !== row.tokenVersion) throw gone("This link was replaced with a new one. Ask your director for the latest link.");
