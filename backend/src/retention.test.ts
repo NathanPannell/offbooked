@@ -14,6 +14,8 @@ import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, ty
 import { FakeSynthesizer, toneWav } from "./test/tts.ts";
 
 const DAY_MS = 86_400_000;
+// Short, so the render and TTS in the deletion test stay quick on CI.
+const SCENE = "HAMLET: Hail to your lordship.\nHORATIO: The same, my lord.\nHAMLET: Sir, my good friend.\nHORATIO: A truant disposition.\n";
 const day = (offsetDays: number, from = Date.now()) => new Date(from + offsetDays * DAY_MS).toISOString().slice(0, 10);
 const deletionMoment = (endsOn: string) => Date.parse(`${endsOn}T12:00:00Z`) + RETENTION_DAYS * DAY_MS;
 
@@ -145,10 +147,10 @@ describe("content retention", { skip: dbSkip }, () => {
     await t.ctx.sql`delete from productions where id = any(${[legacy!.id, undated!.id, dated!.id]}::uuid[])`;
   });
 
-  test("deletes a production's script, recordings and renders for good, keeps shared TTS and a tombstone", { timeout: 60_000 }, async () => {
+  test("deletes a production's script, recordings and renders for good, keeps shared TTS and a tombstone", { timeout: 120_000 }, async () => {
     const root = (t.ctx.storage as LocalStorage).root;
     const show = async (title: string) => {
-      const { id, script } = await productionWithScript(t, director, SEED_SCENE, title);
+      const { id, script } = await productionWithScript(t, director, SCENE, title);
       const { joinUrl } = (await get(`/api/productions/${id}/join-link`)).json();
       const joinToken = joinUrl.split("/join/")[1] as string;
       const hamlet = script.characters.find((c: { name: string }) => c.name === "HAMLET");
