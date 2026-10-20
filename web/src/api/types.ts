@@ -171,6 +171,10 @@ export interface LineAudio {
   ready: boolean;
   /** A synthesized clip: when each printed line (and narrated [direction]) is said. Absent for takes. */
   segments?: SpokenSegment[];
+  /** A take: when each spoken word starts, in ms of the clip as served, one per spoken piece of `lineTokens(text)` in order. Absent when unknown. */
+  wordStartsMs?: number[];
+  /** A take: the stretches of the clip with speech in them, in ms of the clip as served. Absent for synthesized clips. */
+  speech?: { startMs: number; endMs: number }[];
 }
 
 /** One spoken stretch of a clip, in ms of the clip as served. `text` is what was said. */
@@ -291,8 +295,4 @@ export interface PartCard {
   linesNeeded: number;
   /** Who recorded most of its lines, or null before anyone has. */
   topRecorder: TopRecorder | null;
-}
-
-export interface PracticeResult extends SttResult {
-  lineId: string;
 }

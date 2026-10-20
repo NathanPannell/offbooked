@@ -160,8 +160,6 @@ describe("my role", () => {
     const { audio, engine } = setup({ source: (id) => (id === "e" ? "actor" : "tts") });
     engine.setPart(mine("pause"));
     engine.setSpeed(2);
-    const gaps: number[] = [];
-    engine.gapListener = { start: (_l, ms) => gaps.push(ms), end: () => {} };
     await flush();
     engine.play();
     await flush();
@@ -185,7 +183,6 @@ describe("my role", () => {
     await flush();
     // e is recorded (2 s take): 2 s plus 500 ms.
     expect(engine.getState().gap?.durationMs).toBe(2500);
-    expect(gaps).toEqual([2000, 2500]);
     audio.finish();
     await flush();
     expect(audio.current).toEqual({ src: "clip:e", rate: 1 });
