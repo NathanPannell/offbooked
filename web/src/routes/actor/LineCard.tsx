@@ -18,7 +18,7 @@ export interface LocalTake {
 
 /**
  * One line to record: the cue, any directions, the line itself and its take. Shared by the actor's
- * recorder and the director's stand-in recorder.
+ * recorder and the director's studio.
  */
 export function LineCard({
   actorLine,
@@ -116,7 +116,6 @@ export function LineCard({
             <p className="cue-who">
               <CharacterName name={cue.characterName} />
               {cue.audioSource === "tts" && <span className="tag tag-tts">TTS</span>}
-              {cue.audioSource === "standin" && <span className="tag tag-standin">stand-in</span>}
             </p>
             <CueText text={cue.text} />
           </div>
@@ -149,16 +148,12 @@ export function LineCard({
             aria-label={`${playing === `now:${line.id}` ? "Pause" : "Play"} what plays now`}
           >
             {playing === `now:${line.id}` ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
-            <span>{actorLine.current.source === "actor" ? `${actorLine.current.by ?? "Earlier"}'s take` : "Stand-in"}</span>
+            <span>{actorLine.current.recordedBy.name}'s take</span>
           </button>
-          <span className="small muted grow placeholder-note">
-            {actorLine.current.source === "actor" ? "Plays for now. Record over it any time." : "Plays until you record yours."}
-          </span>
-          {actorLine.current.source === "actor" && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onRerecord}>
-              <RotateCcw size={15} aria-hidden="true" /> Record over
-            </button>
-          )}
+          <span className="small muted grow placeholder-note">Plays for now. Record over it any time.</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onRerecord}>
+            <RotateCcw size={15} aria-hidden="true" /> Record over
+          </button>
         </div>
       )}
       {recorded && !recording && (

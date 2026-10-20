@@ -3,9 +3,9 @@
 export interface DemoLine {
   who: string;
   text: string;
-  /** How this line is voiced in the demo, as in a real run-through. */
-  source: "actor" | "standin" | "tts" | "you";
-  /** Shown beside the name: the actor, "stand-in" or "TTS". */
+  /** How this line is voiced in the demo, as when listening for real. */
+  source: "actor" | "director" | "tts" | "you";
+  /** Shown beside the name: the actor, "director" or "TTS". */
   by: string;
 }
 
@@ -19,8 +19,8 @@ export const DEMO_LINES: DemoLine[] = [
   {
     who: "Gertrude",
     text: "Good Hamlet, cast thy nighted colour off,\nAnd let thine eye look like a friend on Denmark.",
-    source: "standin",
-    by: "stand-in",
+    source: "director",
+    by: "director",
   },
   { who: "Hamlet", text: "Ay, madam, it is common.", source: "you", by: "you" },
   { who: "Gertrude", text: "If it be,\nWhy seems it so particular with thee?", source: "tts", by: "TTS" },

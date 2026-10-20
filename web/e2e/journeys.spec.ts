@@ -126,7 +126,7 @@ test("the screen stays on while the run-through plays", async ({ page }) => {
 
   await signInAsDirector(page);
   await createProduction(page, "Hamlet (run-through)");
-  await page.getByRole("button", { name: "Run-through", exact: true }).click();
+  await page.getByRole("button", { name: "Listen", exact: true }).click();
   const play = page.getByRole("group", { name: "Playback" }).getByRole("button", { name: "Play", exact: true });
   await expect(play).toBeEnabled();
   expect(await wakeLock()).toEqual({ requested: 0, released: 0 });

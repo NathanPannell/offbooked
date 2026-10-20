@@ -107,8 +107,8 @@ export function Wrapped({
         <h1 className="wrapped-title">{partName ? `${titleCase(partName)}'s wrapped` : "You're wrapped"}</h1>
         <p className="lede">
           {emailState === "saved"
-            ? "We'll let you know when the full run-through is ready."
-            : "Every line is in. The run-through fills in as the rest of the cast records."}
+            ? "We'll let you know when the whole play is ready to listen through."
+            : "Every line is in. The play fills in as the rest of the cast records."}
         </p>
       </div>
 
@@ -122,7 +122,7 @@ export function Wrapped({
         <form className="card stack" onSubmit={submitEmail}>
           <label className="field">
             <span>
-              <Mail size={16} aria-hidden="true" /> Want an email when the full run-through is ready?
+              <Mail size={16} aria-hidden="true" /> Want an email when the whole play is ready to listen through?
             </span>
             <input
               className="input"
@@ -198,13 +198,13 @@ export function Wrapped({
         <PickUpParts
           api={api}
           onPicked={onPickedUp}
-          intro="Got time for more? These parts are free. Lines nobody has recorded yet play in the computer voice."
+          intro="Got time for more? Pick up another part. Lines nobody has recorded yet play in the computer voice."
         />
       </section>
 
       <div className="stack wrapped-actions">
         <Link className={`btn ${nextPart ? "btn-secondary" : "btn-primary btn-lg"} btn-block`} to={`/i/${token}/play${playQuery ? `?${playQuery}` : ""}`}>
-          <Headphones size={20} aria-hidden="true" /> Listen to what's recorded so far
+          <Headphones size={20} aria-hidden="true" /> Listen through what's recorded so far
         </Link>
         <Link className="btn btn-secondary btn-block" to={`/i/${token}/play?mode=mine${playQuery ? `&${playQuery}` : ""}`}>
           <Mic size={18} aria-hidden="true" /> Practise my part

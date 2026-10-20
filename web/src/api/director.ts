@@ -139,18 +139,9 @@ export const script = {
     request<{ characters: Character[] }>(`/characters/${characterId}/merge`, { auth: director, json: { intoId } }),
 };
 
-/** The director's cast page: a read-only call sheet, and recording a part themselves. */
+/** The director's cast page: a read-only call sheet. The director records a part in its studio. */
 export const cast = {
   callSheet: (productionId: string) => request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
-  /** Takes a part away from whoever has it; their takes stay and keep playing. */
-  unassign: (productionId: string, characterId: string) =>
-    request<void>(`/productions/${productionId}/characters/${characterId}/unassign`, { method: "POST", auth: director }),
-  /** Takes a free part (or one already theirs) for the director's own cast member; open `/i/<inviteToken>` to record. */
-  recordAs: (productionId: string, characterId: string) =>
-    request<{ inviteToken: string; inviteUrl: string }>(`/productions/${productionId}/record-as`, {
-      auth: director,
-      json: { characterId },
-    }),
 };
 
 /** The one link the whole cast can use to pick their characters. */
@@ -159,7 +150,7 @@ export const joinLink = {
   reset: (productionId: string) => request<{ joinUrl: string }>(`/productions/${productionId}/join-link/reset`, { method: "POST", auth: director }),
 };
 
-/** Director stand-in recordings, scene by scene. */
+/** The director's own recordings, scene by scene or part by part (the studio). */
 export const standins = {
   /** Every line a character says (shared ones too), for their studio: the same items as a scene. */
   characterLines: (productionId: string, characterId: string) =>

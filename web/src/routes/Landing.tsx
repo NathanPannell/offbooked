@@ -61,8 +61,8 @@ export function Landing() {
             Run lines with your <span className="marker">whole cast.</span> No rehearsal room required.
           </h1>
           <p className="hero-lede">
-            Upload the script, send one link, and everyone records their lines from their phone in a few minutes. Then the whole play comes back as one
-            run-through, with gaps where you speak.
+            Upload the script, send one link, and everyone records their lines from their phone in a few minutes. Then listen through the whole play, with gaps
+            where you speak.
           </p>
           <div className="hero-ctas">
             <Link className="btn btn-primary btn-lg" to={cta.to}>
@@ -75,7 +75,7 @@ export function Landing() {
 
       <section className="landing-section demo-section" id="demo" aria-labelledby="demo-title">
         <div className="section-intro">
-          <p className="eyebrow">The run-through</p>
+          <p className="eyebrow">Listen through</p>
           <h2 id="demo-title" className="section-title">
             Press play. You're Hamlet.
           </h2>
@@ -112,7 +112,7 @@ export function Landing() {
           <li className="act">
             <p className="act-label mono">Act III</p>
             <h3>Hear the whole play.</h3>
-            <p className="muted">Every take is stitched into one run-through. Practise your part with gaps where you speak.</p>
+            <p className="muted">Every take joins one play to listen through. Practise your part with gaps where you speak.</p>
             <ActGap />
           </li>
         </ol>
@@ -133,14 +133,14 @@ export function Landing() {
             <p className="muted small">Upload the script and you can already hear the whole scene.</p>
           </li>
           <li className="loop-step">
-            <span className="tag tag-standin">stand-in</span>
+            <span className="tag tag-director">you</span>
             <h3>You read in for scene partners.</h3>
             <p className="muted small">Record any line yourself, scene by scene, and it replaces the robot.</p>
           </li>
           <li className="loop-step">
             <span className="tag tag-actor">Sam</span>
             <h3>Actors replace them as they record.</h3>
-            <p className="muted small">Each take drops into the run-through within seconds.</p>
+            <p className="muted small">Each take is ready to listen to within seconds.</p>
           </li>
           <li className="loop-step">
             <span className="tag tag-score">94% word-perfect</span>
@@ -194,7 +194,7 @@ export function Landing() {
         <h2 id="cta-title" className="display">
           Places, everyone.
         </h2>
-        <p>Add your script tonight, drop one link in the cast chat, and wake up to a run-through.</p>
+        <p>Add your script tonight, drop one link in the cast chat, and wake up to the whole play, ready to listen through.</p>
         <Link className="btn btn-primary btn-lg" to={cta.to}>
           {cta.label} <ArrowRight size={18} aria-hidden="true" />
         </Link>
@@ -251,7 +251,7 @@ function HeroScene() {
         </div>
       </div>
       <div className="hero-lyrics raised">
-        <p className="mono hero-lyrics-label">Run-through</p>
+        <p className="mono hero-lyrics-label">Listen</p>
         {lyrics.map((l, i) => (
           <p key={i} className={`hero-lyric ${i === beat ? "is-current" : i < beat ? "is-past" : ""} ${l.you ? "is-you" : ""}`}>
             <span className="hero-lyric-who">
@@ -282,7 +282,7 @@ function ActParse() {
   );
 }
 
-/** Act II: the cast link, with parts claimed. */
+/** Act II: the cast link, with parts picked and recorded. */
 function ActCastLink() {
   return (
     <div className="act-ui" aria-hidden="true">
@@ -293,8 +293,8 @@ function ActCastLink() {
         </span>
       </div>
       <ul className="act-roles">
-        <li className="is-taken">
-          <strong>HAMLET</strong> <span>Taken by Sam</span>
+        <li>
+          <strong>HAMLET</strong> <span>Sam + 1</span>
         </li>
         <li className="is-picked">
           <strong>OPHELIA</strong> <span>58 lines</span>

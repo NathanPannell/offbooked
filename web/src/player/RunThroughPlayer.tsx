@@ -233,7 +233,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     navigator.mediaSession.metadata = new MediaMetadata({
       title: currentLine ? `${who ? who + ": " : ""}${currentLine.text}`.slice(0, 120) : data.production.title,
       artist: data.production.title,
-      album: section?.title ?? "Run-through",
+      album: section?.title ?? "Listen",
     });
     navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
   }, [currentLine, characterName, data, state.playing]);

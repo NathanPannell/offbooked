@@ -16,7 +16,7 @@ import { ScriptTab } from "./ScriptTab";
 const STEPS: { id: StepTab; label: string }[] = [
   { id: "script", label: "Script" },
   { id: "cast", label: "Cast" },
-  { id: "play", label: "Run-through" },
+  { id: "play", label: "Listen" },
 ];
 
 export default function ProductionPage() {
