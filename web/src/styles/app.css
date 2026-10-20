@@ -1276,18 +1276,6 @@
   outline: none;
 }
 
-.archive-confirm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-2) var(--s-3);
-}
-
-.archive-confirm p {
-  flex-basis: 100%;
-  margin: 0;
-}
-
 /* The production pages pin the Script / Cast / Run-through tabs to the top of the screen (the site
    header scrolls away), and the script and run-through pin their own row just under them. */
 .production-page {

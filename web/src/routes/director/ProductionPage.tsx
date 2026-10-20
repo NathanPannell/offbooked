@@ -5,6 +5,7 @@ import { errorMessage } from "../../api/client";
 import { productions } from "../../api/director";
 import type { Production } from "../../api/types";
 import { Loading } from "../../components/Loading";
+import { Dialog } from "../../components/Dialog";
 import { useToast } from "../../components/Toast";
 import { longDate } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
@@ -98,7 +99,7 @@ export default function ProductionPage() {
 
 /**
  * The title edits where it stands, like a script line: click it, type, Enter or click away saves,
- * Escape cancels. Archive sits beside it and asks once, in place.
+ * Escape cancels. Archive sits beside it and asks once, in a centred modal like "Make a new one".
  */
 function ProductionTitle({ production, onSaved }: { production: Production; onSaved: (p: Production) => void }) {
   const navigate = useNavigate();
@@ -106,6 +107,7 @@ function ProductionTitle({ production, onSaved }: { production: Production; onSa
   const [draft, setDraft] = useState<string | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
   const field = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
@@ -140,12 +142,16 @@ function ProductionTitle({ production, onSaved }: { production: Production; onSa
   };
 
   const archive = async () => {
+    setArchiving(true);
     try {
       await productions.archive(production.id);
       toast(`${production.title} archived`);
       navigate("/app", { replace: true });
     } catch (err) {
+      setConfirmArchive(false);
       setError(errorMessage(err));
+    } finally {
+      setArchiving(false);
     }
   };
 
@@ -173,30 +179,32 @@ function ProductionTitle({ production, onSaved }: { production: Production; onSa
         <button
           type="button"
           className="icon-btn"
-          onClick={() => setConfirmArchive((c) => !c)}
-          aria-expanded={confirmArchive}
+          onClick={() => setConfirmArchive(true)}
+          aria-haspopup="dialog"
           aria-label="Archive production"
           title="Archive production"
         >
           <Archive size={18} />
         </button>
       </div>
-      {confirmArchive && (
-        <div className="archive-confirm" role="group" aria-label="Archive this production">
-          <p className="small">
+      <Dialog open={confirmArchive} onClose={() => setConfirmArchive(false)} title={`Archive ${production.title}?`} variant="confirm">
+        <div className="stack">
+          <p>
             Archiving hides this production and turns off the cast link.{" "}
             {production.contentDeletesOn
               ? `The script and every recording are deleted on ${longDate(production.contentDeletesOn)}, 7 days after the final performance.`
               : "The script and every recording are deleted 7 days after the final performance."}
           </p>
-          <button type="button" className="btn btn-danger btn-sm" onClick={archive}>
-            Archive
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmArchive(false)}>
-            Keep it
-          </button>
+          <div className="dialog-actions">
+            <button type="button" className="btn btn-danger" onClick={() => void archive()} disabled={archiving}>
+              {archiving ? "Archiving…" : "Archive"}
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setConfirmArchive(false)} disabled={archiving} autoFocus>
+              Keep it
+            </button>
+          </div>
         </div>
-      )}
+      </Dialog>
       {error && <p className="field-error">{error}</p>}
     </>
   );
