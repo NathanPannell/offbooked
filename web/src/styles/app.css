@@ -3419,7 +3419,8 @@
 .record-main {
   max-width: 720px;
   margin: 0 auto;
-  padding: var(--s-4) var(--s-4) calc(200px + var(--safe-bottom));
+  /* Clear of the dock, whatever its height (RecordDock sets --dock-h). */
+  padding: var(--s-4) var(--s-4) calc(var(--dock-h, 200px) + 40px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -3639,19 +3640,25 @@
 
 .take-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
 }
 
+.take-actions .take-play {
+  flex-shrink: 0;
+  padding: 0 12px 0 10px;
+}
+
 .take-actions .btn {
   min-height: var(--tap);
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--ink-soft);
   white-space: nowrap;
 }
 
 .take-actions .take-play {
-  margin-right: 4px;
+  margin-right: 2px;
 }
 
 .take-actions svg {

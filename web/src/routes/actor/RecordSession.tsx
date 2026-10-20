@@ -144,8 +144,10 @@ export function RecordSession({
 
   const uploadFor = useCallback(
     (lineId: string) => {
+      // Once saved, the server's lines say whether the take is still there (it may have been deleted
+      // on an earlier visit), so only takes still on their way count from the queue.
       const item = latestForLine(myItems, token, lineId);
-      return item && !deleted.has(item.takeId) ? item : null;
+      return item && item.status !== "saved" && !deleted.has(item.takeId) ? item : null;
     },
     [myItems, token, deleted],
   );
@@ -242,7 +244,7 @@ export function RecordSession({
         serverTakeIds.current.set(item.takeId, result.take.id);
         setLinesData((current) => ({
           sections: current?.sections ?? [],
-          lines: (current?.lines ?? []).map((l) => (l.line.id === item.lineId ? { ...l, take: result.take } : l)),
+          lines: (current?.lines ?? []).map((l) => (l.line.id === item.lineId ? { ...l, take: { ...result.take, mine: true }, current: null } : l)),
         }));
         void stt.start();
         const score = scoresRef.current.get(item.lineId);

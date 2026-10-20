@@ -1,5 +1,5 @@
 import { Mic, Settings, Square } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { markMicChecked, needsMicCheck } from "../audio/micPrefs";
 import type { MicError } from "../audio/recorder";
 import { type MicStatus } from "../audio/useTakeRecorder";
@@ -47,9 +47,11 @@ export function RecordDock({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [micCheck, setMicCheck] = useState(needsMicCheck);
   const message = micStatus === "requesting" ? "Allow the microphone when your browser asks." : note;
+  const dockRef = useRef<HTMLDivElement>(null);
+  useDockHeight(dockRef);
 
   return (
-    <div className="record-dock">
+    <div className="record-dock" ref={dockRef}>
       {micError && (
         <div className="dock-help">
           <MicHelp kind={micError.kind} onRetry={onRetry} />
@@ -91,7 +93,7 @@ export function RecordDock({
             type="button"
             className="icon-btn dock-gear"
             onClick={() => setSettingsOpen(true)}
-            disabled={recording}
+            disabled={recording || micStatus === "requesting"}
             aria-label="Mic settings"
             title="Mic settings"
           >
@@ -104,4 +106,22 @@ export function RecordDock({
       </MicSettings>
     </div>
   );
+}
+
+/** Publishes the dock's height as --dock-h, so the list above always scrolls clear of it (the mic check makes it taller). */
+function useDockHeight(ref: RefObject<HTMLDivElement | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    const root = document.documentElement;
+    if (!el) return;
+    const publish = () => root.style.setProperty("--dock-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    publish();
+    if (typeof ResizeObserver === "undefined") return () => root.style.removeProperty("--dock-h");
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--dock-h");
+    };
+  }, [ref]);
 }

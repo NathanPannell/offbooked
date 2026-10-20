@@ -298,8 +298,9 @@ function SceneLines({
   const current = shown.find((l) => l.line.id === currentId) ?? null;
   const sectionTitles = new Map((data.data.sections ?? []).map((sec) => [sec.id, sec.title]));
   const uploadFor = (lineId: string) => {
+    // Once saved, the server's lines are the truth; only takes still on their way count from the queue.
     const item = latestForLine(myItems, productionId, lineId);
-    return item && !deleted.has(item.takeId) ? item : null;
+    return item && item.status !== "saved" && !deleted.has(item.takeId) ? item : null;
   };
   const shownTake = (l: SectionLine): string | null => {
     const local = localTakes.get(l.line.id);

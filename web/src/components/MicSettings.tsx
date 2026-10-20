@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { chooseMic, markMicChecked, micOptions, rememberedMic, type MicOption } from "../audio/micPrefs";
 import { recordSample } from "../audio/micTest";
 import { micConstraints, MicError, MicSession } from "../audio/recorder";
+import { silenceUrl } from "../player/silence";
 import { Waveform } from "../audio/Waveform";
 import { Dialog } from "./Dialog";
 import { MicHelp } from "./MicHelp";
@@ -52,6 +53,13 @@ function useMicTest() {
   /** Call from a tap: the browser may ask for the mic. */
   const run = useCallback(async () => {
     cleanUp();
+    // iOS only lets an element play sound once it has played from a tap, and the clip arrives seconds
+    // later: start the element on a moment of silence now, then play the clip on it.
+    const a = (audio.current ??= new Audio());
+    a.onended = null;
+    a.onerror = null;
+    a.src = silenceUrl(50);
+    void a.play().catch(() => {});
     const session = new MicSession(micConstraints(rememberedMic()));
     mic.current = session;
     setState({ status: "listening" });
@@ -75,16 +83,25 @@ function useMicTest() {
 }
 
 /**
- * Record a few seconds, then hear them back. `onHeard` fires once the playback has been heard;
- * `doneAction` sits beside "Did you hear yourself?" then.
+ * Record a few seconds, then hear them back. `onHeard` says whether the playback has been heard
+ * (false again while a new test runs or after it fails); `doneAction` sits beside "Did you hear
+ * yourself?".
  */
-export function MicTest({ startLabel = "Test my mic", onHeard, doneAction }: { startLabel?: string; onHeard?: () => void; doneAction?: ReactNode }) {
+export function MicTest({
+  startLabel = "Test my mic",
+  onHeard,
+  doneAction,
+}: {
+  startLabel?: string;
+  onHeard?: (heard: boolean) => void;
+  doneAction?: ReactNode;
+}) {
   const { state, analyser, run, play } = useMicTest();
   const heard = state.status === "heard";
   const onHeardRef = useRef(onHeard);
   onHeardRef.current = onHeard;
   useEffect(() => {
-    if (heard) onHeardRef.current?.();
+    onHeardRef.current?.(heard);
   }, [heard]);
 
   if (state.status === "error") return <MicHelp kind={state.error.kind} onRetry={() => void run()} />;
@@ -190,7 +207,7 @@ export function MicSettings({
         </label>
         <section className="stack mic-settings-test">
           <h3 className="eyebrow">Test your mic</h3>
-          <MicTest onHeard={refresh} />
+          <MicTest onHeard={(heard) => heard && refresh()} />
         </section>
         {children && <div className="mic-settings-options">{children}</div>}
       </div>
@@ -213,7 +230,7 @@ export function FirstMicCheck({ onDone }: { onDone: () => void }) {
       <div className="first-mic-check-row">
         <MicTest
           startLabel="Check my mic"
-          onHeard={() => setHeard(true)}
+          onHeard={setHeard}
           doneAction={
             <button type="button" className="btn btn-primary btn-sm" onClick={finish}>
               Sounds good
