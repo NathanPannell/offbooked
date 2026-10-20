@@ -3,7 +3,8 @@ import { requireActor, type ActorSession } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { notifyActorsDone } from "../email/notify.ts";
 import { badRequest, notFound } from "../errors.ts";
-import { body, idOf, idParam, requiredEmail, requiredString, uuidList } from "../input.ts";
+import { requestVerification } from "../email/verify.ts";
+import { body, idOf, idParam, optionalEmail, requiredString, uuidList } from "../input.ts";
 import { cueViews, previousCue, saysLine, warmCues } from "../lineaudio.ts";
 import { scheduleRender } from "../render/queue.ts";
 import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
@@ -65,6 +66,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
       linesTotal: c.linesTotal,
       linesRecorded: c.linesRecorded,
       hasEmail: Boolean(s.actor.email),
+      pendingEmail: Boolean(s.actor.pendingEmail),
     };
   });
 
@@ -215,11 +217,11 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     return reply.code(204).send();
   });
 
-  app.post("/api/invite/contact", async (req, reply) => {
+  // Sends a verification link to the address (or again to the one waiting, without `email`). Only a
+  // verified address gets the completion emails or keeps the cast member's details after the show.
+  app.post("/api/invite/contact", async (req) => {
     const s = await requireActor(ctx, req);
-    const email = requiredEmail(body(req.body), "email");
-    await sql`update actors set email = ${email} where id = ${s.actor.id}`;
-    return reply.code(204).send();
+    return requestVerification(ctx, s, optionalEmail(body(req.body), "email"), req.ip);
   });
 
   app.get("/api/invite/runthrough", async (req) => {

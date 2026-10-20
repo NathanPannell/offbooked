@@ -245,6 +245,13 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
 
     const unsubscribe = new URL(/Unsubscribe: (\S+)/.exec(actorEmail.text)![1]!);
     assert.equal((await t.app.inject({ method: "GET", url: unsubscribe.pathname + unsubscribe.search })).statusCode, 200);
+    const oneClick = await t.app.inject({
+      method: "POST",
+      url: unsubscribe.pathname + unsubscribe.search,
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "List-Unsubscribe=One-Click",
+    });
+    assert.equal(oneClick.statusCode, 200, "the one-click List-Unsubscribe form post");
   });
 
   test("practice runs and contact email", async () => {
@@ -257,10 +264,14 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().practice.avgAccuracy, 0.75);
-    assert.equal(
-      (await t.app.inject({ method: "POST", url: "/api/invite/contact", headers: as(hamlet), payload: { email: "riz@example.test" } })).statusCode,
-      204,
-    );
+    const contact = await t.app.inject({ method: "POST", url: "/api/invite/contact", headers: as(hamlet), payload: { email: "riz@example.test" } });
+    assert.equal(contact.statusCode, 200);
+    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: as(hamlet) })).json().hasEmail, false, "not until it is confirmed");
+    const link = new URL(contact.json().devLink);
+    assert.equal((await t.app.inject({ method: "GET", url: link.pathname + link.search })).statusCode, 200);
+    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: as(hamlet) })).json().hasEmail, false, "opening the link isn't enough");
+    const confirm = await t.app.inject({ method: "POST", url: link.pathname, payload: Object.fromEntries(link.searchParams) });
+    assert.equal(confirm.statusCode, 200, "the Confirm button's fields work as JSON too");
     assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: as(hamlet) })).json().hasEmail, true);
   });
 
