@@ -141,7 +141,7 @@ export const script = {
 
 /** The director's cast page: a read-only call sheet. The director records a part in its studio. */
 export const cast = {
-  callSheet: (productionId: string) => request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
+  callSheet: (productionId: string) => request<{ characters: CallSheetCharacter[]; lines: { total: number; recorded: number } }>(`/productions/${productionId}/call-sheet`, { auth: director }),
 };
 
 /** The one link the whole cast can use to pick their characters. */

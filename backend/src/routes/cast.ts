@@ -85,7 +85,9 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // The call sheet: every speaking character with its lines, how many are recorded (by anyone,
   // shared lines included) and who recorded most of them. Groups ("ALL", "ANGELO, ESCALUS") aren't
-  // parts, so they aren't listed. `mine`: the director has recorded some of its lines.
+  // parts, so they aren't listed. `mine`: the director has recorded some of its lines. `lines` counts the
+  // script's dialogue lines once each, like the script page and the production card; a shared line is
+  // under every part that says it, so the parts' counts add up to more.
   app.get("/api/productions/:id/call-sheet", async (req) => {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, idOf(req.params));
@@ -105,6 +107,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
     inferInBackground(ctx, p.id);
     return {
       characters: rows.filter((c) => c.lineCount > 0).map((c) => ({ ...c, topRecorder: top.get(c.id) ?? null, mine: mine.has(c.id) })),
+      lines: { total: p.linesTotal, recorded: p.linesRecorded },
     };
   });
 

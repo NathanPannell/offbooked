@@ -326,7 +326,7 @@ The director's cast page shows the cast link, a read-only call sheet and a way t
 
 | Method | Path | Auth | Response |
 | --- | --- | --- | --- |
-| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, topRecorder: { name, others } \| null, mine: boolean }[] }`: every character with dialogue, biggest parts first. Changed 2026-10-20, see "Open parts". |
+| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, topRecorder: { name, others } \| null, mine: boolean }[], lines: { total, recorded } }`: every character with dialogue, biggest parts first. `lines` counts the script's dialogue lines once each (the production's `progress`); a shared line is under each part that says it, so the parts add up to more. Changed 2026-10-20, see "Open parts". |
 
 - `POST /api/productions/:id/record-as` (the director's own cast member) was removed on 2026-10-20: the director records any part in its studio (`PUT /api/lines/:id/take`). Its old takes became director takes (migration `014_open_parts.sql`).
 

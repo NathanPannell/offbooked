@@ -4975,3 +4975,30 @@
 .name-prompt-close {
   margin-top: -8px;
 }
+
+/* The cast page's name line: under the share button, one quiet line until you change it. */
+.name-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+  color: var(--muted);
+}
+
+.name-line .link-btn {
+  font-size: inherit;
+}
+
+.name-line-close {
+  margin: -10px -8px -10px 0;
+}
+
+.name-line-form .input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.name-line-form .field-error {
+  flex-basis: 100%;
+}

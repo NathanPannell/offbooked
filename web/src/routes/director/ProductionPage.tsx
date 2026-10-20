@@ -10,6 +10,7 @@ import { longDate } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
 import { CastTab } from "./CastTab";
 import { nextStep, type StepTab } from "./nextStep";
+import { useLinkShared } from "../../lib/linkShared";
 import { RunThroughTab } from "./RunThroughTab";
 import { ScriptTab } from "./ScriptTab";
 
@@ -23,6 +24,7 @@ export default function ProductionPage() {
   const { id = "" } = useParams();
   const [params, setParams] = useSearchParams();
   const production = useResource(() => productions.get(id).then((r) => r.production), id);
+  const shared = useLinkShared(id);
 
   if (production.loading) return <Loading />;
   if (production.error || !production.data) {
@@ -62,8 +64,9 @@ export default function ProductionPage() {
       <div className="steps-bar">
         <nav className="steps" aria-label="Production steps">
           {STEPS.map((s, i) => {
-            // The step to go to next gets a small marker until you're on it.
-            const isNext = !next.done && next.tab === s.id && tab !== s.id && !done[s.id];
+            // The step to go to next gets a small marker until you're on it. Cast's job is sharing the
+            // link, so once it has been copied or shared the marker goes for good.
+            const isNext = !next.done && next.tab === s.id && tab !== s.id && !done[s.id] && !(s.id === "cast" && shared);
             return (
               <button
                 key={s.id}
