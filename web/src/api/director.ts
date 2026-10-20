@@ -55,11 +55,17 @@ export const auth = {
   logout: () => request<void>("/auth/logout", { method: "POST", auth: director }),
 };
 
+/** YYYY-MM-DD. A new production without a final date gets one a year out; an update can't clear it. */
+export interface PerformanceDates {
+  performanceStartsOn?: string | null;
+  performanceEndsOn?: string;
+}
+
 export const productions = {
   list: () => request<{ productions: Production[] }>("/productions", { auth: director }),
-  create: (input: { title: string; performanceDate?: string | null }) => request<{ production: Production }>("/productions", { auth: director, json: input }),
+  create: (input: { title: string } & PerformanceDates) => request<{ production: Production }>("/productions", { auth: director, json: input }),
   get: (id: string) => request<{ production: Production }>(`/productions/${id}`, { auth: director }),
-  update: (id: string, input: { title?: string; performanceDate?: string | null }) =>
+  update: (id: string, input: { title?: string } & PerformanceDates) =>
     request<{ production: Production }>(`/productions/${id}`, { method: "PATCH", auth: director, json: input }),
   archive: (id: string) => request<void>(`/productions/${id}/archive`, { method: "POST", auth: director }),
   runthrough: (id: string) => request<RunThrough>(`/productions/${id}/runthrough`, { auth: director }),

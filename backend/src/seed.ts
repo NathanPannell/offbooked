@@ -55,7 +55,8 @@ try {
 
 async function createDemo(ownerId: string): Promise<{ id: string }> {
   const [p] = await sql<{ id: string }[]>`
-    insert into productions (owner_id, title, performance_date) values (${ownerId}, ${SEED_TITLE}, current_date + 60) returning id`;
+    insert into productions (owner_id, title, performance_starts_on, performance_ends_on)
+    values (${ownerId}, ${SEED_TITLE}, current_date + 53, current_date + 60) returning id`;
   await startScriptParse(ctx, p!.id, { kind: "text", text: SEED_SCENE });
   await ctx.jobs.idle();
   const characters = new Map(

@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Ctx } from "../context.ts";
+import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { encodeCue, normalizeClip } from "./ffmpeg.ts";
 
 export interface TakeAudioRow {
@@ -66,6 +67,7 @@ async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { 
       await writeFile(flac, await storage.get(have.normalizedKey));
       await encodeCue(flac, m4a);
       await storage.put(streamKey, await readFile(m4a), "audio/mp4");
+      if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();
       await sql`update takes set stream_key = ${streamKey} where id = ${take.id}`;
       return { ...have, streamKey };
     }
@@ -74,6 +76,7 @@ async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { 
     const samples = await normalizeClip(source, flac, m4a, { clean: true });
     const normalizedKey = `productions/${productionId}/normalized/${take.id}.${NORMALIZE_VERSION}.flac`;
     await Promise.all([storage.put(normalizedKey, await readFile(flac), "audio/flac"), storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
+    if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();
     await sql`update takes set normalized_key = ${normalizedKey}, normalized_samples = ${samples}, stream_key = ${streamKey} where id = ${take.id}`;
     return { normalizedKey, samples, streamKey };
   } finally {

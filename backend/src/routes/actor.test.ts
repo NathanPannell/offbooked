@@ -274,13 +274,15 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     );
     assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) })).statusCode, 200);
 
-    await t.app.inject({ method: "PATCH", url: `/api/productions/${pid}`, headers: bearer(director), payload: { performanceDate: "2020-01-01" } });
+    // The API refuses a final date this far back; an old production (or time passing) has one.
+    const [{ endsOn }] = await t.ctx.sql<{ endsOn: string }[]>`select performance_ends_on::text as ends_on from productions where id = ${pid}`;
+    await t.ctx.sql`update productions set performance_ends_on = '2020-01-01' where id = ${pid}`;
     assert.equal(
       (await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) })).statusCode,
       410,
-      "expired 14 days after the performance",
+      "expired when the content is due for deletion, 7 days after the final performance",
     );
-    await t.app.inject({ method: "PATCH", url: `/api/productions/${pid}`, headers: bearer(director), payload: { performanceDate: null } });
+    await t.ctx.sql`update productions set performance_ends_on = ${endsOn} where id = ${pid}`;
     await t.app.inject({ method: "POST", url: `/api/productions/${pid}/archive`, headers: bearer(director) });
     const archived = await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) });
     assert.equal(archived.statusCode, 410);

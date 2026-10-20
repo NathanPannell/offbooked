@@ -8,6 +8,7 @@ import { HttpError, badRequest, conflict, notFound } from "./errors.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
 import { probeDurationSeconds } from "./render/ffmpeg.ts";
 import { scheduleRender } from "./render/queue.ts";
+import { ContentDeletedError, sweepIfDeleted } from "./retention.ts";
 import { takeColumns, takeView, type TakeRow } from "./views.ts";
 
 // Take uploads, shared by the actor endpoint and the director's stand-in endpoint: same body,
@@ -110,10 +111,11 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
   if (durationMs === null) throw badRequest("We couldn't read that recording. Try recording it again.");
   if (durationMs > MAX_TAKE_MS) throw badRequest("That take is over an hour long. Record it in shorter pieces.");
 
-  // The newest take is current, whoever recorded it. Older takes are kept forever.
+  // The newest take is current, whoever recorded it. Older takes are kept until the production's content is deleted (retention.ts).
   const voiceId = u.voiceId ? await u.voiceId() : null;
   const key = `productions/${u.productionId}/takes/${id}.${ext}`;
   await storage.put(key, audio, contentType);
+  if (await sweepIfDeleted(ctx, u.productionId)) throw new HttpError(410, "content_deleted", new ContentDeletedError().message);
   await sql.begin(async (tx) => {
     const [inserted] = await tx`
       insert into takes (id, production_id, line_id, actor_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms, character_id)

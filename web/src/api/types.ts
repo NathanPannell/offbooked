@@ -76,7 +76,11 @@ export type ScriptStatus = "none" | "parsing" | "ready" | "failed";
 export interface Production {
   id: string;
   title: string;
-  performanceDate: string | null;
+  /** First and final performance, YYYY-MM-DD. Every production has a final date. */
+  performanceStartsOn: string | null;
+  performanceEndsOn: string | null;
+  /** The day the script and recordings are deleted for good: the final performance + 7 days. */
+  contentDeletesOn: string | null;
   createdAt: string;
   archived: boolean;
   scriptStatus: ScriptStatus;
