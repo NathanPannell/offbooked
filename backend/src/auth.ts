@@ -40,7 +40,8 @@ export async function ownedProduction(ctx: Ctx, user: Director, productionId: st
 }
 
 export interface ActorSession {
-  actor: { id: string; name: string; firstName: string | null; email: string | null; tokenVersion: number; createdAt: Date };
+  // `email` is the verified address only; `pendingEmail` is waiting for its verification link.
+  actor: { id: string; name: string; firstName: string | null; email: string | null; pendingEmail: string | null; tokenVersion: number; createdAt: Date };
   production: { id: string; title: string; performanceEndsOn: string | null; directorName: string };
   characterIds: string[];
 }
@@ -58,6 +59,7 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
       name: string;
       firstName: string | null;
       email: string | null;
+      pendingEmail: string | null;
       tokenVersion: number;
       createdAt: Date;
       productionId: string;
@@ -68,7 +70,8 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
       directorEmail: string;
     }[]
   >`
-    select a.id, a.name, a.first_name, a.email, a.token_version, a.created_at, p.id as production_id, p.title,
+    select a.id, a.name, a.first_name, case when a.email_verified_at is not null then nullif(btrim(a.email), '') end as email,
+      a.pending_email, a.token_version, a.created_at, p.id as production_id, p.title,
       p.performance_ends_on::text as performance_ends_on, p.archived_at, u.name as director_name,
       u.email as director_email
     from actors a join productions p on p.id = a.production_id join users u on u.id = p.owner_id
@@ -83,7 +86,15 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
   const chars = await ctx.sql<{ characterId: string }[]>`select character_id from actor_characters where actor_id = ${row.id}`;
   await ctx.sql`update actors set last_active_at = now() where id = ${row.id}`;
   return {
-    actor: { id: row.id, name: row.name, firstName: row.firstName, email: row.email, tokenVersion: row.tokenVersion, createdAt: row.createdAt },
+    actor: {
+      id: row.id,
+      name: row.name,
+      firstName: row.firstName,
+      email: row.email,
+      pendingEmail: row.pendingEmail,
+      tokenVersion: row.tokenVersion,
+      createdAt: row.createdAt,
+    },
     production: { id: row.productionId, title: row.title, performanceEndsOn: row.performanceEndsOn, directorName },
     characterIds: chars.map((c) => c.characterId),
   };

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "react-router";
 import { actorApi } from "../../api/actor";
 import { ApiError, errorMessage } from "../../api/client";
@@ -22,6 +22,29 @@ export default function InvitePage() {
   const [intro, setIntro] = useState(() => !onboardingSeen());
   // Load the speech model while they read the welcome and type a name.
   usePrewarmStt(!!invite.data);
+
+  // Coming back to the page (from the email's confirm page in another tab, say): one GET, so the
+  // profile and Wrapped's prompt show where the email stands. Not a poll.
+  const loaded = !!invite.data;
+  const setInvite = invite.setData;
+  useEffect(() => {
+    if (!loaded) return;
+    let last = 0;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < 2000) return;
+      last = Date.now();
+      api
+        .invite()
+        .then((fresh) => setInvite((cur) => (cur ? { ...cur, hasEmail: fresh.hasEmail, pendingEmail: fresh.pendingEmail } : fresh)))
+        .catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [loaded, api, setInvite]);
 
   if (invite.loading) return <Loading />;
   if (invite.error instanceof ApiError && invite.error.status === 410) return <LinkGone body={invite.error.body} token={token} />;
@@ -67,7 +90,7 @@ export default function InvitePage() {
       api={api}
       invite={data}
       onRenamed={(actor) => invite.setData({ ...data, actor: { ...data.actor, name: actor.name, firstName: actor.firstName } })}
-      onEmailSaved={() => invite.setData({ ...data, hasEmail: true })}
+      onEmailChanged={(email) => invite.setData((cur) => ({ ...(cur ?? data), ...email }))}
       onPartsChanged={(characters) => invite.setData({ ...data, characters })}
     />
   );

@@ -249,7 +249,20 @@ export interface Invite {
   characters: { id: string; name: string }[];
   linesTotal: number;
   linesRecorded: number;
+  /** A verified email: the only kind that gets the ready-to-listen-through email. */
   hasEmail: boolean;
+  /** An address waiting for its verification link. */
+  pendingEmail: boolean;
+}
+
+/** Where a cast member's email stands, after asking for a verification link. */
+export interface EmailState {
+  hasEmail: boolean;
+  pendingEmail: boolean;
+  /** This request sent a verification email (false: nothing waiting, or that address is already verified). */
+  sent: boolean;
+  /** The verification link, when the server logs emails instead of sending them (local runs). */
+  devLink?: string;
 }
 
 export interface Cue {

@@ -47,6 +47,16 @@ export function signInEmail(to: string, link: string): Email {
   });
 }
 
+export function verifyEmailEmail(to: string, p: { title: string; url: string }): Email {
+  return render(to, {
+    subject: "Confirm your email for Offbooked",
+    heading: "Confirm your email",
+    paragraphs: [`Tap the button and we'll email you when ${p.title} is ready to listen through.`],
+    button: { label: "Confirm my email", url: p.url },
+    footer: "If you didn't ask for this, you can ignore this email.",
+  });
+}
+
 export function actorDoneEmail(to: string, p: { actorName: string; lines: number; title: string; url: string }): Email {
   return render(to, {
     subject: `${p.actorName} finished all ${p.lines} lines`,

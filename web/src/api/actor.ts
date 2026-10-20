@@ -1,5 +1,5 @@
 import { request, type Auth } from "./client";
-import type { ActorLine, Invite, LineAudio, LineAudioApi, PartCard, RunThrough, Section, SttResult, Take } from "./types";
+import type { ActorLine, EmailState, Invite, LineAudio, LineAudioApi, PartCard, RunThrough, Section, SttResult, Take } from "./types";
 
 export interface TakeUploadResult {
   take: Take;
@@ -64,7 +64,8 @@ export function actorApi(token: string) {
         },
       }),
     postStt: (takeId: string, result: SttResult) => request<void>(`/invite/takes/${takeId}/stt`, { auth, json: result }),
-    contact: (email: string) => request<void>("/invite/contact", { auth, json: { email } }),
+    /** Sends a link to verify the address; without one, sends it again to the address waiting. */
+    contact: (email?: string) => request<EmailState>("/invite/contact", { auth, json: email ? { email } : {} }),
     runthrough: () => request<RunThrough>("/invite/runthrough", { auth }),
     /** Line-by-line audio for the run-through player, and for cues that aren't ready yet. */
     lineAudio: {
