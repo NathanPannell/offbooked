@@ -67,6 +67,11 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText(/^Your cast will see “Director /)).toHaveCount(0);
 
+  // The dates reached the server: archiving says the day everything is deleted.
+  await page.getByRole("button", { name: "Archive production" }).click();
+  await expect(page.getByText(/The script and every recording are deleted on .+, 7 days after the final performance\./)).toBeVisible();
+  await page.getByRole("button", { name: "Keep it" }).click();
+
   await page.getByRole("button", { name: "Copy the cast link" }).click();
   await expect(page.getByText("Link copied")).toBeVisible();
   const joinUrl = await page.evaluate(() => navigator.clipboard.readText());
