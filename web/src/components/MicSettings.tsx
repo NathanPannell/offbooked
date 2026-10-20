@@ -1,6 +1,7 @@
 import { Mic, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { chooseMic, markMicChecked, micOptions, rememberedMic, type MicOption } from "../audio/micPrefs";
+import { recordSample } from "../audio/micTest";
 import { micConstraints, MicError, MicSession } from "../audio/recorder";
 import { Waveform } from "../audio/Waveform";
 import { Dialog } from "./Dialog";
@@ -55,24 +56,18 @@ function useMicTest() {
     mic.current = session;
     setState({ status: "listening" });
     try {
-      await session.open();
-      setAnalyser(session.analyser);
-      const take = session.start(TEST_MS + 1000, () => {});
-      await new Promise((r) => setTimeout(r, TEST_MS));
-      const clip = await take.stop();
-      session.close();
+      const blob = await recordSample(session, TEST_MS, { onListening: () => setAnalyser(session.analyser) });
       if (!alive.current || mic.current !== session) return;
       mic.current = null;
       setAnalyser(null);
       if (url.current) URL.revokeObjectURL(url.current);
-      url.current = URL.createObjectURL(clip.blob);
+      url.current = URL.createObjectURL(blob);
       play(url.current);
     } catch (err) {
-      session.close();
       if (!alive.current || mic.current !== session) return;
       mic.current = null;
       setAnalyser(null);
-      setState({ status: "error", error: err instanceof MicError ? err : new MicError("unknown", "The microphone didn't start.") });
+      setState({ status: "error", error: err as MicError });
     }
   }, [cleanUp, play]);
 
