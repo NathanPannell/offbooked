@@ -13,7 +13,7 @@ interface RenderRow {
 
 // Status comes from the newest job; audio and timing from the newest finished render, so the
 // last good run-through keeps playing while a new one builds. Stale means the inputs changed: a
-// new take or stand-in, an edited line, or a different TTS voice or engine.
+// new take, an edited line, or a different TTS voice or engine.
 export async function renderView(ctx: Ctx, productionId: string) {
   const [latest] = await ctx.sql<RenderRow[]>`
     select status, storage_key, duration_ms, timing, content_hash, finished_at from renders

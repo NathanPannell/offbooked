@@ -39,9 +39,9 @@ describe("speeds", () => {
 });
 
 describe("audio source", () => {
-  it("tags everything but the cast's own takes", () => {
+  it("tags everything but recordings", () => {
     expect(audioSourceTag("actor")).toBeNull();
-    expect(audioSourceTag("standin")).toBe("stand-in");
+    expect(audioSourceTag("director")).toBeNull();
     expect(audioSourceTag("tts")).toBe("TTS");
     expect(audioSourceTag("none")).toBe("silent");
   });

@@ -13,15 +13,16 @@ interface Sheet {
   name: string;
   lineCount: number;
   linesRecorded: number;
-  takenBy: string | null;
+  topRecorder: { name: string; others: number } | null;
   mine: boolean;
 }
 
-describe("call sheet and recording a part yourself", { skip: dbSkip }, () => {
+describe("call sheet: open parts, top recorders and the director's takes", { skip: dbSkip }, () => {
   let t: TestApp;
   let alice: string;
   let bob: string;
   let pid: string;
+  let joinToken: string;
   let chars: Map<string, string>;
   let lines: { id: string; kind: string; characterId: string | null }[];
   let wav: Buffer;
@@ -30,13 +31,27 @@ describe("call sheet and recording a part yourself", { skip: dbSkip }, () => {
   const sheet = async () => (await get(`/api/productions/${pid}/call-sheet`)).json().characters as Sheet[];
   const row = async (name: string) => (await sheet()).find((c) => c.name === name)!;
   const asInvite = (token: string) => ({ authorization: `Invite ${token}` });
+  const audio = { "content-type": "audio/wav", "x-duration-ms": "700" };
   const upload = (token: string, lineId: string) =>
     t.app.inject({
       method: "PUT",
       url: `/api/invite/lines/${lineId}/take`,
-      headers: { ...asInvite(token), "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "700" },
+      headers: { ...asInvite(token), ...audio, "x-take-id": randomUUID() },
       payload: wav,
     });
+  const directorTake = (lineId: string) =>
+    t.app.inject({ method: "PUT", url: `/api/lines/${lineId}/take`, headers: { ...bearer(alice), ...audio, "x-take-id": randomUUID() }, payload: wav });
+  const linesOf = (name: string) => lines.filter((l) => l.kind === "dialogue" && l.characterId === chars.get(name));
+  const claim = async (firstName: string, names: string[]) => {
+    const res = await t.app.inject({
+      method: "POST",
+      url: `/api/join/${joinToken}/claim`,
+      payload: { firstName, characterIds: names.map((n) => chars.get(n)) },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    return res.json().inviteToken as string;
+  };
+  const cards = async () => (await t.app.inject({ method: "GET", url: `/api/join/${joinToken}` })).json().characters as (Sheet & { linesNeeded: number })[];
 
   before(async () => {
     t = await createTestApp();
@@ -51,83 +66,91 @@ describe("call sheet and recording a part yourself", { skip: dbSkip }, () => {
     pid = made.id;
     lines = made.script.lines;
     chars = new Map(made.script.characters.map((c: { name: string; id: string }) => [c.name, c.id]));
+    joinToken = (await get(`/api/productions/${pid}/join-link`)).json().joinUrl.split("/join/")[1];
   });
   after(() => t.close());
 
-  test("the call sheet lists speaking characters with who took them and their progress", async () => {
+  test("before anyone records, no part has a recorder", async () => {
     const empty = await sheet();
     assert.ok(empty.length > 0);
-    assert.ok(empty.every((c) => c.lineCount > 0 && c.linesRecorded === 0 && c.takenBy === null && !c.mine));
+    assert.ok(empty.every((c) => c.lineCount > 0 && c.linesRecorded === 0 && c.topRecorder === null && !c.mine));
+    assert.ok(empty.every((c) => !("takenBy" in c) && !("sharedLines" in c)));
     assert.deepEqual(
       empty.map((c) => c.lineCount),
       [...empty.map((c) => c.lineCount)].sort((a, b) => b - a),
       "biggest parts first",
     );
     assert.equal((await get(`/api/productions/${pid}/call-sheet`, bob)).statusCode, 404, "only the owner sees it");
-
-    const { joinUrl } = (await get(`/api/productions/${pid}/join-link`)).json();
-    const claim = await t.app.inject({
-      method: "POST",
-      url: `/api/join/${joinUrl.split("/join/")[1]}/claim`,
-      payload: { firstName: "Riz", characterIds: [chars.get("HAMLET")] },
-    });
-    const hamletLine = lines.find((l) => l.kind === "dialogue" && l.characterId === chars.get("HAMLET"))!;
-    assert.equal((await upload(claim.json().inviteToken, hamletLine.id)).statusCode, 200);
-    const hamlet = await row("HAMLET");
-    assert.equal(hamlet.takenBy, "Riz");
-    assert.equal(hamlet.linesRecorded, 1);
-    assert.equal(hamlet.mine, false);
   });
 
-  test("the director records a part through their own cast member, reused across parts", async () => {
-    const horatio = chars.get("HORATIO")!;
-    const res = await post(`/api/productions/${pid}/record-as`, { characterId: horatio });
-    assert.equal(res.statusCode, 200);
-    const { inviteToken, inviteUrl } = res.json();
-    assert.ok(inviteUrl.endsWith(`/i/${inviteToken}`));
+  test("two people can pick the same part; the label is whoever recorded most, plus the others", async () => {
+    const riz = await claim("Riz", ["HAMLET"]);
+    const jo = await claim("Jo", ["HAMLET", "QUEEN"]);
+    const hamlet = linesOf("HAMLET");
+    assert.equal((await upload(riz, hamlet[0]!.id)).statusCode, 200);
+    assert.deepEqual((await row("HAMLET")).topRecorder, { name: "Riz", others: 0 });
+    assert.deepEqual((await cards()).find((c) => c.name === "HAMLET")!.topRecorder, { name: "Riz", others: 0 }, "the join page shows the same label");
 
-    const invite = (await t.app.inject({ method: "GET", url: "/api/invite", headers: asInvite(inviteToken) })).json();
-    assert.deepEqual(
-      invite.characters.map((c: { name: string }) => c.name),
-      ["HORATIO"],
-    );
-    assert.equal(invite.actor.firstName, "Alice", "named already, so the welcome step is skipped");
+    assert.equal((await upload(jo, hamlet[1]!.id)).statusCode, 200);
+    assert.equal((await upload(jo, hamlet[2]!.id)).statusCode, 200);
+    assert.deepEqual((await row("HAMLET")).topRecorder, { name: "Jo", others: 1 });
 
-    const again = (await post(`/api/productions/${pid}/record-as`, { characterId: horatio })).json();
-    assert.equal(again.inviteToken, inviteToken, "picking the same part again reuses the link");
-
-    const marcellus = chars.get("MARCELLUS")!;
-    const second = (await post(`/api/productions/${pid}/record-as`, { characterId: marcellus })).json();
-    assert.equal(second.inviteToken, inviteToken, "one cast member for the director per production");
-    const both = (await t.app.inject({ method: "GET", url: "/api/invite", headers: asInvite(inviteToken) })).json();
-    assert.deepEqual(both.characters.map((c: { name: string }) => c.name).sort(), ["HORATIO", "MARCELLUS"]);
-
-    const h = await row("HORATIO");
-    assert.equal(h.takenBy, "Alice");
+    // The director records a line too: one more recorder, and HAMLET is one of the director's roles.
+    assert.equal((await directorTake(hamlet[3]!.id)).statusCode, 200);
+    const h = await row("HAMLET");
+    assert.deepEqual(h.topRecorder, { name: "Jo", others: 2 });
+    assert.equal(h.linesRecorded, 4);
     assert.equal(h.mine, true);
+    assert.equal((await row("QUEEN")).mine, false);
 
-    // Recording every line of a part counts as progress but sends no "finished" email to the director.
-    const mine = lines.filter((l) => l.kind === "dialogue" && l.characterId === marcellus);
-    for (const l of mine) assert.equal((await upload(inviteToken, l.id)).statusCode, 200);
-    await t.ctx.jobs.idle();
-    assert.equal((await row("MARCELLUS")).linesRecorded, mine.length);
-    assert.ok(!t.mailer.sent.some((m) => /finished all/.test(m.subject)));
+    // Recording over someone's line moves it to the new recorder: Riz's only line goes to Jo.
+    assert.equal((await upload(jo, hamlet[0]!.id)).statusCode, 200);
+    assert.deepEqual((await row("HAMLET")).topRecorder, { name: "Jo", others: 1 });
   });
 
-  test("a part someone else has taken, a foreign character, bad input and other directors are refused", async () => {
-    const taken = await post(`/api/productions/${pid}/record-as`, { characterId: chars.get("HAMLET") });
-    assert.equal(taken.statusCode, 409);
-    assert.equal(taken.json().error.code, "character_taken");
-    assert.equal((await post(`/api/productions/${pid}/record-as`, { characterId: randomUUID() })).statusCode, 404);
-    assert.equal((await post(`/api/productions/${pid}/record-as`, { characterId: "nope" })).statusCode, 400);
-    assert.equal((await post(`/api/productions/${pid}/record-as`, { characterId: chars.get("HORATIO") }, bob)).statusCode, 404);
+  test("the director's takes count towards progress and the join page's cards", async () => {
+    const marcellus = linesOf("MARCELLUS");
+    const before = (await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded;
+    for (const l of marcellus) assert.equal((await directorTake(l.id)).statusCode, 200);
+    const m = await row("MARCELLUS");
+    assert.equal(m.linesRecorded, marcellus.length);
+    assert.deepEqual(m.topRecorder, { name: "Alice", others: 0 }, "the director's first name, as the cast sees it");
+    assert.equal(m.mine, true);
+    assert.equal((await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded, before + marcellus.length);
+    const card = (await cards()).find((c) => c.name === "MARCELLUS")!;
+    assert.deepEqual([card.linesRecorded, card.linesNeeded, card.topRecorder], [marcellus.length, 0, { name: "Alice", others: 0 }]);
+  });
 
-    const { joinUrl } = (await get(`/api/productions/${pid}/join-link`)).json();
-    const steal = await t.app.inject({
-      method: "POST",
-      url: `/api/join/${joinUrl.split("/join/")[1]}/claim`,
-      payload: { firstName: "Jo", characterIds: [chars.get("HORATIO")] },
-    });
-    assert.equal(steal.statusCode, 409, "the cast link can't claim a part the director is recording");
+  test("the director's takes finish a cast member's lines: actor progress and the email", async () => {
+    const sam = await claim("Sam", ["QUEEN"]);
+    const [first, ...rest] = linesOf("QUEEN");
+    assert.equal((await upload(sam, first!.id)).statusCode, 200);
+    for (const l of rest) assert.equal((await directorTake(l.id)).statusCode, 200);
+    await t.ctx.jobs.idle();
+    const invite = (await t.app.inject({ method: "GET", url: "/api/invite", headers: asInvite(sam) })).json();
+    assert.equal(invite.linesRecorded, invite.linesTotal);
+    assert.ok(t.mailer.sent.some((m) => m.subject === `Sam finished all ${invite.linesTotal} lines`));
+    const items = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: asInvite(sam) })).json().lines;
+    assert.deepEqual(items[1].current.recordedBy, { kind: "director", name: "Alice" });
+    assert.equal(items[1].current.mine, false);
+  });
+
+  test("no actor-done email for someone who recorded none of their lines, or for a second pick of a finished part", async () => {
+    const zed = await claim("Zed", ["POLONIUS"]);
+    for (const l of linesOf("POLONIUS")) assert.equal((await directorTake(l.id)).statusCode, 200);
+    await claim("Sam", ["QUEEN"]); // Sam again, on another phone
+    assert.equal((await directorTake(linesOf("KING")[0]!.id)).statusCode, 200);
+    await t.ctx.jobs.idle();
+    const invite = (await t.app.inject({ method: "GET", url: "/api/invite", headers: asInvite(zed) })).json();
+    assert.equal(invite.linesRecorded, invite.linesTotal, "Zed's part is fully recorded");
+    assert.ok(!t.mailer.sent.some((m) => m.subject.startsWith("Zed finished")), "but Zed recorded none of it");
+    assert.equal(t.mailer.sent.filter((m) => m.subject.startsWith("Sam finished")).length, 1, "and Sam's second phone sends no second email");
+  });
+
+  test("there is no unassigning a part and no recording through a cast member of the director's own", async () => {
+    const unassign = await post(`/api/productions/${pid}/characters/${chars.get("HAMLET")}/unassign`);
+    assert.equal(unassign.statusCode, 404);
+    assert.equal((await post(`/api/productions/${pid}/record-as`, { characterId: chars.get("HORATIO") })).statusCode, 404);
+    assert.equal((await row("HAMLET")).linesRecorded, 4, "nothing changed");
   });
 });

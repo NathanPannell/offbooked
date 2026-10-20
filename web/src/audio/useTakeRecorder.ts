@@ -12,7 +12,7 @@ export type MicStatus = "idle" | "requesting" | "ready";
 /**
  * One take at a time from a shared mic: asks for the mic on the first tap, keeps the screen awake
  * while recording, stops itself at the time limit. Used by the actor's recorder and the director's
- * stand-in recorder.
+ * recorder.
  */
 export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => void } = {}) {
   const micRef = useRef<MicSession | null>(null);

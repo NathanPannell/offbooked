@@ -24,9 +24,9 @@ export default function InvitePage() {
   usePrewarmStt(!!invite.data);
 
   if (invite.loading) return <Loading />;
-  if (invite.error instanceof ApiError && (invite.error.status === 410 || invite.error.status === 401 || invite.error.status === 404)) {
-    return <LinkGone body={invite.error.body} token={token} />;
-  }
+  if (invite.error instanceof ApiError && invite.error.status === 410) return <LinkGone body={invite.error.body} token={token} />;
+  // A token that doesn't check out: usually a link copied short or mistyped, never one that expired.
+  if (invite.error instanceof ApiError && (invite.error.status === 401 || invite.error.status === 404)) return <LinkBroken token={token} />;
   if (invite.error || !invite.data) {
     return (
       <main className="page page-narrow center-page">
@@ -125,6 +125,24 @@ function Welcome({ invite, onStart }: { invite: Invite; onStart: (firstName: str
         <p className="small muted consent">Your recordings are shared with the cast and director of {invite.production.title}. No account needed.</p>
       </form>
       <span className="sr-only">You're playing {joinNames(roles)}.</span>
+    </main>
+  );
+}
+
+function LinkBroken({ token }: { token: string }) {
+  const joinToken = joinTokenForInvite(token);
+  return (
+    <main className="page page-narrow center-page">
+      <Brand to={null} />
+      <div className="raised message-card stack">
+        <h1 className="display">This link doesn't work</h1>
+        <p>It may be missing a few characters. Ask your director for the cast link, then pick your part.</p>
+        {joinToken && (
+          <a className="btn btn-primary" href={`/join/${joinToken}`} onClick={() => forgetJoin(joinToken)}>
+            Pick your part again
+          </a>
+        )}
+      </div>
     </main>
   );
 }

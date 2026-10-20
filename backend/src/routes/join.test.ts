@@ -31,7 +31,15 @@ describe("cast join link and script source", { skip: dbSkip }, () => {
     const open = (await get(`/api/join/${token}`)).json();
     assert.equal(open.production.title, "Hamlet");
     assert.equal(open.production.directorName, "Alice", "with no name set, the cast sees the start of the email, never the address");
-    assert.ok(open.characters.every((c: { lineCount: number; takenBy: string | null }) => c.lineCount > 0 && c.takenBy === null));
+    assert.ok(
+      open.characters.every(
+        (c: { lineCount: number; linesRecorded: number; topRecorder: unknown }) => c.lineCount > 0 && c.linesRecorded === 0 && c.topRecorder === null,
+      ),
+    );
+    assert.ok(
+      open.characters.every((c: object) => !("takenBy" in c)),
+      "no one owns a part",
+    );
 
     const hamlet = characters.find((c) => c.name === "HAMLET")!;
     const horatio = characters.find((c) => c.name === "HORATIO")!;
@@ -49,11 +57,11 @@ describe("cast join link and script source", { skip: dbSkip }, () => {
       ["HAMLET", "HORATIO"],
     );
 
-    const after = (await get(`/api/join/${token}`)).json();
-    assert.equal(after.characters.find((c: { id: string }) => c.id === hamlet.id).takenBy, "Riz");
+    // Parts aren't owned: someone else (or Riz on a new phone) picks HAMLET too.
     const again = await post(`/api/join/${token}/claim`, { firstName: "Jo", characterIds: [hamlet.id] });
-    assert.equal(again.statusCode, 409, "a taken character can't be claimed again");
-    assert.equal(again.json().error.code, "character_taken");
+    assert.equal(again.statusCode, 200, "a part someone picked can be picked again");
+    assert.notEqual(again.json().inviteToken, inviteToken);
+    assert.equal((await post(`/api/join/${token}/claim`, { firstName: "Jo", characterIds: [] })).statusCode, 400);
   });
 
   test("resetting the link revokes the old one; forged and invite tokens are refused", async () => {

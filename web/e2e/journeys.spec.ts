@@ -59,7 +59,7 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await page.goBack();
   await page.getByRole("button", { name: "Cast, next step" }).click();
   await expect(page.getByRole("heading", { name: "Invite your cast" })).toBeVisible();
-  await expect(page.getByText("0 of 2 parts taken")).toBeVisible();
+  await expect(page.getByText("0 of 2 parts started")).toBeVisible();
 
   // With no name set, the cast would see the start of the director's email: offer to change it.
   await expect(page.getByText(/^Your cast will see “Director /)).toBeVisible();
@@ -83,16 +83,27 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await phone.goto(joinUrl);
   await phone.getByRole("button", { name: "Skip intro" }).click();
   await expect(phone.getByRole("heading", { name: "Hamlet (e2e)" })).toBeVisible();
-  await phone.getByRole("checkbox", { name: /^HORATIO, 2 lines$/i }).check({ force: true });
+  await phone.getByRole("checkbox", { name: /^HORATIO, 2 lines, 0 recorded/i }).check({ force: true });
   await phone.getByLabel("Your first name").fill("Riz");
   await phone.getByRole("button", { name: /Start recording/ }).click();
   await expect(phone).toHaveURL(/\/i\/[^/]+/);
   await expect(phone.getByText("Friends to this ground.").first()).toBeVisible();
 
-  // The director sees the part taken.
+  // Parts aren't owned: someone on another phone can pick HORATIO too.
+  const other = await browser.newContext({ ...testInfo.project.use });
+  const second = await other.newPage();
+  await second.goto(joinUrl);
+  await second.getByRole("button", { name: "Skip intro" }).click();
+  await second.getByRole("checkbox", { name: /^HORATIO, 2 lines/i }).check({ force: true });
+  await second.getByLabel("Your first name").fill("Jo");
+  await second.getByRole("button", { name: /Start recording/ }).click();
+  await expect(second).toHaveURL(/\/i\/[^/]+/);
+
+  // Picking a part isn't recording it: the call sheet counts parts started by their recordings.
   await page.reload();
-  await expect(page.getByText("1 of 2 parts taken")).toBeVisible();
+  await expect(page.getByText("0 of 2 parts started")).toBeVisible();
   await actor.close();
+  await other.close();
 });
 
 test("the screen stays on while the run-through plays", async ({ page }) => {
@@ -126,7 +137,7 @@ test("the screen stays on while the run-through plays", async ({ page }) => {
 
   await signInAsDirector(page);
   await createProduction(page, "Hamlet (run-through)");
-  await page.getByRole("button", { name: "Run-through", exact: true }).click();
+  await page.getByRole("button", { name: "Listen", exact: true }).click();
   const play = page.getByRole("group", { name: "Playback" }).getByRole("button", { name: "Play", exact: true });
   await expect(play).toBeEnabled();
   expect(await wakeLock()).toEqual({ requested: 0, released: 0 });

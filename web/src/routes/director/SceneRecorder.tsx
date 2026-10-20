@@ -18,7 +18,7 @@ import { LineCard, type LocalTake } from "../actor/LineCard";
 
 const VOICE_LABEL: Record<AudioSource, string> = {
   actor: "Cast take",
-  standin: "Stand-in",
+  director: "Your take",
   tts: "TTS voice",
   none: "Silent",
 };
@@ -26,7 +26,7 @@ const VOICE_LABEL: Record<AudioSource, string> = {
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 /**
- * The director records stand-in lines, scene by scene and partner by partner, or one character's
+ * The director records lines, scene by scene and partner by partner, or one character's
  * lines across the play (`?character=`, their studio, opened from the call sheet).
  */
 export default function SceneRecorder() {
@@ -64,12 +64,11 @@ export default function SceneRecorder() {
               <h1 className="display">{character ? titleCase(character.name) : "Character"}</h1>
             </div>
             <Link className="btn btn-ghost btn-sm" to={`/app/p/${id}?tab=play`}>
-              <Headphones size={16} aria-hidden="true" /> Run-through
+              <Headphones size={16} aria-hidden="true" /> Listen
             </Link>
           </div>
           <p className="muted">
-            Every line {character ? titleCase(character.name) : "they"} says, with what's recorded. Listen back, delete a take, or read one in yourself as a
-            stand-in.
+            Every line {character ? titleCase(character.name) : "they"} says, with what's recorded. Listen back, delete a take, or record one yourself.
           </p>
         </div>
         <SceneLines
@@ -91,14 +90,14 @@ export default function SceneRecorder() {
         </Link>
         <div className="spread scene-title-row">
           <div>
-            <p className="eyebrow">Stand-ins</p>
+            <p className="eyebrow">Record lines</p>
             <h1 className="display">Read in for your cast</h1>
           </div>
           <Link className="btn btn-ghost btn-sm" to={`/app/p/${id}?tab=play`}>
-            <Headphones size={16} aria-hidden="true" /> Run-through
+            <Headphones size={16} aria-hidden="true" /> Listen
           </Link>
         </div>
-        <p className="muted">Every line starts in a computer voice. Record any of them here and your take plays instead, until the actor records their own.</p>
+        <p className="muted">Every line starts in a computer voice. Record any of them here and your take plays instead, until someone records over it.</p>
         <label className="field scene-picker">
           <span>Scene</span>
           <select className="input" value={sectionId} onChange={(e) => setParams({ section: e.target.value }, { replace: true })}>
@@ -138,7 +137,7 @@ function SceneLines({
   const [who, setWho] = useState<string>("all");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [localTakes, setLocalTakes] = useState(new Map<string, LocalTake>());
-  /** Server take ids of stand-ins saved on this screen, by client take id. */
+  /** Server take ids of takes saved on this screen, by client take id. */
   const serverTakeIds = useRef(new Map<string, string>());
   const [deleted, setDeleted] = useState(new Set<string>());
   const cardRefs = useRef(new Map<string, HTMLElement>());
@@ -177,7 +176,7 @@ function SceneLines({
           current
             ? {
                 ...current,
-                lines: current.lines.map((l) => (l.line.id === item.lineId ? { ...l, take: result.take, audioSource: "standin" } : l)),
+                lines: current.lines.map((l) => (l.line.id === item.lineId ? { ...l, take: result.take, audioSource: "director" } : l)),
               }
             : current!,
         );
@@ -235,7 +234,7 @@ function SceneLines({
   };
   stopRef.current = () => void stop();
 
-  /** Deletes the take shown on a line (a stand-in or the cast's), with Undo. */
+  /** Deletes the take shown on a line (yours or the cast's), with Undo. */
   const remove = async (lineId: string, takeId: string) => {
     playback.pause();
     const local = localTakes.get(lineId);
@@ -279,7 +278,7 @@ function SceneLines({
     return (
       <div className="page">
         <div className="notice notice-accent" role="status">
-          Stand-in recording isn't ready on the server yet. Check back soon: it's on its way.
+          Recording isn't ready on the server yet. Check back soon: it's on its way.
         </div>
       </div>
     );
@@ -308,14 +307,14 @@ function SceneLines({
     if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
     return l.take?.id ?? null;
   };
-  const voiced = (l: SectionLine): AudioSource => (localTakes.has(l.line.id) ? "standin" : l.audioSource);
+  const voiced = (l: SectionLine): AudioSource => (localTakes.has(l.line.id) ? "director" : l.audioSource);
   const counts = all.reduce((acc, l) => ((acc[voiced(l)] = (acc[voiced(l)] ?? 0) + 1), acc), {} as Partial<Record<AudioSource, number>>);
 
   return (
     <>
       <div className="page scene-filter">
         <p className="small muted nums">
-          {plural(all.length, "line")}: {counts.actor ?? 0} by the cast · {counts.standin ?? 0} stand-in · {(counts.tts ?? 0) + (counts.none ?? 0)} still
+          {plural(all.length, "line")}: {counts.actor ?? 0} by the cast · {counts.director ?? 0} by you · {(counts.tts ?? 0) + (counts.none ?? 0)} still
           computer voice
         </p>
         {speakers.length > 1 && !data.data.sections && (
@@ -362,7 +361,7 @@ function SceneLines({
                   noCueLabel="Opens the scene"
                   voice={<span className={`tag tag-${source}`}>{VOICE_LABEL[source]}</span>}
                   progress={playback.progress}
-                  takeLabel={source === "standin" ? "Your stand-in" : "Cast take"}
+                  takeLabel={source === "director" ? "Your take" : "Cast take"}
                   onPlay={playback.play}
                   onPlayTogether={playback.playTogether}
                   onDelete={takeId ? () => void remove(l.line.id, takeId) : undefined}

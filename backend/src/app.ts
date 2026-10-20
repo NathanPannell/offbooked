@@ -14,7 +14,7 @@ import { fileRoutes } from "./routes/files.ts";
 import { MAX_PDF_BYTES, productionRoutes } from "./routes/productions.ts";
 import { runthroughRoutes } from "./routes/runthrough.ts";
 import { scriptRoutes } from "./routes/script.ts";
-import { standinRoutes } from "./routes/standin.ts";
+import { studioRoutes } from "./routes/studio.ts";
 import { MAX_TAKE_BYTES } from "./takes.ts";
 
 const run = promisify(execFile);
@@ -109,7 +109,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     castRoutes(api, ctx);
     joinRoutes(api, ctx);
     actorRoutes(api, ctx);
-    standinRoutes(api, ctx);
+    studioRoutes(api, ctx);
     runthroughRoutes(api, ctx);
     fileRoutes(api, ctx);
     emailRoutes(api, ctx);

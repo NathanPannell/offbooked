@@ -1,8 +1,23 @@
 import { X } from "lucide-react";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 
-/** A modal built on <dialog>: focus trapping, Escape and the backdrop come from the browser. */
-export function Dialog({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+/**
+ * A modal built on <dialog>: focus trapping, Escape and the backdrop come from the browser. A
+ * "sheet" rises from the bottom on phones; a "confirm" stays centred over a blurred page.
+ */
+export function Dialog({
+  open,
+  onClose,
+  title,
+  children,
+  variant = "sheet",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+  variant?: "sheet" | "confirm";
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -16,7 +31,7 @@ export function Dialog({ open, onClose, title, children }: { open: boolean; onCl
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={`dialog dialog-${variant}`}
       aria-labelledby={titleId}
       onClose={onClose}
       onClick={(e) => {

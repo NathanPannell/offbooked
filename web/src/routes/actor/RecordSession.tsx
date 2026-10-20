@@ -140,12 +140,12 @@ export function RecordSession({
     },
     [myItems, token, deleted],
   );
-  // A line is done once it has the actor's own take, or a take by whoever had the part before
-  // (it keeps playing; the actor can record over it). A stand-in or the computer voice still needs them.
+  // A line is done once it has a take by anyone: the actor's own, another cast member's or the
+  // director's (it keeps playing; the actor can record over it). Only the computer voice still needs them.
   const isRecorded = useCallback(
     (lineId: string) => {
       const l = allLines.find((x) => x.line.id === lineId);
-      return !!l?.take || l?.current?.source === "actor" || !!uploadFor(lineId);
+      return !!l?.take || !!l?.current || !!uploadFor(lineId);
     },
     [allLines, uploadFor],
   );
@@ -481,7 +481,7 @@ export function RecordSession({
             <Plus size={22} />
           </button>
           {recordedCount > 0 && (
-            <Link className="icon-btn" to={`/i/${token}/play${activePart ? `?part=${activePart}` : ""}`} aria-label="Listen to the run-through">
+            <Link className="icon-btn" to={`/i/${token}/play${activePart ? `?part=${activePart}` : ""}`} aria-label="Listen through the play">
               <Headphones size={22} />
             </Link>
           )}
@@ -530,7 +530,7 @@ export function RecordSession({
         {total === 0 && (
           <section className="card stack empty-parts">
             <h2 className="display">No lines right now</h2>
-            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Your director has moved your part on. Pick up a free part to keep recording." />
+            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Pick up a part to keep recording." />
           </section>
         )}
         <SectionNav sections={sections} idPrefix="rec-section-" />
@@ -661,7 +661,7 @@ function saysPart(l: ActorLine, characterId: string): boolean {
   return l.line.characterId === characterId || (l.line.voiceIds ?? []).includes(characterId);
 }
 
-/** A line with the actor's own take, or an earlier cast member's that keeps playing. */
+/** A line with the actor's own take, or anyone else's that keeps playing. */
 function lineDone(l: ActorLine): boolean {
-  return !!l.take || l.current?.source === "actor";
+  return !!l.take || !!l.current;
 }

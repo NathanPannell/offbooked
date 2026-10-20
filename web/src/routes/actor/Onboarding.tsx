@@ -65,8 +65,11 @@ export function Onboarding({
       title: "Hear the whole play come together",
       body: (
         <>
-          <p>Your takes join everyone else's in one run-through. Lines nobody has recorded yet play in a computer voice until someone does.</p>
-          <p>Practise your part against it any time, and pick up a free part if you have time for more.</p>
+          <p>
+            Your takes join everyone else's, so you can listen through the whole play. Lines nobody has recorded yet play in a computer voice until someone
+            does.
+          </p>
+          <p>Practise your part against it any time, and pick up another part if you have time for more.</p>
         </>
       ),
     },

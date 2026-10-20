@@ -41,7 +41,7 @@ test("timing uses 350 ms gaps within a section and 1200 ms at a section change",
 test("each line uses its take, else its TTS clip, else a placeholder silence", () => {
   const lines: PlanLine[] = [
     { ...line("l1", "s1", "t1"), takeSource: "actor", ttsHash: "h1" },
-    { ...line("l2", "s1", "t2"), takeSource: "standin" },
+    { ...line("l2", "s1", "t2"), takeSource: "director" },
     { ...line("l3", "s1", null), ttsHash: "h3" },
     { ...line("l4", "s2", null, "a b c d e"), ttsHash: "h4" }, // its clip failed: silence
     line("l5", "s2", null), // TTS unavailable
@@ -62,7 +62,7 @@ test("each line uses its take, else its TTS clip, else a placeholder silence", (
     plan.timing.map((e) => [e.lineId, e.source, e.recorded]),
     [
       ["l1", "actor", true],
-      ["l2", "standin", true],
+      ["l2", "director", true],
       ["l3", "tts", false],
       ["l4", "none", false],
       ["l5", "none", false],

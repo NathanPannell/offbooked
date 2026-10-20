@@ -24,8 +24,18 @@ describe("nextStep", () => {
 
   it("once the script is read, the cast link, then progress, then listening", () => {
     expect(nextStep(production())).toMatchObject({ action: "Share the cast link", tab: "cast", step: 1 });
-    expect(nextStep(production({}, { actorsTotal: 2 }))).toMatchObject({ status: "100 lines to go", action: "Check who's joined" });
-    expect(nextStep(production({}, { actorsTotal: 2, linesRecorded: 99 }))).toMatchObject({ status: "1 line to go", action: "See who's recorded" });
-    expect(nextStep(production({}, { actorsTotal: 2, linesRecorded: 100 }))).toMatchObject({ tab: "play", step: 2, done: true });
+    expect(nextStep(production({}, { actorsTotal: 2 }))).toMatchObject({ status: "100 lines to go", action: "Open the cast", tab: "cast" });
+    expect(nextStep(production({}, { actorsTotal: 2, linesRecorded: 99 }))).toMatchObject({ status: "1 line to go", action: "Open the cast" });
+    expect(nextStep(production({}, { actorsTotal: 2, linesRecorded: 100 }))).toMatchObject({
+      action: "Listen through the play",
+      tab: "play",
+      step: 2,
+      done: true,
+    });
+  });
+
+  it("counts the director's own recordings: no cast yet, but lines recorded", () => {
+    expect(nextStep(production({}, { linesRecorded: 10 }))).toMatchObject({ status: "90 lines to go", tab: "cast" });
+    expect(nextStep(production({}, { linesRecorded: 100 }))).toMatchObject({ tab: "play", done: true });
   });
 });

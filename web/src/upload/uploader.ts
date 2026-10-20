@@ -8,10 +8,10 @@ import { openTakeStore, type TakeStore } from "./store";
 export interface NewTake {
   /** Defaults to "invite". */
   kind?: TakeKind;
-  /** The invite token, or the production ID for a director stand-in take. */
+  /** The invite token, or the production ID for a director's take. */
   token: string;
   lineId: string;
-  /** A director's stand-in on a shared line: the character it voices. */
+  /** A director's take on a shared line: the character it voices. */
   characterId?: string | null;
   audio: Blob;
   durationMs: number;
