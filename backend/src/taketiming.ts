@@ -108,37 +108,55 @@ export function servedSpeech(flat: readonly number[] | null, durationMs: number)
   return out.length ? out : undefined;
 }
 
-// One analysis per take at a time, and a take whose upload can't be read isn't tried again.
+// One analysis per take at a time and MAX_BACKFILLS in all. A take whose upload ffmpeg can't read
+// isn't tried again; one that failed otherwise (storage, the database) is tried again by a request
+// after BACKFILL_RETRY_MS. All in memory, and only ever driven by requests: no timers.
+export const MAX_BACKFILLS = 2;
+export const BACKFILL_RETRY_MS = 10 * 60_000;
 const inflight = new Map<string, Promise<void>>();
 const unreadable = new Set<string>();
+const failedAt = new Map<string, number>();
 
 /**
  * Works out the speech and the trim's cut for a take normalized before takes kept them: reads the
  * upload once, finds its speech as the normalization did, and stores both, so it is never done
  * again. `servedMs` is the normalized clip's length.
  */
-export function backfillTiming(ctx: Ctx, take: { id: string; storageKey: string }, servedMs: number): Promise<void> {
+export function backfillTiming(ctx: Ctx, take: { id: string; storageKey: string }, servedMs: number, now: number = Date.now()): Promise<void> {
+  const running = inflight.get(take.id);
+  if (running) return running;
   if (unreadable.has(take.id)) return Promise.resolve();
-  let running = inflight.get(take.id);
-  if (!running) {
-    running = (async () => {
-      const dir = await mkdtemp(path.join(tmpdir(), "offbooked-timing-"));
+  const failed = failedAt.get(take.id);
+  if (failed !== undefined && now - failed < BACKFILL_RETRY_MS) return Promise.resolve();
+  // Only a few at once: the rest are left for a later request (nothing polls or waits for them).
+  if (inflight.size >= MAX_BACKFILLS) return Promise.resolve();
+  const job = (async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "offbooked-timing-"));
+    try {
+      const source = path.join(dir, `source${path.extname(take.storageKey)}`);
+      await writeFile(source, await ctx.storage.get(take.storageKey));
+      let analysis: Awaited<ReturnType<typeof analyzeSpeech>>;
       try {
-        const source = path.join(dir, `source${path.extname(take.storageKey)}`);
-        await writeFile(source, await ctx.storage.get(take.storageKey));
-        const { bounds, stretches } = await analyzeSpeech(source);
-        // The normalization cut here (render/ffmpeg.ts trimFilters), or kept the take whole.
-        const cut = bounds && bounds.endMs - bounds.startMs >= 50 ? bounds.startMs : 0;
-        const speech = flattenStretches(shiftStretches(stretches, cut, servedMs));
-        await ctx.sql`update takes set speech_ms = ${speech}::int[], trim_start_ms = coalesce(trim_start_ms, ${Math.round(cut)}) where id = ${take.id}`;
+        analysis = await analyzeSpeech(source);
       } catch (err) {
+        // ffmpeg can't read the upload: that won't change, so it isn't tried again.
         unreadable.add(take.id);
         throw err;
-      } finally {
-        await rm(dir, { recursive: true, force: true });
       }
-    })().finally(() => inflight.delete(take.id));
-    inflight.set(take.id, running);
-  }
-  return running;
+      const { bounds, stretches } = analysis;
+      // The normalization cut here (render/ffmpeg.ts trimFilters), or kept the take whole.
+      const cut = bounds && bounds.endMs - bounds.startMs >= 50 ? bounds.startMs : 0;
+      const speech = flattenStretches(shiftStretches(stretches, cut, servedMs));
+      await ctx.sql`update takes set speech_ms = ${speech}::int[], trim_start_ms = coalesce(trim_start_ms, ${Math.round(cut)}) where id = ${take.id}`;
+      failedAt.delete(take.id);
+    } catch (err) {
+      // Storage or the database failing may pass: a request after the cooldown tries again.
+      if (!unreadable.has(take.id)) failedAt.set(take.id, now);
+      throw err;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  })().finally(() => inflight.delete(take.id));
+  inflight.set(take.id, job);
+  return job;
 }

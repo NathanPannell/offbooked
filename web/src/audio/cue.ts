@@ -16,6 +16,41 @@ export interface CueElement {
 
 export type CueEnd = "ended" | "stopped" | "failed";
 
+/** How long the recorder waits to fetch a cue whose voice wasn't ready, before recording without it. */
+export const CUE_FETCH_MS = 3000;
+
+/**
+ * Runs `load` with a signal that aborts when `signal` does (a tap on record) or after `timeoutMs`,
+ * and resolves its answer, or null when it was cut short or failed: the take never waits on it.
+ */
+export function fetchOrGiveUp<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  {
+    signal,
+    timeoutMs = CUE_FETCH_MS,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
+  }: { signal?: AbortSignal; timeoutMs?: number; setTimer?: typeof setTimeout; clearTimer?: typeof clearTimeout } = {},
+): Promise<T | null> {
+  const inner = new AbortController();
+  return new Promise<T | null>((resolve) => {
+    let done = false;
+    const finish = (value: T | null) => {
+      if (done) return;
+      done = true;
+      clearTimer(timer);
+      signal?.removeEventListener("abort", stop);
+      inner.abort();
+      resolve(value);
+    };
+    const stop = () => finish(null);
+    const timer = setTimer(stop, timeoutMs);
+    if (signal?.aborted) return stop();
+    signal?.addEventListener("abort", stop);
+    load(inner.signal).then(finish, () => finish(null));
+  });
+}
+
 /** After the cue ends, this long before the take starts, so the mic doesn't catch the cue's last sound from the speaker. */
 export const CUE_SETTLE_MS = 250;
 /** A cue that stops moving for this long (the network stalled) is given up on. Never a playing cue. */

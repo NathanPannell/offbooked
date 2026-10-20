@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
 import { errorMessage } from "../../api/client";
 import type { ActorLine, EmailState, Invite, SttResult } from "../../api/types";
+import { fetchOrGiveUp } from "../../audio/cue";
 import { useAccompaniment, usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { Brand } from "../../components/Brand";
 import { CharacterName } from "../../components/CharacterName";
@@ -99,8 +100,10 @@ export function RecordSession({
   const [hearPartners, setHearPartners] = useStoredFlag(HEAR_PARTNERS_KEY, false);
   /** A line whose cue is playing before its take starts. */
   const [cueing, setCueing] = useState<string | null>(null);
-  /** A tap on record while the cue plays: start the take now. */
-  const skipCue = useRef(false);
+  /** Aborted by a tap on record while the cue is fetched or plays: start the take now. */
+  const skipCue = useRef<AbortController | null>(null);
+  /** Lines whose cue had no voice even when asked again: not asked again this visit. */
+  const cueMissing = useRef(new Set<string>());
   /** What timing the take's words needs, filled by the live take. */
   const timingRef = useRef<TakeTiming | null>(null);
   /** Client take ids deleted on this screen, so their upload no longer counts as the line's take. */
@@ -271,17 +274,21 @@ export function RecordSession({
     if (hearPartners && item?.cue) {
       // Hear the whole cue first, like on stage, and only then record; a tap on record skips the rest of it.
       setCueing(lineId);
-      skipCue.current = false;
+      const skip = new AbortController();
+      skipCue.current = skip;
       setAnnouncement(`Listening to ${item.cue.characterName}'s cue.`);
       let url = item.cue.audioUrl;
-      if (!url) {
-        // Its voice was still being made when the lines loaded: ask again (the server waits a moment for it).
-        const fresh = await api.lines().catch(() => null);
+      if (!url && !cueMissing.current.has(lineId)) {
+        // Its voice was still being made when the lines loaded: ask again, for a few seconds at most
+        // (a tap records at once). Still nothing, and this line records without its cue from now on.
+        const fresh = await fetchOrGiveUp((signal) => api.lines(signal), { signal: skip.signal });
         if (fresh) setLinesData(fresh);
         url = fresh?.lines.find((l) => l.line.id === lineId)?.cue?.audioUrl ?? null;
+        if (!url && !skip.signal.aborted) cueMissing.current.add(lineId);
       }
-      if (url && !skipCue.current) await accompaniment.playThrough(url);
+      if (url && !skip.signal.aborted) await accompaniment.playThrough(url);
       if (!alive.current) return;
+      if (skipCue.current === skip) skipCue.current = null;
       setCueing(null);
     }
     if (!(await recorder.start(lineId))) return;
@@ -649,7 +656,7 @@ export function RecordSession({
         label={current ? `Record line ${actorLines.indexOf(current) + 1}` : "Record"}
         onToggle={() => {
           if (cueing) {
-            skipCue.current = true;
+            skipCue.current?.abort();
             accompaniment.stop();
           } else if (recorder.recording) void stopRecording();
           else if (current) void startRecording(current.line.id);

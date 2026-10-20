@@ -22,9 +22,20 @@ export interface TakePart {
 
 export const partHeaders = (part?: TakePart): Record<string, string> => (part ? { "X-Take-Parts": String(part.total), "X-Take-Part": String(part.index) } : {});
 
-/** When each spoken word of the take starts, in ms of the recording (see docs/api.md, `X-Word-Starts`). */
-export const wordStartHeaders = (wordStartsMs?: readonly number[] | null): Record<string, string> =>
-  wordStartsMs?.length ? { "X-Word-Starts": wordStartsMs.map((ms) => Math.max(0, Math.round(ms))).join(",") } : {};
+/** The server keeps at most this many word starts (`MAX_WORD_STARTS`), and a header past a few KB risks a 431. */
+export const MAX_WORD_STARTS = 2000;
+export const MAX_WORD_STARTS_HEADER = 8000;
+
+/**
+ * When each spoken word of the take starts, in ms of the recording (see docs/api.md,
+ * `X-Word-Starts`). Left out when there are too many to send safely: a refused header would stop
+ * the take ever uploading, and the take matters more than its timing.
+ */
+export function wordStartHeaders(wordStartsMs?: readonly number[] | null): Record<string, string> {
+  if (!wordStartsMs?.length || wordStartsMs.length > MAX_WORD_STARTS) return {};
+  const value = wordStartsMs.map((ms) => Math.max(0, Math.round(ms))).join(",");
+  return value.length > MAX_WORD_STARTS_HEADER ? {} : { "X-Word-Starts": value };
+}
 
 /** All calls scoped to one actor's invite token. */
 export function actorApi(token: string) {
@@ -40,7 +51,7 @@ export function actorApi(token: string) {
     /** Deletes one of the actor's own takes; `restoreTake` is its Undo. */
     deleteTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}`, { method: "DELETE", auth }),
     restoreTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}/restore`, { method: "POST", auth }),
-    lines: () => request<{ sections: Section[]; lines: ActorLine[] }>("/invite/lines", { auth }),
+    lines: (signal?: AbortSignal) => request<{ sections: Section[]; lines: ActorLine[] }>("/invite/lines", { auth, signal }),
     putTake: (
       lineId: string,
       audio: Blob,

@@ -8,7 +8,7 @@ import { Waveform, type WaveTrace } from "../audio/Waveform";
 import { Dialog } from "./Dialog";
 import { MicHelp } from "./MicHelp";
 
-type TestState =
+export type MicTestState =
   | { status: "idle" }
   | { status: "listening" }
   | { status: "playing"; clip: Listened }
@@ -22,7 +22,7 @@ type TestState =
  * is in, so it never holds the mic open.
  */
 function useMicTest() {
-  const [state, setState] = useState<TestState>({ status: "idle" });
+  const [state, setState] = useState<MicTestState>({ status: "idle" });
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const mic = useRef<MicSession | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -111,14 +111,7 @@ function useMicTest() {
  * that, `doneAction` (the one filled button) and a quiet "Try again". `onHeard` says whether the
  * playback has been heard (false again while a new check runs).
  */
-export function MicTest({
-  startLabel = "Test my mic",
-  primary = false,
-  intro,
-  onHeard,
-  doneAction,
-  aside,
-}: {
+export interface MicTestProps {
   startLabel?: string;
   /** The start button is the screen's one filled action (the first-run check, with the record button hidden). */
   primary?: boolean;
@@ -126,9 +119,11 @@ export function MicTest({
   intro?: ReactNode;
   onHeard?: (heard: boolean) => void;
   doneAction?: (reset: () => void) => ReactNode;
-  /** Beside the status while it runs, and beside the start button (e.g. Skip). */
+  /** Shown in every state, the mic's errors included (e.g. the first run's Skip, so nobody is ever stuck). */
   aside?: ReactNode;
-}) {
+}
+
+export function MicTest({ onHeard, ...props }: MicTestProps) {
   const { state, analyser, run, reset, audio } = useMicTest();
   const heard = state.status === "heard";
   const onHeardRef = useRef(onHeard);
@@ -145,8 +140,38 @@ export function MicTest({
     return { levels: clip.levels, progress: () => ((audio.current?.currentTime ?? 0) * 1000) / Math.max(1, clip.durationMs) };
   }, [clip, state.status, audio]);
 
-  if (state.status === "error") return <MicHelp kind={state.error.kind} onRetry={() => void run()} />;
+  return <MicTestView {...props} state={state} analyser={analyser} trace={trace} onRun={() => void run()} onReset={reset} />;
+}
 
+/** What the mic check shows in each state (MicTest runs it). */
+export function MicTestView({
+  state,
+  analyser,
+  trace,
+  onRun,
+  onReset,
+  startLabel = "Test my mic",
+  primary = false,
+  intro,
+  doneAction,
+  aside,
+}: Omit<MicTestProps, "onHeard"> & {
+  state: MicTestState;
+  analyser: AnalyserNode | null;
+  trace?: WaveTrace;
+  onRun: () => void;
+  onReset: () => void;
+}) {
+  if (state.status === "error") {
+    return (
+      <div className="mic-test is-error">
+        <MicHelp kind={state.error.kind} onRetry={onRun} />
+        {aside && <div className="mic-test-row">{aside}</div>}
+      </div>
+    );
+  }
+  const heard = state.status === "heard";
+  const clip = state.status === "playing" || heard ? state.clip : null;
   const status =
     state.status === "listening" ? "Listening… say a line" : state.status === "playing" ? "Playing it back" : heard ? "Did you hear yourself?" : null;
   return (
@@ -155,7 +180,7 @@ export function MicTest({
         <>
           {intro}
           <div className="mic-test-row">
-            <button type="button" className={`btn ${primary ? "btn-primary" : "btn-secondary"}`} onClick={() => void run()}>
+            <button type="button" className={`btn ${primary ? "btn-primary" : "btn-secondary"}`} onClick={onRun}>
               <Mic size={18} aria-hidden="true" /> {startLabel}
             </button>
             {aside}
@@ -175,10 +200,11 @@ export function MicTest({
             </p>
             {heard ? (
               <span className="mic-test-actions">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void run()}>
+                {aside}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={onRun}>
                   <RotateCcw size={15} aria-hidden="true" /> Try again
                 </button>
-                {doneAction?.(reset)}
+                {doneAction?.(onReset)}
               </span>
             ) : (
               aside

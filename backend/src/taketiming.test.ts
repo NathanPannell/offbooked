@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { shiftStretches, speechStretches, TRIM } from "./render/trim.ts";
-import { MAX_WORD_STARTS, parseWordStarts, servedSpeech, servedWordStarts, pieceCount } from "./taketiming.ts";
+import type { Ctx } from "./context.ts";
+import {
+  backfillTiming,
+  BACKFILL_RETRY_MS,
+  MAX_BACKFILLS,
+  MAX_WORD_STARTS,
+  parseWordStarts,
+  servedSpeech,
+  servedWordStarts,
+  pieceCount,
+} from "./taketiming.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "./test/helpers.ts";
 
 // Frame levels: `ms` of each level in turn, in 10 ms frames.
@@ -78,6 +88,84 @@ test("finds stretches of speech, split on pauses of 150 ms or more", () => {
   ]);
   assert.equal(servedSpeech([], 1300), undefined);
   assert.equal(servedSpeech(null, 1300), undefined);
+});
+
+// A stand-in context for the backfill: storage that answers (or fails, or waits) as told, and a
+// database that records the updates.
+function fakeCtx(get: (key: string) => Promise<Buffer>) {
+  const gets: string[] = [];
+  const updates: unknown[][] = [];
+  const sql = (_strings: TemplateStringsArray, ...values: unknown[]) => {
+    updates.push(values);
+    return Promise.resolve([]);
+  };
+  const ctx = {
+    storage: {
+      get: (key: string) => {
+        gets.push(key);
+        return get(key);
+      },
+    },
+    sql,
+  } as unknown as Ctx;
+  return { ctx, gets, updates };
+}
+
+describe("backfilling a take's timing", () => {
+  const take = (name: string) => ({ id: `${name}-${randomUUID()}`, storageKey: `productions/p/takes/${name}.wav` });
+  const audio = () => wav([false, 300], [true, 500], [false, 300]);
+
+  test("works it out once and stores it", async () => {
+    const { ctx, gets, updates } = fakeCtx(async () => audio());
+    await backfillTiming(ctx, take("ok"), 860);
+    assert.equal(gets.length, 1);
+    assert.equal(updates.length, 1);
+    assert.deepEqual(updates[0]![0], [120, 620], "the speech, moved onto the trimmed clip");
+    assert.equal(updates[0]![1], 180, "the trim's cut");
+  });
+
+  test("tries a take again after a passing failure, but only once the cooldown is over", async () => {
+    let fail = true;
+    const { ctx, gets, updates } = fakeCtx(async () => {
+      if (fail) throw new Error("storage timed out");
+      return audio();
+    });
+    const t = take("flaky");
+    await assert.rejects(backfillTiming(ctx, t, 860, 1_000));
+    fail = false;
+    await backfillTiming(ctx, t, 860, 1_000 + BACKFILL_RETRY_MS - 1);
+    assert.equal(gets.length, 1, "not again inside the cooldown");
+    await backfillTiming(ctx, t, 860, 1_000 + BACKFILL_RETRY_MS);
+    assert.equal(gets.length, 2);
+    assert.equal(updates.length, 1);
+  });
+
+  test("never tries an upload ffmpeg can't read again", async () => {
+    const { ctx, gets } = fakeCtx(async () => Buffer.from("not audio at all"));
+    const t = take("garbage");
+    await assert.rejects(backfillTiming(ctx, t, 860, 0));
+    await backfillTiming(ctx, t, 860, BACKFILL_RETRY_MS * 10);
+    assert.equal(gets.length, 1);
+  });
+
+  test("runs at most a couple at once; the rest wait for a later request", async () => {
+    const gates: (() => void)[] = [];
+    let hold = true;
+    const { ctx, gets } = fakeCtx(async () => {
+      if (hold) await new Promise<void>((go) => gates.push(go));
+      return audio();
+    });
+    const takes = Array.from({ length: MAX_BACKFILLS + 1 }, (_, i) => take(`busy${i}`));
+    const runs = takes.map((t) => backfillTiming(ctx, t, 860));
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(gets.length, MAX_BACKFILLS, "the extra one is skipped for now");
+    assert.equal(backfillTiming(ctx, takes[0]!, 860), runs[0], "a take already running is shared");
+    hold = false;
+    gates.forEach((go) => go());
+    await Promise.all(runs);
+    await backfillTiming(ctx, takes[MAX_BACKFILLS]!, 860);
+    assert.equal(gets.length, MAX_BACKFILLS + 1, "and done by the next request");
+  });
 });
 
 // A 16 kHz mono WAV: silence and tones (`[tone?, ms]`), so the voice is exactly where the tones are.

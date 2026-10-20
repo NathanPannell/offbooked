@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CUE_SETTLE_MS, playToEnd, type CueElement } from "./cue";
+import { CUE_FETCH_MS, CUE_SETTLE_MS, fetchOrGiveUp, playToEnd, type CueElement } from "./cue";
 
 /** An <audio> stand-in: plays when asked (or refuses), and the test makes it pause, end or fail. */
 function fakeAudio({ refuse = false } = {}) {
@@ -120,5 +120,52 @@ describe("playToEnd", () => {
     const failing = playToEnd(broken.a, "cue.m4a", clock());
     broken.a.onerror?.(new Event("error"));
     expect(await settled(failing.done)).toBe("failed");
+  });
+});
+
+describe("fetching a cue that wasn't ready", () => {
+  /** A load that answers only when told, and notes whether it was aborted. */
+  const pending = () => {
+    let answer: (v: string) => void = () => {};
+    let seen: AbortSignal | null = null;
+    const load = (signal: AbortSignal) => {
+      seen = signal;
+      return new Promise<string>((r) => (answer = r));
+    };
+    return { load, answer: (v: string) => answer(v), aborted: () => seen?.aborted ?? false };
+  };
+
+  it("answers with what came back in time", async () => {
+    const p = pending();
+    const got = fetchOrGiveUp(p.load, clock());
+    p.answer("cue.m4a");
+    expect(await settled(got)).toBe("cue.m4a");
+  });
+
+  it("gives up after a few seconds, so the take records without it", async () => {
+    const p = pending();
+    const c = clock();
+    const got = fetchOrGiveUp(p.load, c);
+    c.advance(CUE_FETCH_MS - 1);
+    expect(await settled(got)).toBe("pending");
+    c.advance(1);
+    expect(await settled(got)).toBeNull();
+    expect(p.aborted()).toBe(true);
+    p.answer("too late");
+    expect(await settled(got)).toBeNull();
+  });
+
+  it("stops at once on a tap", async () => {
+    const p = pending();
+    const tap = new AbortController();
+    const got = fetchOrGiveUp(p.load, { ...clock(), signal: tap.signal });
+    tap.abort();
+    expect(await settled(got)).toBeNull();
+    expect(p.aborted()).toBe(true);
+    expect(await settled(fetchOrGiveUp(pending().load, { ...clock(), signal: tap.signal }))).toBeNull();
+  });
+
+  it("treats a failed request as no cue", async () => {
+    expect(await settled(fetchOrGiveUp(() => Promise.reject(new Error("offline")), clock()))).toBeNull();
   });
 });
