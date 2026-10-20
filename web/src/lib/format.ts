@@ -47,3 +47,8 @@ export function characterHue(key: string): number {
   for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   return hash % 360;
 }
+
+/** "12 June 2027" from a YYYY-MM-DD calendar date, with no time zone shift. */
+export function longDate(day: string, locale?: string): string {
+  return new Date(`${day}T12:00:00`).toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
+}

@@ -1,18 +1,9 @@
-import { ClipboardPaste, FileUp } from "lucide-react";
-import { useRef, useState, type DragEvent } from "react";
+import { useState } from "react";
 import { ApiError, errorMessage } from "../../api/client";
 import { script } from "../../api/director";
+import { ScriptDropZone } from "./ScriptDropZone";
 
-const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const MAX_BYTES = 20 * 1024 * 1024;
-
-function validate(file: File): string | null {
-  const ok = /\.(pdf|docx|txt|text|fountain)$/i.test(file.name) || ["application/pdf", "text/plain", DOCX_TYPE].includes(file.type);
-  if (!ok) return "That file type won't work. Use a PDF, a Word .docx or a plain text file, or paste the script.";
-  if (file.size > MAX_BYTES) return "That file is over 20 MB. Try a smaller export, or paste the text.";
-  return null;
-}
-
+/** Adds or replaces a production's script: a PDF or Word file, read as soon as it's chosen. */
 export function ScriptUpload({
   productionId,
   failure,
@@ -26,19 +17,15 @@ export function ScriptUpload({
   onCancel: () => void;
   onStarted: (fileName: string | null) => void;
 }) {
-  const [mode, setMode] = useState<"file" | "paste">(failure ? "paste" : "file");
-  const [dragging, setDragging] = useState(false);
-  const [text, setText] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  const send = async (label: string, fileName: string | null, work: () => Promise<unknown>) => {
-    setBusy(label);
+  const upload = async (file: File) => {
+    setBusy(`Uploading ${file.name}…`);
     setError(null);
     try {
-      await work();
-      onStarted(fileName);
+      await script.uploadFile(productionId, file);
+      onStarted(file.name);
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 409
@@ -50,89 +37,22 @@ export function ScriptUpload({
     }
   };
 
-  const upload = (file: File | undefined) => {
-    if (!file) return;
-    const problem = validate(file);
-    if (problem) return setError(problem);
-    void send(`Uploading ${file.name}…`, file.name, () => script.uploadFile(productionId, file));
-  };
-
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    upload(e.dataTransfer.files[0]);
-  };
-
   return (
     <div className="upload stack">
       {failure && (
         <div className="notice notice-error" role="alert">
           <div>
-            <strong>We couldn't read that script.</strong> {failure} Try the file again, or paste the text. Pasting usually works best for scanned or unusual
-            layouts.
+            <strong>We couldn't read that script.</strong> {failure} Try another file: a PDF exported from Word or Google Docs, or the .docx itself, usually
+            reads best.
           </div>
         </div>
       )}
-
-      {mode === "file" ? (
-        <div
-          className={`upload-drop ${dragging ? "is-drag" : ""}`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={onDrop}
-        >
-          <ScriptIllustration />
-          <h2 className="display">Drop your script here</h2>
-          <p className="muted">PDF, Word or plain text, up to 20 MB. We'll find the scenes, characters and lines for you.</p>
-          <button type="button" className="btn btn-primary btn-lg" disabled={!!busy} onClick={() => inputRef.current?.click()}>
-            <FileUp size={19} aria-hidden="true" /> {busy ?? "Choose a file"}
-          </button>
-          <input
-            ref={inputRef}
-            type="file"
-            accept={`application/pdf,.pdf,${DOCX_TYPE},.docx,text/plain,.txt`}
-            hidden
-            onChange={(e) => {
-              upload(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-          <button type="button" className="quiet-link" onClick={() => setMode("paste")}>
-            Or paste the text instead
-          </button>
-        </div>
-      ) : (
-        <form
-          className="stack panel"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send("Sending…", null, () => script.uploadText(productionId, text));
-          }}
-        >
-          <label className="field">
-            <span>Paste your script</span>
-            <textarea
-              className="input script-paste"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={"HAMLET\nWho's there?\n\nHORATIO\nFriends to this ground."}
-              spellCheck={false}
-            />
-            <span className="field-hint">Keep the character names, line breaks and indentation as they are.</span>
-          </label>
-          <div className="row">
-            <button className="btn btn-primary" disabled={!!busy || !text.trim()}>
-              <ClipboardPaste size={18} aria-hidden="true" /> {busy ?? "Use this text"}
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={() => setMode("file")}>
-              Upload a file instead
-            </button>
-          </div>
-        </form>
-      )}
+      <ScriptDropZone
+        onFile={(f) => void upload(f)}
+        onProblem={setError}
+        disabled={!!busy}
+        buttonLabel={busy ?? (failure ? "Try another file" : "Choose a file")}
+      />
       {error && (
         <p className="field-error" role="alert">
           {error}
@@ -144,24 +64,5 @@ export function ScriptUpload({
         </button>
       )}
     </div>
-  );
-}
-
-/** A little script page with one line marked, for the empty upload state. */
-function ScriptIllustration() {
-  return (
-    <svg className="upload-art" width="120" height="104" viewBox="0 0 120 104" aria-hidden="true" fill="none">
-      <rect x="28" y="12" width="66" height="86" rx="4" fill="var(--paper)" stroke="var(--line-strong)" strokeWidth="1.25" />
-      <rect x="22" y="6" width="66" height="86" rx="4" fill="#fff" stroke="var(--edge-strong)" strokeWidth="1.25" />
-      <rect x="32" y="20" width="22" height="3" rx="1.5" fill="var(--edge-strong)" />
-      <rect x="32" y="30" width="46" height="2.5" rx="1.25" fill="var(--line-strong)" />
-      <rect x="29" y="40" width="52" height="11" rx="2" fill="var(--marker)" />
-      <rect x="32" y="44.5" width="44" height="2.5" rx="1.25" fill="var(--ink-soft)" />
-      <rect x="32" y="60" width="18" height="3" rx="1.5" fill="var(--edge-strong)" />
-      <rect x="32" y="70" width="40" height="2.5" rx="1.25" fill="var(--line-strong)" />
-      <rect x="32" y="78" width="30" height="2.5" rx="1.25" fill="var(--line-strong)" />
-      <circle cx="98" cy="22" r="10" fill="var(--accent)" />
-      <path d="M93.5 22h9M98 17.5v9" stroke="#fff" strokeWidth="1.75" strokeLinecap="round" />
-    </svg>
   );
 }

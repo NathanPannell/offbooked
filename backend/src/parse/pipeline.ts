@@ -36,7 +36,7 @@ export async function parseScriptText(
   opts: { labeler: Labeler | null; log: Log; onProgress?: (p: LabelProgress) => void },
 ): Promise<{ structure: StructuredScript; usage: ParseUsage }> {
   const { text, report } = prepareText(rawText);
-  if (!text) throw new ScriptInputError("The script is empty. Paste the text or upload a file.");
+  if (!text) throw new ScriptInputError("The script is empty.");
   if (text.length > MAX_SCRIPT_CHARS) throw new ScriptInputError("This script is too long to process. Split it into parts under 600,000 characters.");
 
   const heuristic = heuristicParse(text);
@@ -137,8 +137,7 @@ export async function parseScriptText(
   const structure = buildStructure(locateLines(lines, text.split("\n")));
   const pageOf = pageIndex(text.split("\n"));
   for (const l of structure.lines) l.page = l.sourceLine ? pageOf(l.sourceLine) : null;
-  if (!structure.lines.some((l) => l.kind === "dialogue"))
-    throw new ScriptInputError("We couldn't find any dialogue in this file. Check it's a script, or paste the text instead.");
+  if (!structure.lines.some((l) => l.kind === "dialogue")) throw new ScriptInputError("We couldn't find any dialogue in this file. Check it's a script.");
   const problems = validateStructure(structure);
   if (problems.length) throw new Error(`Parsed script failed validation: ${problems.slice(0, 5).join("; ")}`);
   return { structure, usage };

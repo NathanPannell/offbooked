@@ -96,11 +96,6 @@ export const script = {
       body: form,
     });
   },
-  uploadText: (productionId: string, text: string) =>
-    request<{ scriptStatus: ScriptStatus }>(`/productions/${productionId}/script`, {
-      auth: director,
-      json: { text },
-    }),
   /** An edit clears the line's flag; undo sends `flagged` (with its code and reason) to put it back. */
   updateLine: (
     lineId: string,

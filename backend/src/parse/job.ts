@@ -73,7 +73,7 @@ export async function runScriptParse(ctx: Ctx, scriptId: string): Promise<void> 
     if (current) inferInBackground(ctx, script.productionId);
     if (!current) await ctx.sql`update scripts set status = 'failed', error = 'Replaced by a newer upload', completed_at = now() where id = ${scriptId}`;
   } catch (err) {
-    const message = err instanceof ScriptInputError ? err.message : "Something went wrong while reading the script. Try again, or paste the text instead.";
+    const message = err instanceof ScriptInputError ? err.message : "Something went wrong while reading the script. Try again.";
     if (!(err instanceof ScriptInputError)) ctx.log.error({ err, scriptId }, "script parse failed");
     await ctx.sql`update scripts set status = 'failed', error = ${message}, completed_at = now() where id = ${scriptId}`;
     await ctx.sql`update productions set script_status = 'failed', script_error = ${message}
