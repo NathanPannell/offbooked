@@ -33,7 +33,7 @@ export default defineConfig({
       include: ["src/**"],
       // The floor is the coverage the unit tests reached when it was set; raise it, never lower it.
       // Screens are covered by the Playwright journeys in e2e/, not here.
-      thresholds: { lines: 24, statements: 24, branches: 23, functions: 16 },
+      thresholds: { lines: 24, statements: 24, branches: 24, functions: 16 },
     },
   },
 });

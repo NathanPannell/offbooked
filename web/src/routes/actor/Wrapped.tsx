@@ -1,4 +1,4 @@
-import { Headphones, ListChecks, Mail, Mic, Plus } from "lucide-react";
+import { ChevronDown, Headphones, ListChecks, Mail, Mic, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
@@ -47,6 +47,7 @@ export function Wrapped({
   const [email, setEmail] = useState("");
   const [emailState, setEmailState] = useState<"ask" | "sending" | "saved" | "skipped">(invite.hasEmail ? "saved" : "ask");
   const [error, setError] = useState<string | null>(null);
+  const [pickUpOpen, setPickUpOpen] = useState(false);
 
   const saving = unsaved.filter((i) => i.status !== "failed");
   const failed = unsaved.filter((i) => i.status === "failed");
@@ -112,8 +113,17 @@ export function Wrapped({
         </p>
       </div>
 
+      <div className="stack wrapped-actions">
+        <Link className="btn btn-primary btn-lg btn-block" to={`/i/${token}/play${playQuery ? `?${playQuery}` : ""}`}>
+          <Headphones size={20} aria-hidden="true" /> Listen through what's recorded so far
+        </Link>
+        <Link className="btn btn-secondary btn-block" to={`/i/${token}/play?mode=mine${playQuery ? `&${playQuery}` : ""}`}>
+          <Mic size={18} aria-hidden="true" /> Practise my part
+        </Link>
+      </div>
+
       {nextPart && onSwitchPart && (
-        <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => onSwitchPart(nextPart.id)}>
+        <button type="button" className="btn btn-secondary btn-block" onClick={() => onSwitchPart(nextPart.id)}>
           <Mic size={18} aria-hidden="true" /> Record {titleCase(nextPart.name)} next · {plural(nextPart.left, "line")}
         </button>
       )}
@@ -191,28 +201,26 @@ export function Wrapped({
         )}
       </section>
 
-      <section className="card stack pick-up-card">
-        <h2 className="row" style={{ gap: 8 }}>
-          <Plus size={20} aria-hidden="true" /> Pick up more lines
-        </h2>
-        <PickUpParts
-          api={api}
-          onPicked={onPickedUp}
-          intro="Got time for more? Pick up another part. Lines nobody has recorded yet play in the computer voice."
-        />
+      <section className="card pick-up-card">
+        <button type="button" className="pick-up-toggle" aria-expanded={pickUpOpen} aria-controls="wrapped-pick-up" onClick={() => setPickUpOpen((o) => !o)}>
+          <Plus size={20} aria-hidden="true" />
+          <span className="grow">Pick up more lines</span>
+          <ChevronDown size={20} aria-hidden="true" className="pick-up-chevron" />
+        </button>
+        {pickUpOpen && (
+          <div id="wrapped-pick-up" className="pick-up-body">
+            <PickUpParts
+              api={api}
+              onPicked={onPickedUp}
+              intro="Got time for more? Pick up another part. Lines nobody has recorded yet play in the computer voice."
+            />
+          </div>
+        )}
       </section>
 
-      <div className="stack wrapped-actions">
-        <Link className={`btn ${nextPart ? "btn-secondary" : "btn-primary btn-lg"} btn-block`} to={`/i/${token}/play${playQuery ? `?${playQuery}` : ""}`}>
-          <Headphones size={20} aria-hidden="true" /> Listen through what's recorded so far
-        </Link>
-        <Link className="btn btn-secondary btn-block" to={`/i/${token}/play?mode=mine${playQuery ? `&${playQuery}` : ""}`}>
-          <Mic size={18} aria-hidden="true" /> Practise my part
-        </Link>
-        <button type="button" className="btn btn-ghost btn-block" onClick={() => onReview(lines[0]?.line.id ?? "")}>
-          Back to my lines
-        </button>
-      </div>
+      <button type="button" className="btn btn-ghost btn-block" onClick={() => onReview(lines[0]?.line.id ?? "")}>
+        Back to my lines
+      </button>
     </main>
   );
 }
