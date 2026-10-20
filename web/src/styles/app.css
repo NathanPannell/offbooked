@@ -97,8 +97,12 @@
   place-items: center;
   width: var(--tap);
   height: var(--tap);
+  padding: 0;
+  border: 0;
   border-radius: 50%;
+  background: none;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .account-btn:hover .avatar {
@@ -3186,6 +3190,16 @@
   box-shadow: 0 -8px 24px rgba(29, 28, 26, 0.05);
 }
 
+/* For someone who isn't reading: a quiet way straight to the listen-through, under the parts. */
+.join-listen {
+  align-self: center;
+  margin: var(--s-2) 0 var(--s-4);
+}
+
+.join-dock[hidden] {
+  display: none;
+}
+
 .join-summary {
   font-size: 17px;
 }
@@ -3332,14 +3346,14 @@
   white-space: nowrap;
 }
 
-.record-title:has(.name-edit) {
-  overflow: visible;
-}
-
+/* Two lines on a phone rather than "Recording for FRAN…" beside the header's buttons. */
 .record-part {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.15;
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
@@ -3491,30 +3505,28 @@
   opacity: 0.8;
 }
 
+/* The line in hand: a plain white card with an ink edge, and the line itself under a highlighter.
+   No yellow card around the yellow line. */
 .line-card.is-current,
 .line-card.is-recording {
-  border-color: var(--sun);
-  background: var(--sun-soft);
+  border-color: var(--ink);
+  background: #fff;
   box-shadow:
-    0 0 0 1px var(--sun),
+    0 0 0 1px var(--ink),
     var(--shadow);
   opacity: 1;
 }
 
 .line-card.is-recording {
   box-shadow:
-    0 0 0 2px var(--sun),
+    0 0 0 2px var(--ink),
     var(--shadow);
 }
 
+.line-card.is-current .my-line,
 .line-card.is-recording .my-line {
   background: var(--marker);
   box-shadow: 0 0 0 8px var(--marker);
-}
-
-.line-card.is-current .cue,
-.line-card.is-recording .cue {
-  background: #fff;
 }
 
 .recorded-by {
@@ -3780,44 +3792,6 @@
   gap: 4px;
   font-size: 13px;
   color: var(--muted);
-}
-
-/* The actor's name on the recorder, editable for a typo made when joining. */
-.name-edit-toggle {
-  margin-left: 6px;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-.name-edit-toggle:hover,
-.name-edit-toggle:focus-visible {
-  color: var(--ink);
-  background: var(--accent-soft);
-}
-
-.name-edit {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.name-edit .input {
-  width: 9em;
-  min-height: 32px;
-  padding: 4px 8px;
-  font-size: 14px;
-}
-
-.name-edit .icon-btn {
-  width: 32px;
-  height: 32px;
 }
 
 .verdict-hint {

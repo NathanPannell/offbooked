@@ -89,12 +89,16 @@ test("a director uploads a script and shares the cast link, and a cast member op
   const phone = await actor.newPage();
   await phone.goto(joinUrl);
   await phone.getByRole("button", { name: "Skip intro" }).click();
-  await expect(phone.getByRole("heading", { name: "Hamlet (e2e)" })).toBeVisible();
+  await expect(phone.getByText("Sam invited you to “Hamlet (e2e)”")).toBeVisible();
+  await expect(phone.getByRole("heading", { name: "Who are you playing?" })).toBeVisible();
   await phone.getByRole("checkbox", { name: /^HORATIO, 2 lines, 0 recorded/i }).check({ force: true });
-  await phone.getByLabel("Your first name").fill("Riz");
+  await expect(phone.getByText(/^You'll be reading for HORATIO/i)).toBeVisible();
+  await phone.getByLabel("Your name").fill("Riz");
   await phone.getByRole("button", { name: /Start recording/ }).click();
   await expect(phone).toHaveURL(/\/i\/[^/]+/);
   await expect(phone.getByText("Friends to this ground.").first()).toBeVisible();
+  // Their name lives behind their initials at the top right, like the director's.
+  await expect(phone.getByRole("button", { name: "You: Riz" })).toBeVisible();
 
   // Parts aren't owned: someone on another phone can pick HORATIO too.
   const other = await browser.newContext({ ...testInfo.project.use });
@@ -102,9 +106,18 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await second.goto(joinUrl);
   await second.getByRole("button", { name: "Skip intro" }).click();
   await second.getByRole("checkbox", { name: /^HORATIO, 2 lines/i }).check({ force: true });
-  await second.getByLabel("Your first name").fill("Jo");
+  await second.getByLabel("Your name").fill("Jo");
   await second.getByRole("button", { name: /Start recording/ }).click();
   await expect(second).toHaveURL(/\/i\/[^/]+/);
+
+  // Someone who isn't reading skips straight to the listen-through, with no part and no name.
+  const listener = await browser.newContext({ ...testInfo.project.use });
+  const ears = await listener.newPage();
+  await ears.goto(joinUrl);
+  await ears.getByRole("button", { name: "Skip intro" }).click();
+  await ears.getByRole("button", { name: /Skip to the listen-through/ }).click();
+  await expect(ears).toHaveURL(/\/i\/[^/]+\/play$/);
+  await listener.close();
 
   // Picking a part isn't recording it: the call sheet counts parts started by their recordings.
   await page.reload();

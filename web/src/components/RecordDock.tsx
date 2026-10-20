@@ -1,6 +1,6 @@
 import { Mic, Settings, Square } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { needsMicCheck } from "../audio/micPrefs";
+import { markMicChecked, needsMicCheck } from "../audio/micPrefs";
 import type { MicError } from "../audio/recorder";
 import { type MicStatus } from "../audio/useTakeRecorder";
 import { Waveform } from "../audio/Waveform";
@@ -26,6 +26,7 @@ export function RecordDock({
   onRetry,
   onDeviceChange,
   settings,
+  recordedBefore = false,
 }: {
   recording: boolean;
   elapsed: number;
@@ -43,9 +44,17 @@ export function RecordDock({
   onDeviceChange: (deviceId: string | null) => void;
   /** Recording options shown in mic settings. */
   settings?: ReactNode;
+  /** This person already has takes of their own (another phone, another part): no mic check. */
+  recordedBefore?: boolean;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [micCheck, setMicCheck] = useState(needsMicCheck);
+  // The mic check is once per person: someone who has recorded before skips it on any device.
+  useEffect(() => {
+    if (!recordedBefore || !micCheck) return;
+    markMicChecked();
+    setMicCheck(false);
+  }, [recordedBefore, micCheck]);
   const message = micStatus === "requesting" ? "Allow the microphone when your browser asks." : note;
   // The first-run mic check is the only thing to do until it's done or skipped: the record button
   // waits behind it, so there's one filled button on screen.

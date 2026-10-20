@@ -18,14 +18,14 @@ import { useToast } from "../../components/Toast";
 import { claimFirstTakeHint } from "../../audio/micPrefs";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useResource } from "../../lib/useResource";
-import { keepInView, recorderBand } from "../../player/follow";
+import { keepInView, recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
 import { latestForLine } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
-import { NameEditor } from "./NameEditor";
+import { CastProfile } from "./CastProfile";
 import { PickUpParts } from "./PickUpParts";
 import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake } from "./recordedBy";
 import { Wrapped } from "./Wrapped";
@@ -45,12 +45,15 @@ export function RecordSession({
   api,
   invite,
   onRenamed,
+  onEmailSaved,
   onPartsChanged,
 }: {
   token: string;
   api: ActorApi;
   invite: Invite;
   onRenamed: (actor: { name: string; firstName: string }) => void;
+  /** The actor left an email in their profile. */
+  onEmailSaved: () => void;
   /** The actor picked up more parts: their parts now. */
   onPartsChanged: (characters: { id: string; name: string }[]) => void;
 }) {
@@ -392,7 +395,9 @@ export function RecordSession({
       advanceTimer.current = null;
       if (next) {
         setCurrentId(next);
-        scrollToLine(next);
+        // The next line in the middle, with the take just kept (and its buttons) still in view.
+        const card = cardRefs.current.get(next);
+        if (card) revealAfterTake(cardRefs.current.get(lineId) ?? null, card);
         if (recordNext) void startRef.current(next);
       } else {
         setView("wrapped");
@@ -479,10 +484,7 @@ export function RecordSession({
       <header className="record-header">
         <div className="record-header-row">
           <div className="grow">
-            <p className="record-title">
-              {invite.production.title}
-              <NameEditor name={invite.actor.name} onSave={async (name) => onRenamed((await api.rename(name)).actor)} />
-            </p>
+            <p className="record-title">{invite.production.title}</p>
             <h1 className="record-part part-title">
               {partName ? (
                 <>
@@ -502,6 +504,15 @@ export function RecordSession({
               <Headphones size={22} />
             </Link>
           )}
+          <CastProfile
+            name={invite.actor.name}
+            hasEmail={invite.hasEmail}
+            onRename={async (name) => onRenamed((await api.rename(name)).actor)}
+            onEmail={async (email) => {
+              await api.contact(email);
+              onEmailSaved();
+            }}
+          />
         </div>
         {total > 0 && <PartProgress total={total} recorded={recordedCount} label={partName ? `${partName}'s lines recorded` : "Lines recorded"} />}
         {activePart && (
@@ -548,6 +559,9 @@ export function RecordSession({
           <section className="card stack empty-parts">
             <h2 className="display">No lines right now</h2>
             <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Pick up a part to keep recording." />
+            <Link className="btn btn-ghost" to={`/i/${token}/play`}>
+              <Headphones size={18} aria-hidden="true" /> Just listen through the play
+            </Link>
           </section>
         )}
         <SectionNav sections={sections} idPrefix="rec-section-" />
@@ -614,6 +628,7 @@ export function RecordSession({
         onToggle={() => (cueing ? accompaniment.stop() : recorder.recording ? void stopRecording() : current && void startRecording(current.line.id))}
         onRetry={() => currentId && void startRecording(currentId)}
         onDeviceChange={recorder.setDevice}
+        recordedBefore={allLines.some((l) => !!ownTake(l))}
         settings={
           <RecordOptions options={options}>
             <label className="checkbox">

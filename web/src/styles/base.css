@@ -728,6 +728,19 @@ dialog.dialog-confirm::backdrop {
   flex: 1 1 160px;
 }
 
+/* A confirm's two choices sit side by side, even on a phone: the safe one on the left, the action
+   (first in the markup, so it reads first) on the right. */
+.dialog-confirm .dialog-actions {
+  flex-direction: row-reverse;
+  flex-wrap: nowrap;
+}
+
+.dialog-confirm .dialog-actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: var(--s-3);
+}
+
 @media (max-width: 560px) {
   dialog.dialog-sheet {
     width: 100vw;

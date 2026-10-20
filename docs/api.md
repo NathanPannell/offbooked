@@ -234,7 +234,7 @@ type AudioSource = "actor" | "director" | "tts" | "none"; // "director" was "sta
 | GET | `/api/productions/:id/join-link` | director | `{ joinUrl }` (`${APP_URL}/join/<token>`) |
 | POST | `/api/productions/:id/join-link/reset` | director | `{ joinUrl }`: the old link stops working |
 | GET | `/api/join/:token` | none | `{ production: { id, title, directorName }, characters: PartCard[] }` (see "Open parts" below), sorted by line count. 409 `script_not_ready` while parsing; 410 when archived; 404 for a bad or reset link. |
-| POST | `/api/join/:token/claim` | none | `{ characterIds: string[], firstName }` → `{ inviteToken, inviteUrl }`. Creates a cast member who has picked those characters, then the web app goes straight to `/i/<inviteToken>`. Parts aren't owned: any part can be picked, however many others have picked it. Store the invite token per join link in localStorage, so reopening the cast link on the same device goes back to that actor's recording screen. |
+| POST | `/api/join/:token/claim` | none | `{ characterIds: string[], firstName }`, or `{ listen: true, firstName? }` for someone who only wants to listen through → `{ inviteToken, inviteUrl }`. Creates a cast member who has picked those characters (none for a listener), then the web app goes straight to `/i/<inviteToken>` (a listener to `/i/<inviteToken>/play`). Parts aren't owned: any part can be picked, however many others have picked it. Store the invite token per join link in localStorage, so reopening the cast link on the same device goes back to that actor's recording screen. |
 
 ## The director's takes and TTS
 

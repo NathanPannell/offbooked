@@ -62,6 +62,16 @@ describe("cast join link and script source", { skip: dbSkip }, () => {
     assert.equal(again.statusCode, 200, "a part someone picked can be picked again");
     assert.notEqual(again.json().inviteToken, inviteToken);
     assert.equal((await post(`/api/join/${token}/claim`, { firstName: "Jo", characterIds: [] })).statusCode, 400);
+
+    // Someone who only wants to listen joins with no part and no name, and can open the listen-through.
+    const listener = await post(`/api/join/${token}/claim`, { listen: true });
+    assert.equal(listener.statusCode, 200);
+    const listenToken = listener.json().inviteToken;
+    const me = await t.app.inject({ method: "GET", url: "/api/invite", headers: { authorization: `Invite ${listenToken}` } });
+    assert.equal(me.statusCode, 200);
+    assert.deepEqual(me.json().characters, []);
+    const play = await t.app.inject({ method: "GET", url: "/api/invite/runthrough", headers: { authorization: `Invite ${listenToken}` } });
+    assert.equal(play.statusCode, 200);
   });
 
   test("resetting the link revokes the old one; forged and invite tokens are refused", async () => {

@@ -85,6 +85,32 @@ function bandBetween(root: ParentNode | null, topSelector: string, bottomSelecto
   return { top, bottom };
 }
 
+/** Room kept above the last take's buttons when they stay in view after moving on. */
+export const TAKE_BAR_MARGIN = 8;
+
+/**
+ * After a take, how far to scroll (px, positive is down) so the next line's card sits in the middle
+ * of the band, while the take just recorded keeps its Listen back / Redo / Delete row in view
+ * above it. The next card staying whole wins over the old buttons; a next card taller than the
+ * band starts at its top.
+ */
+export function afterTakeDelta(takeBar: { top: number } | null, next: { top: number; bottom: number }, band: Band): number {
+  const height = band.bottom - band.top;
+  const nextHeight = next.bottom - next.top;
+  if (nextHeight >= height) return next.top - band.top;
+  const centred = (next.top + next.bottom) / 2 - (band.top + band.bottom) / 2;
+  const keepsBar = takeBar ? takeBar.top - band.top - TAKE_BAR_MARGIN : Infinity;
+  const nextWhole = next.bottom - band.bottom; // the least scroll that keeps the next card's bottom in the band
+  return Math.max(nextWhole, Math.min(centred, keepsBar));
+}
+
+/** Scrolls the recorder after a take: the next card centred, the last take's buttons still in view. */
+export function revealAfterTake(takeCard: Element | null, nextCard: Element) {
+  const delta = afterTakeDelta(takeCard?.querySelector(".take-bar")?.getBoundingClientRect() ?? null, nextCard.getBoundingClientRect(), recorderBand(null));
+  if (Math.abs(delta) < 2) return;
+  window.scrollBy({ top: delta, behavior: reducedMotion() ? "auto" : "smooth" });
+}
+
 /** The band inside `root`'s page: below the pinned run-through row, above the player bar. */
 export function visibleBand(root: HTMLElement | null): Band {
   return bandBetween(root, ".runthrough-bar", ".player-controls");
