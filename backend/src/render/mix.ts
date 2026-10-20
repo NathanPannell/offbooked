@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
+import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { mixClips } from "./ffmpeg.ts";
 import { NORMALIZE_VERSION, normalizedTake, type TakeAudioRow } from "./takeaudio.ts";
 
@@ -85,6 +86,7 @@ async function make(ctx: Ctx, productionId: string, hash: string, takes: TakeAud
     const normalizedKey = `productions/${productionId}/mixes/${hash}.flac`;
     const streamKey = `productions/${productionId}/mixes/${hash}.m4a`;
     await Promise.all([ctx.storage.put(normalizedKey, await readFile(flac), "audio/flac"), ctx.storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
+    if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();
     await ctx.sql`
       insert into take_mixes (hash, production_id, normalized_key, stream_key, samples)
       values (${hash}, ${productionId}, ${normalizedKey}, ${streamKey}, ${samples})

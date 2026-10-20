@@ -8,7 +8,7 @@ import { startScriptParse, type ScriptSource } from "../parse/job.ts";
 import { PAGE_BREAK, ScriptInputError } from "../parse/pdf.ts";
 import { decodeText, detectSourceKind, type SourceKind } from "../parse/source.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
-import { RETENTION_DAYS } from "../retention.ts";
+import { ContentDeletedError, RETENTION_DAYS } from "../retention.ts";
 import { contentTypeForKey } from "../storage/storage.ts";
 import { charactersOf, characterView, linesOf, lineView, productionRows, productionView, sectionsOf, sectionView } from "../views.ts";
 
@@ -21,14 +21,20 @@ interface PerformanceDates {
   endsOn: string | null;
 }
 
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const deletionMoment = (endsOn: string) => Date.parse(`${endsOn}T12:00:00Z`) + RETENTION_DAYS * DAY_MS;
+
 // Performance dates from a create (no `current`) or update body. Every production has a final
 // date, because content is deleted RETENTION_DAYS after it: a new one without dates gets one year
-// from today, and a start date alone is a single performance. A final date whose deletion moment
-// (12:00 UTC on contentDeletesOn) has already passed is refused, so a typo can't delete a show.
+// from today, and a start date alone is a single performance. A new final date may be at most
+// RETENTION_DAYS - 1 days ago (UTC), so its deletion (12:00 UTC on contentDeletesOn) is always at
+// least 12 hours off and a typo can't delete a show. Once content is due, the final date is fixed.
 export function performanceDates(b: Body, current?: PerformanceDates, now = Date.now()): PerformanceDates {
   const start = optionalDate(b, "performanceStartsOn");
   const end = optionalDate(b, "performanceEndsOn");
   if (current && end === null) throw badRequest("A production needs a final performance date.");
+  if (current?.endsOn && end && end !== current.endsOn && deletionMoment(current.endsOn) <= now)
+    throw conflict("content_due", "This production's script and recordings are due for deletion, so its final performance can't be changed.");
   const startsOn = start === undefined ? (current?.startsOn ?? null) : start;
   let endsOn = end ?? current?.endsOn ?? null;
   if (!current && !endsOn) {
@@ -37,7 +43,7 @@ export function performanceDates(b: Body, current?: PerformanceDates, now = Date
     endsOn = startsOn ?? inAYear.toISOString().slice(0, 10);
   }
   if (startsOn && endsOn && startsOn > endsOn) throw badRequest("The first performance must be on or before the final one.");
-  if (endsOn && endsOn !== current?.endsOn && Date.parse(`${endsOn}T12:00:00Z`) + RETENTION_DAYS * DAY_MS <= now)
+  if (endsOn && endsOn !== current?.endsOn && endsOn < isoDay(now - (RETENTION_DAYS - 1) * DAY_MS))
     throw badRequest(
       `That final performance was more than ${RETENTION_DAYS - 1} days ago. Offbooked deletes a show's script and recordings ${RETENTION_DAYS} days after its final performance.`,
     );
@@ -125,7 +131,12 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
       source = { kind: "text", text };
     }
     await enforce(ctx.sql, ctx.log, `parse:${user.id}`, LIMITS.scriptParse, "Too many script uploads in the last hour. Try again later.");
-    await startScriptParse(ctx, p.id, source);
+    try {
+      await startScriptParse(ctx, p.id, source);
+    } catch (err) {
+      if (err instanceof ContentDeletedError) throw new HttpError(410, "content_deleted", err.message);
+      throw err;
+    }
     return reply.code(202).send({ scriptStatus: "parsing" });
   });
 

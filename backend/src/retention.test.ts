@@ -6,7 +6,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import { after, before, describe, test } from "node:test";
 import type { Ctx } from "./context.ts";
 import { scheduleRender, processDueRenders } from "./render/queue.ts";
-import { deleteProductionContent, dueContent, RETENTION_DAYS, startRetentionWorker, type RetentionWorker } from "./retention.ts";
+import { startScriptParse } from "./parse/job.ts";
+import {
+  ContentDeletedError,
+  deleteProductionContent,
+  dueContent,
+  RETENTION_DAYS,
+  startRetentionWorker,
+  sweepIfDeleted,
+  type RetentionWorker,
+} from "./retention.ts";
 import { performanceDates } from "./routes/productions.ts";
 import { SEED_SCENE } from "./seed-scene.ts";
 import type { LocalStorage } from "./storage/local.ts";
@@ -61,9 +70,11 @@ describe("performance dates (validation)", () => {
     for (const bad of ["2026-02-30", "2026-13-01", "20261101", "next week", "2026-11-1"])
       assert.throws(() => performanceDates({ performanceEndsOn: bad }, undefined, now), /must be a date/, bad);
     assert.throws(() => performanceDates({ performanceStartsOn: "2026-11-09", performanceEndsOn: "2026-11-08" }, undefined, now), /on or before/);
-    // 2026-10-13 + 7 days is 2026-10-20 12:00 UTC, still ahead at 09:00; a day earlier has passed.
-    assert.equal(performanceDates({ performanceEndsOn: "2026-10-13" }, undefined, now).endsOn, "2026-10-13");
-    assert.throws(() => performanceDates({ performanceEndsOn: "2026-10-12" }, undefined, now), /more than 6 days ago/);
+    // Six days ago is the earliest: its content goes at 12:00 UTC tomorrow. Seven days ago would go
+    // at 12:00 today, three hours after a slip in the date picker, so it is refused.
+    assert.equal(performanceDates({ performanceEndsOn: "2026-10-14" }, undefined, now).endsOn, "2026-10-14");
+    assert.throws(() => performanceDates({ performanceEndsOn: "2026-10-13" }, undefined, now), /more than 6 days ago/);
+    assert.throws(() => performanceDates({ performanceEndsOn: "2026-10-13" }, undefined, Date.parse("2026-10-20T00:00:01Z")), /more than 6 days ago/);
     assert.throws(() => performanceDates({ performanceStartsOn: "2026-09-01" }, undefined, now), /more than 6 days ago/, "a start alone is the final date");
   });
 
@@ -77,6 +88,9 @@ describe("performance dates (validation)", () => {
     // An unchanged final date that is already past isn't re-checked (the worker deletes it).
     const past = { startsOn: null, endsOn: "2026-01-01" };
     assert.deepEqual(performanceDates({ performanceStartsOn: "2025-12-31" }, past, now), { startsOn: "2025-12-31", endsOn: "2026-01-01" });
+    // Once the content is due, the final date is fixed, so a pass already deleting it can't race a move.
+    assert.throws(() => performanceDates({ performanceEndsOn: "2026-12-01" }, past, now), /due for deletion/);
+    assert.deepEqual(performanceDates({ performanceEndsOn: "2026-01-01" }, past, now), past, "sending the same date is fine");
   });
 });
 
@@ -130,21 +144,24 @@ describe("content retention", { skip: dbSkip }, () => {
       insert into productions (owner_id, title) values (${owner!.id}, 'Legacy, no date') returning id`;
     const [dated] = await t.ctx.sql<{ id: string }[]>`
       insert into productions (owner_id, title, performance_starts_on, performance_ends_on) values (${owner!.id}, 'Dated', '2026-11-01', '2026-11-03') returning id`;
+    const [later] = await t.ctx.sql<{ id: string }[]>`
+      insert into productions (owner_id, title, performance_date) values (${owner!.id}, 'Opens late', '2028-03-01') returning id`;
     // Re-running the migration's statements is what CI's second migrate run proves is safe.
     await t.ctx.sql.unsafe(await readFile(new URL("../migrations/013_performance_dates.sql", import.meta.url), "utf8"));
     const rows = await t.ctx.sql<{ id: string; startsOn: string | null; endsOn: string }[]>`
       select id, performance_starts_on::text as starts_on, performance_ends_on::text as ends_on from productions
-      where id = any(${[legacy!.id, undated!.id, dated!.id]}::uuid[])`;
+      where id = any(${[legacy!.id, undated!.id, dated!.id, later!.id]}::uuid[])`;
     const byId = new Map(rows.map((r) => [r.id, [r.startsOn, r.endsOn]]));
     assert.deepEqual(byId.get(legacy!.id), ["2026-12-01", "2027-10-20"]);
     assert.deepEqual(byId.get(undated!.id), [null, "2027-10-20"]);
     assert.deepEqual(byId.get(dated!.id), ["2026-11-01", "2026-11-03"], "existing dates are left alone");
+    assert.deepEqual(byId.get(later!.id), ["2028-03-01", "2028-03-01"], "a show opening after the backfill date keeps its content until it has played");
     await assert.rejects(
       t.ctx.sql`update productions set performance_starts_on = '2028-01-01' where id = ${dated!.id}`,
       /productions_performance_order/,
       "the database refuses a start after the end",
     );
-    await t.ctx.sql`delete from productions where id = any(${[legacy!.id, undated!.id, dated!.id]}::uuid[])`;
+    await t.ctx.sql`delete from productions where id = any(${[legacy!.id, undated!.id, dated!.id, later!.id]}::uuid[])`;
   });
 
   test("deletes a production's script, recordings and renders for good, keeps shared TTS and a tombstone", { timeout: 120_000 }, async () => {
@@ -207,6 +224,10 @@ describe("content retention", { skip: dbSkip }, () => {
         },
       }),
     };
+    assert.equal(await deleteProductionContent(ctx, doomed.id), null, "not due yet: nothing is touched");
+    assert.equal(sweeps, 0);
+    assert.equal(await count("lines", doomed.id), await count("lines", kept.id));
+    await t.ctx.sql`update productions set performance_ends_on = ${day(-8)} where id = ${doomed.id}`;
     const result = await deleteProductionContent(ctx, doomed.id);
     assert.equal(sweeps, 2);
     assert.ok(result && result.objects > before.filter((f) => f.includes(".")).length, "the late file counts too");
@@ -239,10 +260,20 @@ describe("content retention", { skip: dbSkip }, () => {
     // Safe to run again: nothing left to do.
     assert.equal(await deleteProductionContent(t.ctx, doomed.id), null);
     assert.equal(await t.ctx.storage.deletePrefix(`productions/${doomed.id}/`), 0);
+
+    // A writer that finishes after the last sweep (a slow upload, render or parse) sweeps up after itself.
+    assert.equal(await sweepIfDeleted(t.ctx, kept.id), false, "a live production is left alone");
+    await t.ctx.storage.put(`productions/${doomed.id}/renders/late.m4a`, Buffer.from("x"), "audio/mp4");
+    assert.equal(await sweepIfDeleted(t.ctx, doomed.id), true);
+    assert.equal(await exists(folder), false);
+    await assert.rejects(startScriptParse(t.ctx, doomed.id, { kind: "text", text: SCENE }), ContentDeletedError);
+    assert.equal(await count("scripts", doomed.id), 0);
+    assert.equal(await exists(folder), false);
   });
 
   test("a failed storage delete leaves the production for the next pass", async () => {
     const { id } = await productionWithScript(t, director, SEED_SCENE, "Flaky");
+    await t.ctx.sql`update productions set performance_ends_on = ${day(-8)} where id = ${id}`;
     const ctx: Ctx = {
       ...t.ctx,
       storage: Object.assign(Object.create(Object.getPrototypeOf(t.ctx.storage)), t.ctx.storage, {
@@ -322,6 +353,8 @@ describe("retention worker", { skip: dbSkip }, () => {
 
     // Further back than the API allows (an older production, or time passing): deleted on the next pass.
     await t.ctx.sql`update productions set performance_ends_on = ${day(-30)} where id = ${p.id}`;
+    const moved = await t.app.inject({ method: "PATCH", url: `/api/productions/${p.id}`, headers: bearer(director), payload: { performanceEndsOn: day(30) } });
+    assert.equal(moved.statusCode, 409, "a due show's final date can't move");
     worker.kick();
     await waitFor(() => deleted(p.id));
     await waitFor(() => worker.state().dueAt === null);

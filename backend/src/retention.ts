@@ -37,11 +37,19 @@ export async function dueContent(sql: Sql): Promise<{ dueIds: string[]; nextMs: 
 // written while the rows went (an upload already past its auth check). A failure anywhere leaves
 // content_deleted_at null, so the next pass picks the production up again. Returns null when the
 // content was already deleted.
+//
+// Only a production that is due is touched (checked here, not just by the caller), and once it is
+// due its final date can't change (routes/productions.ts), so a stale list can't delete a show whose
+// date just moved. Writers that finish after the last sweep (an upload, normalization, mix, render
+// or parse) call sweepIfDeleted after their own writes, so nothing written late survives.
 export async function deleteProductionContent(ctx: Ctx, productionId: string): Promise<{ objects: number } | null> {
   const { sql, storage } = ctx;
-  // Archiving first stops new takes and parses: invite, join and upload routes refuse archived productions.
+  // Archiving first turns the cast's invite and join links away (410) before anything goes.
   const [p] = await sql`
-    update productions set archived_at = coalesce(archived_at, now()) where id = ${productionId} and content_deleted_at is null returning id`;
+    update productions p set archived_at = coalesce(archived_at, now())
+    where p.id = ${productionId} and p.content_deleted_at is null and p.performance_ends_on is not null
+      and (((p.performance_ends_on + ${RETENTION_DAYS}::int) + time '12:00') at time zone 'UTC') <= now()
+    returning p.id`;
   if (!p) return null;
   const prefix = `productions/${productionId}/`;
   let objects = await storage.deletePrefix(prefix);
@@ -62,6 +70,24 @@ export async function deleteProductionContent(ctx: Ctx, productionId: string): P
   objects += await storage.deletePrefix(prefix);
   ctx.log.info({ productionId, objects }, "production content deleted (retention)");
   return { objects };
+}
+
+// Writers call this after putting objects under productions/<id>/ and before recording them. If the
+// production's content was deleted meanwhile (after deleteProductionContent's last sweep), the
+// folder is swept again and it returns true, so the writer stops.
+export async function sweepIfDeleted(ctx: Ctx, productionId: string): Promise<boolean> {
+  const [deleted] = await ctx.sql`select 1 from productions where id = ${productionId} and content_deleted_at is not null`;
+  if (!deleted) return false;
+  await ctx.sql`delete from take_mixes where production_id = ${productionId}`;
+  await ctx.storage.deletePrefix(`productions/${productionId}/`);
+  ctx.log.warn({ productionId }, "swept a write that finished after the production's content was deleted");
+  return true;
+}
+
+export class ContentDeletedError extends Error {
+  constructor() {
+    super("This production's script and recordings were deleted after its final performance.");
+  }
 }
 
 export interface RetentionWorker {

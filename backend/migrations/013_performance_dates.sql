@@ -6,10 +6,11 @@ alter table productions add column if not exists performance_ends_on date;
 alter table productions add column if not exists content_deleted_at timestamptz;
 
 -- Productions made before performance dates existed: the old date becomes the opening night, and
--- every production without a final date gets one year from the day this shipped (2026-10-20).
-update productions set performance_starts_on = performance_date
-  where performance_starts_on is null and performance_date is not null and performance_date <= date '2027-10-20';
-update productions set performance_ends_on = date '2027-10-20' where performance_ends_on is null;
+-- every production without a final date gets one year from the day this shipped (2026-10-20), or
+-- its old date when that is later, so no show loses its content before it opens.
+update productions set performance_starts_on = performance_date where performance_starts_on is null and performance_date is not null;
+update productions set performance_ends_on = greatest(coalesce(performance_date, date '2027-10-20'), date '2027-10-20')
+  where performance_ends_on is null;
 
 alter table productions drop constraint if exists productions_performance_order;
 alter table productions add constraint productions_performance_order

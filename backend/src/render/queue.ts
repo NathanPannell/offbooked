@@ -7,6 +7,7 @@ import { notifyCastComplete } from "../email/notify.ts";
 import { concatToM4a, makeSilence } from "./ffmpeg.ts";
 import { mixedClip, mixHash, voiceTakes } from "./mix.ts";
 import { normalizedTake, type TakeAudioRow } from "./takeaudio.ts";
+import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { TTS_PRIORITY, type TtsRequest } from "../tts/service.ts";
 import { contentHash, planRender, RENDER_SETTINGS, type PlanLine, type TimingEntry } from "./plan.ts";
 
@@ -228,6 +229,7 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
       await concatToM4a(files, workDir, out);
       const key = `productions/${job.productionId}/renders/${job.id}.m4a`;
       await storage.put(key, await readFile(out), "audio/mp4");
+      if (await sweepIfDeleted(ctx, job.productionId)) throw new ContentDeletedError();
       const takeIds = [...new Set(lines.flatMap((l) => l.mixTakeIds ?? (l.takeId && takeSamples.has(l.takeId) ? [l.takeId] : [])))];
       await sql`update renders set status = 'ready', content_hash = ${hash}, storage_key = ${key},
                 duration_ms = ${Math.round((plan.totalSamples * 1000) / RENDER_SETTINGS.sampleRate)}, timing = ${sql.json(plan.timing as never)},

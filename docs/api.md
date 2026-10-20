@@ -96,7 +96,7 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 
 ### Performance dates and validation
 
-`performanceStartsOn` and `performanceEndsOn` are `YYYY-MM-DD` calendar dates. `POST` and `PATCH` return 400 `bad_request` (with a message to show as it is) when a date isn't real (`2026-02-30`), the start is after the final date, `performanceEndsOn` is `null` on `PATCH`, or the final date is more than 6 days ago, so its content would already be due for deletion. An unchanged final date is not re-checked.
+`performanceStartsOn` and `performanceEndsOn` are `YYYY-MM-DD` calendar dates. `POST` and `PATCH` return 400 `bad_request` (with a message to show as it is) when a date isn't real (`2026-02-30`), the start is after the final date, `performanceEndsOn` is `null` on `PATCH`, or a new final date is more than 6 days ago (UTC), so its deletion would be less than about 12 hours off. An unchanged final date is not re-checked. Once a production's content is due, changing its final date is 409 `content_due`.
 
 ### Content retention
 
@@ -106,7 +106,7 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 - Rows: scripts (with their raw text), sections, characters, lines, takes, renders, take mixes, practice runs and part assignments.
 - Kept: the production row as an archived tombstone (title kept, `content_deleted_at` set), the actors (so their links answer 410 "This production has wrapped" instead of looking forged), notification records, and TTS clips, which are shared across productions by hash.
 
-Cast and join links return 410 `invite_expired` afterwards, and the production drops out of `GET /api/productions`. The job is idempotent: a failure leaves `content_deleted_at` unset and the next pass finishes it.
+Cast and join links return 410 `invite_expired` afterwards, and the production drops out of `GET /api/productions`. The job is idempotent: a failure leaves `content_deleted_at` unset and the next pass finishes it. A take upload, normalization, mix, render or script upload that finishes after the deletion sweeps the folder again and fails (a take or script upload with 410 `content_deleted`).
 
 ## Cast (director)
 
