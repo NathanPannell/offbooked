@@ -9,11 +9,12 @@ import { Brand } from "../../components/Brand";
 import { CharacterName } from "../../components/CharacterName";
 import { Dialog } from "../../components/Dialog";
 import { InAppBanner } from "../../components/InAppBanner";
+import { PartProgress } from "../../components/PartProgress";
 import { Loading } from "../../components/Loading";
-import { ProgressBar } from "../../components/ProgressBar";
 import { RecordDock } from "../../components/RecordDock";
 import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
+import { claimFirstTakeHint } from "../../audio/micPrefs";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useResource } from "../../lib/useResource";
 import { keepInView, recorderBand } from "../../player/follow";
@@ -24,12 +25,14 @@ import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
 import { NameEditor } from "./NameEditor";
 import { PickUpParts } from "./PickUpParts";
+import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake, type AuthorContext } from "./recordedBy";
 import { Wrapped } from "./Wrapped";
 
 const ADVANCE_DELAY_MS = 700;
 const AUTO_ADVANCE_KEY = "offbooked.autoAdvance";
 const KEEP_RECORDING_KEY = "offbooked.keepRecording";
 const HEAR_PARTNERS_KEY = "offbooked.hearPartners";
+const FIRST_TAKE_HINT = "Moves to the next line when you finish. Change this in mic settings.";
 
 function useStoredFlag(key: string, fallback: boolean) {
   const [value, setValue] = useState(() => {
@@ -99,6 +102,10 @@ export function RecordSession({
   /** Client take ids deleted on this screen, so their upload no longer counts as the line's take. */
   const [deleted, setDeleted] = useState(new Set<string>());
   const [pickingUp, setPickingUp] = useState(false);
+  /** The one hint on the device's first take, shown while it records. */
+  const [firstTakeHint, setFirstTakeHint] = useState(false);
+  const directorName = invite.production.directorName;
+  const ctx: AuthorContext = useMemo(() => ({ me: "actor", actorName: "someone in the cast", directorName }), [directorName]);
 
   const recorder = useTakeRecorder({
     onLimit: () => {
@@ -116,11 +123,13 @@ export function RecordSession({
   const activePart = useMemo(() => {
     if (parts.length <= 1) return null;
     if (chosenPart && parts.some((p) => p.id === chosenPart)) return chosenPart;
-    return (parts.find((p) => allLines.some((l) => saysPart(l, p.id) && !lineDone(l))) ?? parts[0]!).id;
+    return (parts.find((p) => allLines.some((l) => saysPart(l, p.id) && !lineRecorded(l))) ?? parts[0]!).id;
   }, [parts, chosenPart, allLines]);
   const actorLines: ActorLine[] = useMemo(() => (activePart ? allLines.filter((l) => saysPart(l, activePart)) : allLines), [allLines, activePart]);
   /** Parts other than the one in view that still have lines needing a voice. */
-  const otherParts = parts.filter((p) => p.id !== activePart).map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineDone(l)).length }));
+  const otherParts = parts
+    .filter((p) => p.id !== activePart)
+    .map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineRecorded(l)).length }));
 
   const live = useLiveTake({
     recording: recorder.recording,
@@ -140,18 +149,21 @@ export function RecordSession({
     },
     [myItems, token, deleted],
   );
-  // A line is done once it has the actor's own take, or a take by whoever had the part before
-  // (it keeps playing; the actor can record over it). A stand-in or the computer voice still needs them.
+  // A line is recorded once anyone has a take on it: this actor, someone else in the cast or a
+  // director. Someone else's keeps playing until the actor records their own.
   const isRecorded = useCallback(
     (lineId: string) => {
       const l = allLines.find((x) => x.line.id === lineId);
-      return !!l?.take || l?.current?.source === "actor" || !!uploadFor(lineId);
+      return (!!l && lineRecorded(l)) || !!uploadFor(lineId);
     },
     [allLines, uploadFor],
   );
+  /** The actor's own take is on the line: saved, or recorded on this screen. */
+  const hasOwn = useCallback((l: ActorLine) => !!ownTake(l, ctx) || localTakes.has(l.line.id) || !!uploadFor(l.line.id), [ctx, localTakes, uploadFor]);
   const recordedCount = actorLines.filter((l) => isRecorded(l.line.id)).length;
   const total = actorLines.length;
   const allRecorded = total > 0 && recordedCount === total;
+  const recordedSome = actorLines.some(hasOwn);
   const unsaved = myItems.filter((i) => i.status !== "saved");
 
   const scrollToLine = (lineId: string) => {
@@ -172,16 +184,20 @@ export function RecordSession({
   // Resume at the first unrecorded line.
   useEffect(() => {
     if (currentId || actorLines.length === 0) return;
-    const first = actorLines.find((l) => !lineDone(l)) ?? actorLines[0]!;
+    const first = actorLines.find((l) => !lineRecorded(l)) ?? actorLines.find((l) => !ownTake(l, ctx)) ?? actorLines[0]!;
     setCurrentId(first.line.id);
     if (first !== actorLines[0]) setTimeout(() => scrollToLine(first.line.id), 100);
-    if (actorLines.every(lineDone)) setView("wrapped");
+    // Someone who picked up lines others recorded lands here, to listen and record their own.
+    if (opensOnWrapped(actorLines, ctx)) setView("wrapped");
     setScores((s) => {
       const next = new Map(s);
-      for (const l of actorLines) if (l.take?.stt && !next.has(l.line.id)) next.set(l.line.id, { takeKey: l.take.id, result: l.take.stt });
+      for (const l of actorLines) {
+        const own = ownTake(l, ctx);
+        if (own?.stt && !next.has(l.line.id)) next.set(l.line.id, { takeKey: own.id, result: own.stt });
+      }
       return next;
     });
-  }, [actorLines, currentId]);
+  }, [actorLines, currentId, ctx]);
 
   // Karaoke-style follow while a take records: the next word to say stays near the middle of the
   // screen, with a few rows of what's coming below it. A scroll by hand pauses it for a moment.
@@ -248,11 +264,13 @@ export function RecordSession({
 
   useEffect(() => () => localTakesRef.current.forEach((t) => URL.revokeObjectURL(t.url)), []);
 
-  const nextUnrecorded = (afterId: string, justRecorded: string): string | null => {
-    const index = actorLines.findIndex((l) => l.line.id === afterId);
-    const ordered = [...actorLines.slice(index + 1), ...actorLines.slice(0, index + 1)];
-    return ordered.find((l) => l.line.id !== justRecorded && !isRecorded(l.line.id))?.line.id ?? null;
-  };
+  /** The next line to record: one nobody has recorded, else one someone else has. */
+  const nextLine = (justRecorded: string): string | null =>
+    nextToRecord(
+      actorLines.map((l) => ({ id: l.line.id, recorded: isRecorded(l.line.id), mine: hasOwn(l) })),
+      justRecorded,
+      new Set([justRecorded]),
+    );
 
   const startRecording = async (lineId: string) => {
     if (recorder.recording || cueing) return;
@@ -267,6 +285,7 @@ export function RecordSession({
       setCueing(null);
     }
     if (!(await recorder.start(lineId))) return;
+    if (autoAdvance && claimFirstTakeHint()) setFirstTakeHint(true);
     setAnnouncement("Recording. Say your line, then tap stop.");
     const others = (item?.together ?? []).flatMap((t) => (t.audioUrl ? [t.audioUrl] : []));
     if (hearPartners && others.length) accompaniment.start(others);
@@ -325,6 +344,7 @@ export function RecordSession({
   const stopRecording = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
     const lineId = recorder.recording?.lineId;
     accompaniment.stop();
+    setFirstTakeHint(false);
     const recorded = await recorder.stop();
     if (!recorded || !lineId) return;
     if (recorded.tooShort) {
@@ -368,7 +388,7 @@ export function RecordSession({
   stopRef.current = () => void stopRecording();
 
   const goToNext = (lineId: string, recordNext = false) => {
-    const next = nextUnrecorded(lineId, lineId);
+    const next = nextLine(lineId);
     setTimeout(() => {
       if (next) {
         setCurrentId(next);
@@ -417,14 +437,14 @@ export function RecordSession({
     l.line.voiceIds
       ? l.line.voiceIds.flatMap((id) => characterNames.get(id) ?? []).join(" & ") || (characterNames.get(l.line.characterId ?? "") ?? "")
       : (characterNames.get(l.line.characterId ?? "") ?? "");
-  // The take that Delete removes: the one just saved here, else the actor's own latest.
+  // The take that Delete removes: the one just saved here, else the actor's own latest. Never someone else's.
   const deletableTake = (l: ActorLine): string | null => {
     const local = localTakes.get(l.line.id);
     if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
-    return l.take?.id ?? null;
+    return ownTake(l, ctx)?.id ?? null;
   };
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
-  const progressLabel = `${Math.min(recordedCount + (allRecorded ? 0 : 1), total)} of ${total}`;
+  const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
   const failed = unsaved.filter((i) => i.status === "failed");
 
   if (view === "wrapped") {
@@ -466,15 +486,15 @@ export function RecordSession({
               {invite.production.title}
               <NameEditor name={invite.actor.name} onSave={async (name) => onRenamed((await api.rename(name)).actor)} />
             </p>
-            <p className="record-progress" aria-live="polite">
-              {allRecorded ? (
-                `All ${total} recorded`
-              ) : (
+            <h1 className="record-part part-title">
+              {partName ? (
                 <>
-                  Line <span className="nums">{progressLabel}</span>
+                  Recording for <CharacterName name={partName} />
                 </>
+              ) : (
+                "Your lines"
               )}
-            </p>
+            </h1>
           </div>
           <SttChip state={sttState} onEnable={() => stt.enable()} />
           <button type="button" className="icon-btn" onClick={() => setPickingUp(true)} aria-label="Pick up more lines" title="Pick up more lines">
@@ -486,7 +506,7 @@ export function RecordSession({
             </Link>
           )}
         </div>
-        <ProgressBar value={recordedCount} max={total} label="Lines recorded" />
+        {total > 0 && <PartProgress total={total} recorded={recordedCount} label={partName ? `${partName}'s lines recorded` : "Lines recorded"} />}
         {activePart && (
           <div className="part-switch" role="group" aria-label="Part to record">
             {parts.map((p) => {
@@ -559,10 +579,11 @@ export function RecordSession({
                       recording={recorder.recording?.lineId === l.line.id}
                       localTake={localTakes.get(l.line.id) ?? null}
                       upload={uploadFor(l.line.id)}
+                      author={lineTake(l, ctx)?.author ?? null}
                       score={scores.get(l.line.id) ?? null}
                       playing={playback.playing}
                       liveCursor={live?.lineId === l.line.id && live.mode === "live" ? live.cursor : null}
-                      liveHint={live?.lineId === l.line.id ? liveHint(live.mode, autoAdvance, keepRecording) : undefined}
+                      liveHint={live?.lineId === l.line.id && !autoAdvance && live.mode === "live" ? "Tap stop when you're done." : undefined}
                       progress={playback.progress}
                       onPlay={playback.play}
                       onPlayTogether={playback.playTogether}
@@ -577,7 +598,7 @@ export function RecordSession({
             </section>
           );
         })}
-        {allRecorded && (
+        {allRecorded && recordedSome && (
           <button type="button" className="btn btn-secondary btn-block" onClick={() => setView("wrapped")}>
             Done for now
           </button>
@@ -590,35 +611,33 @@ export function RecordSession({
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
-        hint={
-          cueing
-            ? "Listening to the cue… tap to start now."
-            : current && isRecorded(current.line.id)
-              ? "Recorded. Tap to record it again."
-              : autoAdvance
-                ? "Tap, then say your line."
-                : "Tap, say your line, tap to stop."
-        }
+        note={cueing ? "Listening to the cue… tap to start now." : recorder.recording && firstTakeHint ? FIRST_TAKE_HINT : undefined}
         disabled={!current}
         label={current ? `Record line ${actorLines.indexOf(current) + 1}` : "Record"}
         onToggle={() => (cueing ? accompaniment.stop() : recorder.recording ? void stopRecording() : current && void startRecording(current.line.id))}
         onRetry={() => currentId && void startRecording(currentId)}
-      >
-        <div className="dock-options">
-          <label className="checkbox dock-option">
-            <input type="checkbox" checked={autoAdvance} onChange={(e) => setAutoAdvance(e.target.checked)} />
-            Auto-advance
-          </label>
-          <label className={`checkbox dock-option${autoAdvance ? "" : " is-off"}`}>
-            <input type="checkbox" checked={keepRecording} disabled={!autoAdvance} onChange={(e) => setKeepRecording(e.target.checked)} />
-            Keep recording
-          </label>
-          <label className="checkbox dock-option" title="Plays the cue before each line, and the others' takes during shared lines. Wear headphones.">
-            <input type="checkbox" checked={hearPartners} onChange={(e) => setHearPartners(e.target.checked)} />
-            Hear partners
-          </label>
-        </div>
-      </RecordDock>
+        onDeviceChange={recorder.setDevice}
+        settings={
+          <>
+            <h3 className="eyebrow">While you record</h3>
+            <label className="checkbox">
+              <input type="checkbox" checked={autoAdvance} onChange={(e) => setAutoAdvance(e.target.checked)} />
+              Go to the next line when I finish
+            </label>
+            <label className={`checkbox${autoAdvance ? "" : " is-off"}`}>
+              <input type="checkbox" checked={keepRecording} disabled={!autoAdvance} onChange={(e) => setKeepRecording(e.target.checked)} />
+              Keep recording the next line
+            </label>
+            <label className="checkbox">
+              <input type="checkbox" checked={hearPartners} onChange={(e) => setHearPartners(e.target.checked)} />
+              <span>
+                Hear my scene partners
+                <span className="field-hint checkbox-hint">Plays the cue before each line, and the others on shared lines. Wear headphones.</span>
+              </span>
+            </label>
+          </>
+        }
+      />
       <Dialog open={pickingUp} onClose={() => setPickingUp(false)} title="Pick up more lines">
         {pickingUp && <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} />}
       </Dialog>
@@ -627,12 +646,6 @@ export function RecordSession({
       </p>
     </div>
   );
-}
-
-function liveHint(mode: "live" | "energy", autoAdvance: boolean, keepRecording: boolean): string | undefined {
-  if (!autoAdvance) return mode === "live" ? "Tap stop when you're done." : undefined;
-  if (mode === "energy") return "Moves on after a pause.";
-  return keepRecording ? "Moves on and keeps recording when you finish." : "Moves on when you finish the line.";
 }
 
 function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>["state"]; onEnable: () => void }) {
@@ -659,9 +672,4 @@ function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>[
 /** Whether a line belongs to a part: its speaker, or one of a shared line's voices. */
 function saysPart(l: ActorLine, characterId: string): boolean {
   return l.line.characterId === characterId || (l.line.voiceIds ?? []).includes(characterId);
-}
-
-/** A line with the actor's own take, or an earlier cast member's that keeps playing. */
-function lineDone(l: ActorLine): boolean {
-  return !!l.take || l.current?.source === "actor";
 }

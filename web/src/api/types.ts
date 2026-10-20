@@ -64,8 +64,18 @@ export interface Take {
   durationMs: number;
   createdAt: string;
   stt: SttResult | null;
-  /** Who recorded it. Missing on older servers, where every take is the actor's. */
-  recordedBy?: "actor" | "standin";
+  /**
+   * Who recorded it: a cast member or a director, by name. Older servers send "actor" or "standin"
+   * (a director's take), or nothing, where every take is the actor's. Read it with `takeAuthor`.
+   */
+  recordedBy?: TakeRecorder | "actor" | "standin";
+  /** Whether the person asking recorded it. Missing on older servers. */
+  mine?: boolean;
+}
+
+export interface TakeRecorder {
+  kind: "actor" | "director";
+  name: string;
 }
 
 /** Where a line's audio comes from in the run-through: a cast take, a stand-in take, a synthetic voice, or nothing yet. */

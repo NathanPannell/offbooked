@@ -180,6 +180,14 @@
   color: var(--bad);
 }
 
+/* "Recording for HAMLET": the part's name in its colour, at the heading's size. */
+.part-title .character-name {
+  font-family: inherit;
+  font-size: 0.86em;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
 .section-nav {
   display: flex;
   align-items: center;
@@ -2618,20 +2626,6 @@
   background: var(--paper);
 }
 
-/* What plays now on a line the actor hasn't recorded: a stand-in, or an earlier cast member's take. */
-.placeholder-bar {
-  border-top-style: dashed;
-}
-
-.take-play.is-placeholder {
-  border-style: dashed;
-  color: var(--ink-soft);
-}
-
-.placeholder-note {
-  min-width: 10em;
-}
-
 /* Picking up more parts (recorder dialog, wrapped screen, no lines left). */
 .pick-up {
   display: flex;
@@ -2791,8 +2785,16 @@
   gap: var(--s-3);
 }
 
+.scene-title-row {
+  flex-wrap: wrap;
+}
+
 .scene-title-row h1 {
   font-size: clamp(28px, 6vw, 40px);
+}
+
+.scene-head .back-link {
+  min-height: var(--tap);
 }
 
 .scene-picker .input {
@@ -3107,7 +3109,7 @@
   margin: 0 auto;
 }
 
-.record-header .progress {
+.record-header .part-progress {
   max-width: 688px;
   width: 100%;
   margin: 0 auto;
@@ -3125,12 +3127,55 @@
   overflow: visible;
 }
 
-.record-progress {
+.record-part {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.012em;
+}
+
+/* One part's progress: the share recorded in green over the rest, then the counts. */
+.part-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-part {
+  height: 8px;
+  background: var(--paper-deep);
+}
+
+.progress-part > span {
+  background: var(--good);
+}
+
+.part-progress-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--ink-soft);
+}
+
+.part-progress-counts .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+
+.part-progress-done .dot {
+  background: var(--good);
+}
+
+.part-progress-left .dot {
+  background: var(--paper-deep);
+  box-shadow: inset 0 0 0 1px var(--edge);
 }
 
 /* An actor with several parts records one at a time. */
@@ -3192,7 +3237,7 @@
 .record-main {
   max-width: 720px;
   margin: 0 auto;
-  padding: var(--s-4) var(--s-4) calc(244px + var(--safe-bottom));
+  padding: var(--s-4) var(--s-4) calc(200px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -3236,17 +3281,43 @@
   opacity: 0.8;
 }
 
-.line-card.is-current {
-  border-color: var(--edge-strong);
-  box-shadow: var(--shadow);
+.line-card.is-current,
+.line-card.is-recording {
+  border-color: var(--sun);
+  background: var(--sun-soft);
+  box-shadow:
+    0 0 0 1px var(--sun),
+    var(--shadow);
   opacity: 1;
 }
 
 .line-card.is-recording {
-  border-color: var(--rec);
   box-shadow:
-    0 0 0 1px var(--rec),
+    0 0 0 2px var(--sun),
     var(--shadow);
+}
+
+.line-card.is-recording .my-line {
+  background: var(--marker);
+  box-shadow: 0 0 0 8px var(--marker);
+}
+
+.line-card.is-current .cue,
+.line-card.is-recording .cue {
+  background: #fff;
+}
+
+.recorded-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.recorded-by.is-mine {
+  color: var(--good);
 }
 
 .line-card-top {
@@ -3329,10 +3400,10 @@
   font-size: 23px;
 }
 
-/* Live highlighting while a take records: said words in ink with a soft red underline, the next
-   word hinted, the rest quieter but readable. Colour changes only, no movement. */
+/* Live highlighting while a take records: each word heard turns bold and underlined in ink, the
+   next word gets a quiet ochre underline, the rest stay readable on the highlighter. */
 .my-text.is-live .lw {
-  color: var(--muted);
+  color: var(--ink-soft);
   text-decoration-line: underline;
   text-decoration-thickness: 2px;
   text-decoration-color: transparent;
@@ -3345,12 +3416,13 @@
 
 .my-text.is-live .lw-lit {
   color: var(--ink);
-  text-decoration-color: var(--accent-line);
+  font-weight: 700;
+  text-decoration-color: var(--ink);
 }
 
 .my-text.is-live .lw-next {
   color: var(--ink);
-  text-decoration-color: var(--line-strong);
+  text-decoration-color: var(--sun);
 }
 
 .lw-dir {
@@ -3373,15 +3445,53 @@
   gap: var(--s-2);
 }
 
-/* After a take: play it (with a quiet progress line), play it with the others on a shared line,
-   the verdict, then redo and delete tucked to the right. */
+/* After a take: listen (with a quiet progress line), redo or record your own, and delete, on one
+   row; playing it with the others on a shared line and the verdict sit under it. */
 .take-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+
+.take-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.take-actions .btn {
+  min-height: var(--tap);
+  padding: 0 10px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.take-actions .take-play {
+  margin-right: 4px;
+}
+
+.take-actions svg {
+  flex: none;
+}
+
+.take-actions .take-time {
+  margin-left: auto;
+  font-size: var(--text-sm);
+}
+
+.take-extra {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s-2);
-  padding-top: var(--s-3);
-  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 400px) {
+  .take-actions .take-time {
+    display: none;
+  }
 }
 
 .take-play {
@@ -3389,9 +3499,10 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
+  min-height: var(--tap);
   padding: 0 14px 0 12px;
   overflow: hidden;
+  white-space: nowrap;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-pill);
   background: #fff;
@@ -3435,25 +3546,9 @@
   color: var(--accent-text);
 }
 
-.take-tools {
-  display: inline-flex;
-  gap: 2px;
-  margin-left: auto;
-}
-
-.take-tools .btn {
-  color: var(--ink-soft);
-}
-
 .take-delete:hover,
 .take-delete:focus-visible {
   color: var(--bad);
-}
-
-@media (max-width: 380px) {
-  .take-tools {
-    margin-left: 0;
-  }
 }
 
 .my-line-who {
@@ -3603,13 +3698,130 @@
   overflow-y: auto;
 }
 
-.dock-hint {
-  font-size: 15px;
+.dock-note {
+  max-width: 420px;
+  font-size: var(--text-sm);
   color: var(--ink-soft);
   text-align: center;
-  min-height: 40px;
+}
+
+.dock-row {
   display: grid;
-  place-items: center;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: min(420px, 100%);
+}
+
+.dock-side {
+  display: flex;
+  padding-left: var(--s-5);
+}
+
+.dock-gear {
+  color: var(--ink-soft);
+}
+
+/* Before the first take on a device: a quick mic check, with Skip. */
+.first-mic-check {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: min(480px, 100%);
+  padding: 10px var(--s-3) 10px var(--s-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  font-size: var(--text-sm);
+}
+
+.first-mic-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-1) var(--s-2);
+}
+
+.first-mic-check-row .mic-test {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.first-mic-check-row > .btn,
+.mic-test .btn {
+  min-height: var(--tap);
+}
+
+.mic-test-live {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--tap);
+  color: var(--ink-soft);
+}
+
+.mic-test-live .waveform {
+  height: 32px;
+}
+
+.mic-test-question {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--tap);
+}
+
+.mic-test-again {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--s-1);
+  margin-left: -10px;
+}
+
+.mic-test-again .btn {
+  min-height: var(--tap);
+  padding: 0 10px;
+}
+
+/* Mic settings, behind the gear. */
+.mic-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.mic-settings-options {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+}
+
+.mic-settings-options .eyebrow {
+  margin-bottom: var(--s-1);
+}
+
+.mic-settings-options .checkbox {
+  align-items: flex-start;
+  padding: 12px 0;
+  min-height: var(--tap);
+  line-height: 1.35;
+}
+
+.mic-settings-options .checkbox input {
+  flex: none;
+  margin: 1px 0 0;
+}
+
+.mic-settings-options .checkbox.is-off {
+  color: var(--faint);
+  cursor: default;
+}
+
+.checkbox-hint {
+  display: block;
+  margin-top: 2px;
 }
 
 .dock-meta {
@@ -3639,31 +3851,6 @@
   font-size: 14px;
   white-space: nowrap;
   color: var(--ink);
-}
-
-.dock-options {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  column-gap: var(--s-5);
-  margin-top: calc(var(--s-1) * -1);
-  margin-bottom: -10px;
-  font-size: var(--text-sm);
-  color: var(--ink-soft);
-}
-
-.dock-option {
-  gap: var(--s-2);
-}
-
-.dock-option input {
-  width: 18px;
-  height: 18px;
-}
-
-.dock-option.is-off {
-  color: var(--faint);
-  cursor: default;
 }
 
 .waveform {
@@ -3814,6 +4001,34 @@
 
 .wrapped-actions {
   gap: 10px;
+}
+
+.pick-up-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 600 var(--text-md) / 1.3 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pick-up-chevron {
+  color: var(--muted);
+  transition: transform var(--fast) var(--ease);
+}
+
+.pick-up-toggle[aria-expanded="true"] .pick-up-chevron {
+  transform: rotate(180deg);
+}
+
+.pick-up-body {
+  margin-top: var(--s-3);
 }
 
 /* ======================================================================
@@ -4298,6 +4513,10 @@
   .rec-dot,
   .record-button.is-recording {
     animation: none;
+  }
+
+  .pick-up-chevron {
+    transition: none;
   }
 
   .act-progress > span {

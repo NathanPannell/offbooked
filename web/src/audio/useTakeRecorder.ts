@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/client";
-import { MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
+import { rememberedMic, rememberMic } from "./micPrefs";
+import { micConstraints, MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
 import { useWakeLock } from "./wakeLock";
 
 /** Only a safety net for a take left running by mistake: real takes never get near it. */
@@ -43,7 +44,7 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
   const start = useCallback(async (lineId: string): Promise<boolean> => {
     if (takeRef.current) return false;
     setMicError(null);
-    const mic = (micRef.current ??= new MicSession());
+    const mic = (micRef.current ??= new MicSession(micConstraints(rememberedMic())));
     if (!mic.isOpen) {
       setMicStatus("requesting");
       try {
@@ -76,6 +77,15 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     return { ...recorded, tooShort: recorded.durationMs < MIN_TAKE_MS || recorded.blob.size === 0 };
   }, []);
 
+  /** Remembers the mic picked in mic settings; the next take opens it. */
+  const setDevice = useCallback((deviceId: string | null) => {
+    rememberMic(deviceId);
+    if (takeRef.current) return;
+    micRef.current?.close();
+    micRef.current = null;
+    setMicStatus("idle");
+  }, []);
+
   return {
     recording,
     elapsed,
@@ -86,6 +96,7 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     capture: micRef.current?.capture ?? null,
     start,
     stop,
+    setDevice,
   };
 }
 

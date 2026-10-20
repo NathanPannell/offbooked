@@ -2,32 +2,29 @@ import { ArrowLeft, Headphones } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError, errorMessage } from "../../api/client";
-import { titleCase } from "../../lib/format";
 import { productions, script as scriptApi, standins } from "../../api/director";
-import type { ActorLine, AudioSource, Section, SectionLine } from "../../api/types";
+import type { ActorLine, Section, SectionLine } from "../../api/types";
 import { usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { CharacterName } from "../../components/CharacterName";
 import { Loading } from "../../components/Loading";
+import { PartProgress } from "../../components/PartProgress";
 import { RecordDock } from "../../components/RecordDock";
 import { useToast } from "../../components/Toast";
-import { plural } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
 import { latestForLine } from "../../upload/queue";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "../actor/LineCard";
+import { takeAuthor, type AuthorContext } from "../actor/recordedBy";
 
-const VOICE_LABEL: Record<AudioSource, string> = {
-  actor: "Cast take",
-  standin: "Stand-in",
-  tts: "TTS voice",
-  none: "Silent",
-};
+/** Older servers only say whether a take is the cast's or a director's; newer ones name who recorded it. */
+const AUTHORS: AuthorContext = { me: "director", actorName: "the cast", directorName: "a director" };
 
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 /**
- * The director records stand-in lines, scene by scene and partner by partner, or one character's
- * lines across the play (`?character=`, their studio, opened from the call sheet).
+ * The director records lines, scene by scene and partner by partner, or one part's lines across
+ * the play (`?character=`, its studio, opened from the call sheet). A director's take counts like
+ * anyone's.
  */
 export default function SceneRecorder() {
   const { id = "" } = useParams();
@@ -48,35 +45,31 @@ export default function SceneRecorder() {
       </main>
     );
   }
-  const [{ production }, script] = base.data;
+  const script = base.data[1];
 
   if (characterId) {
     const character = script.characters.find((c) => c.id === characterId);
     return (
       <div className="scene-recorder">
         <div className="page scene-head">
-          <Link className="back-link" to={`/app/p/${id}?tab=cast`}>
-            <ArrowLeft size={16} aria-hidden="true" /> {production.title}
+          <Link className="back-link" to={`/app/p/${id}?tab=script`}>
+            <ArrowLeft size={16} aria-hidden="true" /> Back to script
           </Link>
           <div className="spread scene-title-row">
-            <div>
-              <p className="eyebrow">Studio</p>
-              <h1 className="display">{character ? titleCase(character.name) : "Character"}</h1>
-            </div>
+            <h1 className="display part-title">
+              Recording for <CharacterName name={character?.name ?? "this part"} />
+            </h1>
             <Link className="btn btn-ghost btn-sm" to={`/app/p/${id}?tab=play`}>
-              <Headphones size={16} aria-hidden="true" /> Run-through
+              <Headphones size={16} aria-hidden="true" /> Listen through
             </Link>
           </div>
-          <p className="muted">
-            Every line {character ? titleCase(character.name) : "they"} says, with what's recorded. Listen back, delete a take, or read one in yourself as a
-            stand-in.
-          </p>
         </div>
         <SceneLines
           key={characterId}
           productionId={id}
           cacheKey={`character:${id}:${characterId}`}
           load={() => standins.characterLines(id, characterId)}
+          progressLabel={`${character?.name ?? "This part"}'s lines recorded`}
           onError={toast}
         />
       </div>
@@ -86,19 +79,15 @@ export default function SceneRecorder() {
   return (
     <div className="scene-recorder">
       <div className="page scene-head">
-        <Link className="back-link" to={`/app/p/${id}?tab=cast`}>
-          <ArrowLeft size={16} aria-hidden="true" /> {production.title}
+        <Link className="back-link" to={`/app/p/${id}?tab=script`}>
+          <ArrowLeft size={16} aria-hidden="true" /> Back to script
         </Link>
         <div className="spread scene-title-row">
-          <div>
-            <p className="eyebrow">Stand-ins</p>
-            <h1 className="display">Read in for your cast</h1>
-          </div>
+          <h1 className="display">Read in for your cast</h1>
           <Link className="btn btn-ghost btn-sm" to={`/app/p/${id}?tab=play`}>
-            <Headphones size={16} aria-hidden="true" /> Run-through
+            <Headphones size={16} aria-hidden="true" /> Listen through
           </Link>
         </div>
-        <p className="muted">Every line starts in a computer voice. Record any of them here and your take plays instead, until the actor records their own.</p>
         <label className="field scene-picker">
           <span>Scene</span>
           <select className="input" value={sectionId} onChange={(e) => setParams({ section: e.target.value }, { replace: true })}>
@@ -111,7 +100,14 @@ export default function SceneRecorder() {
         </label>
       </div>
       {sectionId ? (
-        <SceneLines key={sectionId} productionId={id} cacheKey={`${id}:${sectionId}`} load={() => standins.sectionLines(id, sectionId)} onError={toast} />
+        <SceneLines
+          key={sectionId}
+          productionId={id}
+          cacheKey={`${id}:${sectionId}`}
+          load={() => standins.sectionLines(id, sectionId)}
+          progressLabel="Lines in this scene recorded"
+          onError={toast}
+        />
       ) : (
         <p className="page muted">This script has no scenes yet.</p>
       )}
@@ -123,12 +119,14 @@ function SceneLines({
   productionId,
   cacheKey,
   load,
+  progressLabel,
   onError,
 }: {
   productionId: string;
   cacheKey: string;
   /** A scene's lines, or a character's (with the scenes they're in, for headings). */
   load: () => Promise<{ lines: SectionLine[]; sections?: Section[] }>;
+  progressLabel: string;
   onError: (m: string, action?: { label: string; onClick: () => void }) => void;
 }) {
   const data = useResource(load, cacheKey);
@@ -138,7 +136,7 @@ function SceneLines({
   const [who, setWho] = useState<string>("all");
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [localTakes, setLocalTakes] = useState(new Map<string, LocalTake>());
-  /** Server take ids of stand-ins saved on this screen, by client take id. */
+  /** Server take ids of takes saved on this screen, by client take id. */
   const serverTakeIds = useRef(new Map<string, string>());
   const [deleted, setDeleted] = useState(new Set<string>());
   const cardRefs = useRef(new Map<string, HTMLElement>());
@@ -165,7 +163,7 @@ function SceneLines({
   const myItems = useMemo(() => items.filter((i) => i.kind === "director" && i.token === productionId), [items, productionId]);
 
   useEffect(() => {
-    if (!currentId && shown.length) setCurrentId((shown.find((l) => l.audioSource !== "actor") ?? shown[0]!).line.id);
+    if (!currentId && shown.length) setCurrentId((shown.find((l) => !l.take) ?? shown[0]!).line.id);
   }, [shown, currentId]);
 
   useEffect(
@@ -177,7 +175,7 @@ function SceneLines({
           current
             ? {
                 ...current,
-                lines: current.lines.map((l) => (l.line.id === item.lineId ? { ...l, take: result.take, audioSource: "standin" } : l)),
+                lines: current.lines.map((l) => (l.line.id === item.lineId ? { ...l, take: { ...result.take, mine: true } } : l)),
               }
             : current!,
         );
@@ -223,9 +221,9 @@ function SceneLines({
       URL.revokeObjectURL(url);
       return onError("Couldn't save that take on this device. Try again.");
     }
-    // On to the next line in view that nobody from the cast has recorded.
+    // On to the next line in view that nobody has recorded.
     const index = shown.findIndex((l) => l.line.id === lineId);
-    const next = shown.slice(index + 1).find((l) => l.audioSource !== "actor" && !localTakes.has(l.line.id)) ?? shown[index + 1];
+    const next = shown.slice(index + 1).find((l) => !l.take && !localTakes.has(l.line.id)) ?? shown[index + 1];
     if (next) {
       setTimeout(() => {
         setCurrentId(next.line.id);
@@ -235,7 +233,7 @@ function SceneLines({
   };
   stopRef.current = () => void stop();
 
-  /** Deletes the take shown on a line (a stand-in or the cast's), with Undo. */
+  /** Deletes the take shown on a line (anyone's), with Undo. */
   const remove = async (lineId: string, takeId: string) => {
     playback.pause();
     const local = localTakes.get(lineId);
@@ -279,7 +277,7 @@ function SceneLines({
     return (
       <div className="page">
         <div className="notice notice-accent" role="status">
-          Stand-in recording isn't ready on the server yet. Check back soon: it's on its way.
+          Recording here isn't ready on the server yet. Check back soon: it's on its way.
         </div>
       </div>
     );
@@ -308,16 +306,13 @@ function SceneLines({
     if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
     return l.take?.id ?? null;
   };
-  const voiced = (l: SectionLine): AudioSource => (localTakes.has(l.line.id) ? "standin" : l.audioSource);
-  const counts = all.reduce((acc, l) => ((acc[voiced(l)] = (acc[voiced(l)] ?? 0) + 1), acc), {} as Partial<Record<AudioSource, number>>);
+  const isRecorded = (l: SectionLine) => !!l.take || localTakes.has(l.line.id) || !!uploadFor(l.line.id);
+  const recordedCount = all.filter(isRecorded).length;
 
   return (
     <>
       <div className="page scene-filter">
-        <p className="small muted nums">
-          {plural(all.length, "line")}: {counts.actor ?? 0} by the cast · {counts.standin ?? 0} stand-in · {(counts.tts ?? 0) + (counts.none ?? 0)} still
-          computer voice
-        </p>
+        <PartProgress total={all.length} recorded={recordedCount} label={progressLabel} />
         {speakers.length > 1 && !data.data.sections && (
           <div className="chip-row" role="group" aria-label="Show lines for">
             <button type="button" className="filter-chip" aria-pressed={who === "all"} onClick={() => setWho("all")}>
@@ -334,7 +329,6 @@ function SceneLines({
       <main className="record-main">
         <ol className="line-list">
           {shown.map((l, i) => {
-            const source = voiced(l);
             const actorLine: ActorLine = { line: l.line, sectionTitle: "", cue: l.cue, directions: [], take: l.take, together: l.together };
             const heading =
               sectionTitles.size > 0 && (i === 0 || shown[i - 1]!.line.sectionId !== l.line.sectionId) ? sectionTitles.get(l.line.sectionId) : null;
@@ -360,9 +354,8 @@ function SceneLines({
                   score={null}
                   playing={playback.playing}
                   noCueLabel="Opens the scene"
-                  voice={<span className={`tag tag-${source}`}>{VOICE_LABEL[source]}</span>}
+                  author={l.take ? takeAuthor(l.take, AUTHORS) : null}
                   progress={playback.progress}
-                  takeLabel={source === "standin" ? "Your stand-in" : "Cast take"}
                   onPlay={playback.play}
                   onPlayTogether={playback.playTogether}
                   onDelete={takeId ? () => void remove(l.line.id, takeId) : undefined}
@@ -381,17 +374,11 @@ function SceneLines({
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
-        hint={
-          current
-            ? current.audioSource === "actor"
-              ? "The cast has recorded this one. Tap to replace it with yours."
-              : `Tap and read ${current.characterName}'s line.`
-            : "Pick a line to read."
-        }
         disabled={!current}
         label={current ? `Record ${current.characterName}'s line` : "Record"}
         onToggle={() => (recorder.recording ? void stop() : current && void start(current.line.id))}
         onRetry={() => currentId && void start(currentId)}
+        onDeviceChange={recorder.setDevice}
       />
     </>
   );
