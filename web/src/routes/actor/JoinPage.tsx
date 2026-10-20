@@ -1,4 +1,4 @@
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, Headphones } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { ApiError, errorMessage } from "../../api/client";
@@ -23,7 +23,8 @@ const RETRY_MS = 10_000;
 export default function JoinPage() {
   const { token = "" } = useParams();
   const remembered = useMemo(() => recallJoin(token), [token]);
-  if (remembered) return <Navigate to={`/i/${remembered.inviteToken}`} replace />;
+  // Someone who joined only to listen has no parts: back to the listen-through.
+  if (remembered) return <Navigate to={`/i/${remembered.inviteToken}${remembered.characterNames.length ? "" : "/play"}`} replace />;
   return <Join token={token} />;
 }
 
@@ -110,7 +111,6 @@ function Join({ token }: { token: string }) {
     return <Onboarding productionTitle={data.production.title} directorName={data.production.directorName} onDone={() => setIntro(false)} />;
   }
   const chosen = data.characters.filter((c) => picked.has(c.id));
-  const lines = chosen.reduce((n, c) => n + c.lineCount, 0);
 
   const toggle = (id: string) =>
     setPicked((p) => {
@@ -142,14 +142,29 @@ function Join({ token }: { token: string }) {
     }
   };
 
+  /** No part to read: join as a listener and go straight to the listen-through. */
+  const listen = async () => {
+    setBusy(true);
+    setClaimError(null);
+    try {
+      const { inviteToken } = await join.claim(token, { listen: true });
+      rememberJoin(token, { inviteToken, firstName: "", characterNames: [] });
+      navigate(`/i/${inviteToken}/play`, { replace: true });
+    } catch (err) {
+      setBusy(false);
+      setClaimError(errorMessage(err));
+    }
+  };
+
   return (
     <main className="join">
       <InAppBanner />
       <header className="join-head">
         <Brand to={null} />
-        <p className="eyebrow">{data.production.directorName} invited you</p>
-        <h1 className="display">{data.production.title}</h1>
-        <p className="lede">Which part are you playing? Pick yours (or more than one, if you're doubling).</p>
+        <p className="eyebrow">
+          {data.production.directorName} invited you to “{data.production.title}”
+        </p>
+        <h1 className="display">Who are you playing?</h1>
       </header>
 
       <form className="join-form" onSubmit={claim}>
@@ -187,14 +202,21 @@ function Join({ token }: { token: string }) {
           })}
         </fieldset>
 
-        <div className={`join-dock ${chosen.length ? "is-ready" : ""}`}>
+        {!chosen.length && (
+          <button type="button" className="btn btn-ghost join-listen" onClick={() => void listen()} disabled={busy}>
+            <Headphones size={18} aria-hidden="true" /> Not reading? Skip to the listen-through
+          </button>
+        )}
+
+        {/* Nothing to say until a part is picked: the roles are the page. */}
+        <div className={`join-dock ${chosen.length ? "is-ready" : ""}`} hidden={!chosen.length && !claimError}>
           {chosen.length > 0 ? (
             <>
               <p className="join-summary">
-                You're <strong>{joinNames(chosen.map((c) => c.name))}</strong> · <span className="nums">{plural(lines, "line")}</span>
+                You'll be reading for <strong>{joinNames(chosen.map((c) => c.name))}</strong>
               </p>
               <label className="field">
-                <span>Your first name</span>
+                <span>Your name</span>
                 <input
                   className="input input-lg"
                   value={name}
@@ -213,11 +235,9 @@ function Join({ token }: { token: string }) {
               <button className="btn btn-primary btn-lg btn-block" disabled={busy || !name.trim()}>
                 {busy ? "Getting your lines…" : "Start recording"} <ArrowRight size={18} aria-hidden="true" />
               </button>
-              <p className="small muted consent">Your recordings are shared with the cast and director. No account needed.</p>
+              <p className="small muted consent">Your recordings are shared with the cast. You can read for other characters later.</p>
             </>
-          ) : (
-            <p className="join-summary muted">Tap your character to begin.</p>
-          )}
+          ) : null}
           {claimError && !chosen.length && (
             <p className="field-error" role="alert">
               {claimError}

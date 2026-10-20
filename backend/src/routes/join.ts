@@ -3,7 +3,7 @@ import { ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
 import { HttpError, badRequest } from "../errors.ts";
-import { body, requiredString, uuidList } from "../input.ts";
+import { body, optionalString, requiredString, uuidList } from "../input.ts";
 import { inviteToken, inviteUrl, joinUrl, parseJoinToken } from "../invite.ts";
 import { castFacingName } from "../names.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
@@ -78,16 +78,18 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     const p = await production((req.params as { token: string }).token, req.ip);
     await enforce(sql, ctx.log, `join-claim-ip:${req.ip}`, { limit: 30, windowSeconds: 3600 });
     const b = body(req.body);
-    const firstName = requiredString(b, "firstName", 60);
-    const characterIds = uuidList(b, "characterIds", true)!;
-    if (!characterIds.length) throw badRequest("Pick at least one character.");
+    // `listen`: someone who only wants to listen through joins with no part and, if they like, no name.
+    const listen = b.listen === true;
+    const firstName = listen ? (optionalString(b, "firstName", 60) ?? "") : requiredString(b, "firstName", 60);
+    const characterIds = listen ? [] : uuidList(b, "characterIds", true)!;
+    if (!listen && !characterIds.length) throw badRequest("Pick at least one character.");
     const actorId = await sql.begin(async (tx) => {
       const rows = await tx`
         select c.id from characters c where c.production_id = ${p.id} and not c.is_group and c.id = any(${characterIds}::uuid[])`;
       if (rows.length !== characterIds.length) throw badRequest("Some of those characters aren't in this production.");
       const [actor] = await tx<{ id: string }[]>`
         insert into actors (production_id, name, first_name, opened_at) values (${p.id}, ${firstName}, ${firstName}, now()) returning id`;
-      await tx`insert into actor_characters ${tx(characterIds.map((characterId) => ({ actorId: actor!.id, characterId })))}`;
+      if (characterIds.length) await tx`insert into actor_characters ${tx(characterIds.map((characterId) => ({ actorId: actor!.id, characterId })))}`;
       return actor!.id;
     });
     return { inviteToken: inviteToken(config.inviteSecret, actorId, 1), inviteUrl: inviteUrl(config.appUrl, config.inviteSecret, actorId, 1) };

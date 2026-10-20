@@ -1,5 +1,5 @@
 import { ArrowLeft, Headphones } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError, errorMessage } from "../../api/client";
 import { productions, script as scriptApi, standins } from "../../api/director";
@@ -13,7 +13,7 @@ import { RecordDock } from "../../components/RecordDock";
 import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions } from "../../components/RecordOptions";
 import { useToast } from "../../components/Toast";
 import { useResource } from "../../lib/useResource";
-import { keepInView, recorderBand } from "../../player/follow";
+import { keepInView, recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
 import { latestForLine } from "../../upload/queue";
@@ -21,8 +21,6 @@ import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "../actor/LineCard";
 import { takeAuthor } from "../actor/recordedBy";
-
-const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 /**
  * The director records lines, scene by scene and partner by partner, or one part's lines across
@@ -242,10 +240,6 @@ function SceneLines({
     [uploader, productionId, setData],
   );
 
-  const scrollTo = useCallback((lineId: string) => {
-    cardRefs.current.get(lineId)?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
-  }, []);
-
   const start = async (lineId: string) => {
     if (recorder.recording) return;
     playback.pause();
@@ -293,7 +287,8 @@ function SceneLines({
       advanceTimer.current = setTimeout(() => {
         advanceTimer.current = null;
         setCurrentId(next.line.id);
-        scrollTo(next.line.id);
+        const card = cardRefs.current.get(next.line.id);
+        if (card) revealAfterTake(cardRefs.current.get(lineId) ?? null, card);
         if (recordNext && unrecorded) void startRef.current(next.line.id);
       }, 600);
     }
@@ -446,6 +441,7 @@ function SceneLines({
         onToggle={() => (recorder.recording ? void stop() : current && void start(current.line.id))}
         onRetry={() => currentId && void start(currentId)}
         onDeviceChange={recorder.setDevice}
+        recordedBefore={all.some((l) => l.take?.mine)}
         settings={<RecordOptions options={options} />}
       />
     </>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorDelta, anchorTop, FOLLOW_ANCHOR, followDelta, followTarget, LOOKAHEAD_ROWS, ROW_SLACK } from "./follow";
+import { afterTakeDelta, anchorDelta, anchorTop, FOLLOW_ANCHOR, followDelta, followTarget, LOOKAHEAD_ROWS, ROW_SLACK, TAKE_BAR_MARGIN } from "./follow";
 
 // A phone: pinned row ends at 52 px, player bar starts at 720 px (band 668 px tall).
 const band = { top: 52, bottom: 720 };
@@ -103,5 +103,34 @@ describe("three rows of lookahead", () => {
     const short = { top: 0, bottom: 300 };
     const delta = anchorDelta({ top: 200, bottom: 240 }, short);
     expect(200 - delta).toBeCloseTo(anchorTop(short, 40), 5);
+  });
+});
+
+describe("afterTakeDelta", () => {
+  const band = { top: 100, bottom: 700 }; // centre 400
+
+  it("centres the next card when the last take's buttons stay in view", () => {
+    // Next card 300–500 (centre 400): already centred.
+    expect(afterTakeDelta({ top: 250 }, { top: 300, bottom: 500 }, band)).toBe(0);
+    // Next card 600–800: scroll down 300 to centre it; the buttons at 550 land at 250, still in view.
+    expect(afterTakeDelta({ top: 550 }, { top: 600, bottom: 800 }, band)).toBe(300);
+  });
+
+  it("scrolls less so the buttons don't slide under the header", () => {
+    // Centring would take 300, but the buttons at 300 would end up at 0: stop with them just in view.
+    expect(afterTakeDelta({ top: 300 }, { top: 600, bottom: 800 }, band)).toBe(300 - band.top - TAKE_BAR_MARGIN);
+  });
+
+  it("keeps the next card whole even if the buttons go", () => {
+    // A tall next card (450 px) from 500: its bottom (950) must come up to 700, so at least 250.
+    expect(afterTakeDelta({ top: 150 }, { top: 500, bottom: 950 }, band)).toBe(250);
+  });
+
+  it("starts a card taller than the band at its top", () => {
+    expect(afterTakeDelta({ top: 150 }, { top: 500, bottom: 1300 }, band)).toBe(400);
+  });
+
+  it("just centres when there is no take on screen", () => {
+    expect(afterTakeDelta(null, { top: 600, bottom: 800 }, band)).toBe(300);
   });
 });
