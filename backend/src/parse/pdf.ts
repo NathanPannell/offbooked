@@ -26,14 +26,14 @@ export async function extractPdfText(data: Uint8Array): Promise<{ text: string; 
   try {
     result = await extractTextItems(data);
   } catch {
-    throw new ScriptInputError("We couldn't read this PDF. Try exporting it again, or paste the script text instead.");
+    throw new ScriptInputError("We couldn't read this PDF. Try exporting it again.");
   }
   if (result.totalPages > MAX_PDF_PAGES) throw new ScriptInputError(`This PDF has ${result.totalPages} pages. The limit is ${MAX_PDF_PAGES}.`);
 
   const pages = result.items.map((items) => pageLines(dropOverprints(items.filter((i) => i.str.trim() && i.dir !== "ttb"))));
   const visibleChars = pages.flat().reduce((n, l) => n + l.text.replace(/\s/g, "").length, 0);
   if (visibleChars < Math.max(50, result.totalPages * 25)) {
-    throw new ScriptInputError("This PDF looks like scanned images, so there is no text to read. Paste the script text instead.");
+    throw new ScriptInputError("This PDF looks like scanned images, so there is no text to read. Export it again from the original document.");
   }
   const text = dropRunningHeaders(pages)
     .map((lines) => withParagraphBreaks(lines))

@@ -6,6 +6,7 @@ import { productions } from "../../api/director";
 import type { Production } from "../../api/types";
 import { Loading } from "../../components/Loading";
 import { useToast } from "../../components/Toast";
+import { longDate } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
 import { CastTab } from "./CastTab";
 import { nextStep, type StepTab } from "./nextStep";
@@ -41,6 +42,7 @@ export default function ProductionPage() {
     setParams({ tab: next }, { replace: true });
     window.scrollTo({ top: 0 });
   };
+  const next = nextStep(p);
   const done: Record<StepTab, boolean> = {
     script: p.scriptStatus === "ready",
     cast: p.progress.linesTotal > 0 && p.progress.linesRecorded >= p.progress.linesTotal,
@@ -59,19 +61,31 @@ export default function ProductionPage() {
       {/* Pinned to the top while scrolling, with each page’s own row pinned just under it. */}
       <div className="steps-bar">
         <nav className="steps" aria-label="Production steps">
-          {STEPS.map((s, i) => (
-            <button key={s.id} type="button" className="step" aria-current={tab === s.id ? "page" : undefined} onClick={() => selectTab(s.id)}>
-              <span className={`step-dot ${done[s.id] ? "is-done" : ""}`} aria-hidden="true">
-                {done[s.id] ? <Check size={13} strokeWidth={3} /> : i + 1}
-              </span>
-              {s.label}
-            </button>
-          ))}
+          {STEPS.map((s, i) => {
+            // The step to go to next gets a small marker until you're on it.
+            const isNext = !next.done && next.tab === s.id && tab !== s.id && !done[s.id];
+            return (
+              <button
+                key={s.id}
+                type="button"
+                className={`step ${isNext ? "is-next" : ""}`}
+                aria-current={tab === s.id ? "page" : undefined}
+                aria-label={isNext ? `${s.label}, next step` : undefined}
+                onClick={() => selectTab(s.id)}
+              >
+                <span className={`step-dot ${done[s.id] ? "is-done" : ""}`} aria-hidden="true">
+                  {done[s.id] ? <Check size={13} strokeWidth={3} /> : i + 1}
+                </span>
+                {s.label}
+                {isNext && <span className="step-next" aria-hidden="true" />}
+              </button>
+            );
+          })}
         </nav>
       </div>
 
       <section className="step-panel" aria-label={STEPS.find((s) => s.id === tab)!.label}>
-        {tab === "script" && <ScriptTab production={p} onChanged={() => void production.reload()} onDone={() => selectTab("cast")} />}
+        {tab === "script" && <ScriptTab production={p} onChanged={() => void production.reload()} />}
         {tab === "cast" && <CastTab production={p} onOpenScript={() => selectTab("script")} onOpenPlay={() => selectTab("play")} />}
         {tab === "play" && <RunThroughTab production={p} />}
       </section>
@@ -166,7 +180,12 @@ function ProductionTitle({ production, onSaved }: { production: Production; onSa
       </div>
       {confirmArchive && (
         <div className="archive-confirm" role="group" aria-label="Archive this production">
-          <p className="small">Archiving hides this production and turns off the cast link. Recordings are kept.</p>
+          <p className="small">
+            Archiving hides this production and turns off the cast link.{" "}
+            {production.contentDeletesOn
+              ? `The script and every recording are deleted on ${longDate(production.contentDeletesOn)}, 7 days after the final performance.`
+              : "The script and every recording are deleted 7 days after the final performance."}
+          </p>
           <button type="button" className="btn btn-danger btn-sm" onClick={archive}>
             Archive
           </button>

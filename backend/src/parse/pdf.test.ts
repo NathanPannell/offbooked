@@ -26,7 +26,7 @@ test("PDF text keeps reading order and drops running headers and page numbers", 
   );
 });
 
-test("image-only PDFs are reported with a paste-text message", async () => {
-  await assert.rejects(extractPdfText(makePdf([[], [], []])), (err) => err instanceof ScriptInputError && /paste the script text/i.test(err.message));
+test("image-only PDFs are reported as scanned images", async () => {
+  await assert.rejects(extractPdfText(makePdf([[], [], []])), (err) => err instanceof ScriptInputError && /scanned images/i.test(err.message));
   await assert.rejects(extractPdfText(new TextEncoder().encode("%PDF-1.4 garbage")), ScriptInputError);
 });

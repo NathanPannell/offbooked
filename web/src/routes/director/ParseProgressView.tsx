@@ -3,9 +3,23 @@ import { useEffect, useState } from "react";
 import type { ParseProgress } from "../../api/types";
 import { useTweenedNumbers } from "../../lib/useTween";
 import { describeProgress, displayFraction, estimateLabelMs, PARSE_STAGES } from "./parseProgress";
+import { readingLine } from "./setup";
 
-/** Live progress while the script is read: the stage, a bar over lines labelled, and counts that tick up. */
-export function ParseProgressView({ progress, fileName }: { progress: ParseProgress | null | undefined; fileName?: string | null }) {
+/**
+ * Live progress while the script is read: the file in the heading, a friendly line for the stage
+ * it is really at, a bar over lines labelled, and counts that tick up.
+ */
+export function ParseProgressView({
+  progress,
+  fileName,
+  eyebrow,
+  headingLevel = 2,
+}: {
+  progress: ParseProgress | null | undefined;
+  fileName?: string | null;
+  eyebrow?: string;
+  headingLevel?: 1 | 2;
+}) {
   const tweened = useTweenedNumbers({
     linesDone: progress?.linesDone ?? 0,
     scenes: progress?.scenes ?? 0,
@@ -26,14 +40,28 @@ export function ParseProgressView({ progress, fileName }: { progress: ParseProgr
     labelling && startedAt !== null ? displayFraction(view.fraction!, now - startedAt, estimateLabelMs(progress?.linesTotal ?? 0)) : view.fraction;
   const percent = fraction === null ? null : Math.round(fraction * 100);
 
+  // The friendly line moves on every few seconds and starts over when the real stage changes.
+  const [stageSince, setStageSince] = useState(() => ({ stage: view.stage, at: Date.now() }));
+  const [tick, setTick] = useState(() => Date.now());
+  if (stageSince.stage !== view.stage) setStageSince({ stage: view.stage, at: tick });
+  useEffect(() => {
+    const id = setInterval(() => setTick(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+  const line = readingLine(view.stage, fileName ?? null, Math.max(0, tick - stageSince.at));
+  const Heading = headingLevel === 1 ? "h1" : "h2";
+
   return (
     <section className="parse raised" aria-labelledby="parse-title">
       <div className="parse-head">
-        <p className="eyebrow">{fileName ? fileName : "Your script"}</p>
-        <h2 id="parse-title" className="display">
-          Reading your script
-        </h2>
-        <p className="muted">It usually takes a minute or two. You can leave this page: it keeps going without you.</p>
+        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+        <Heading id="parse-title" className="display parse-title" tabIndex={-1}>
+          {fileName ? `Reading ${fileName}` : "Reading your script"}
+        </Heading>
+        <p key={line} className="parse-line" aria-hidden="true">
+          {line}
+        </p>
+        <p className="muted small">It usually takes a minute or two. You can leave this page: it keeps going without you.</p>
       </div>
 
       <ol className="parse-stages">
