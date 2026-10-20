@@ -97,8 +97,12 @@
   place-items: center;
   width: var(--tap);
   height: var(--tap);
+  padding: 0;
+  border: 0;
   border-radius: 50%;
+  background: none;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .account-btn:hover .avatar {
@@ -3342,10 +3346,14 @@
   white-space: nowrap;
 }
 
+/* Two lines on a phone rather than "Recording for FRAN…" beside the header's buttons. */
 .record-part {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.15;
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
