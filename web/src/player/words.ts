@@ -1,8 +1,9 @@
 import type { SpokenSegment } from "../api/types";
 
 // Word-by-word timing for the run-through: which word of a line is being said at a moment of its
-// clip. A synthesized clip says when each printed line (and each narrated [direction]) is spoken;
-// within those, and for recorded takes as a whole, the time is spread over the words by weight.
+// clip. A recorded take can say when each word starts (`wordStartsMs`), or at least where its speech
+// is (`speech`); a synthesized clip says when each printed line (and each narrated [direction]) is
+// spoken. Whatever isn't known is spread over the words by weight.
 
 /** A word as printed: its place in the line's text and what of it is said. */
 export interface WordToken {
@@ -110,7 +111,7 @@ interface Piece {
 }
 
 /** Spreads [fromMs, toMs] over pieces by weight, with pauses for punctuation and line breaks. */
-function spread(pieces: Piece[], fromMs: number, toMs: number, out: { startMs: number; endMs: number }[]) {
+function spread(pieces: Piece[], fromMs: number, toMs: number, out: Span[]) {
   const weights = pieces.map((p, i) => {
     const last = i === pieces.length - 1;
     return { word: weight(p.text), pause: last ? 0 : pauseAfter(p.text) + (p.lineBreakAfter ? 3 : 0) };
@@ -132,13 +133,76 @@ export const TAIL_MS = 220;
 /** Piper leaves about this much quiet after each utterance, inside its segment. */
 export const SEGMENT_TAIL_MS = 180;
 
+/** A stretch of a clip, in ms. */
+export interface Span {
+  startMs: number;
+  endMs: number;
+}
+
+/** What is known about when a clip's words are said. */
+export interface ClipTimings {
+  durationMs: number;
+  /** A synthesized clip: when each printed line (and narrated [direction]) is said. */
+  segments?: SpokenSegment[];
+  /** A take: when each spoken piece starts. Used only with exactly one per piece. */
+  wordStartsMs?: number[];
+  /** A take: the stretches with speech in them. Words are kept out of the pauses between. */
+  speech?: Span[];
+}
+
+/** The tail left after a clip's last word when nothing better is known. */
+const tailOf = (durationMs: number) => Math.min(TAIL_MS, durationMs * 0.08);
+
 /**
- * When each printed word is said, in ms of the clip. With segments (a synthesized clip), each
- * segment's span is shared among its own words and the gaps between segments are pauses. Without
- * them (a take, an older clip, or a silence the listener fills), the whole duration is shared,
- * less a short lead-in and tail.
+ * Each piece from its real start: it ends at the next piece's start or the end of the speech
+ * stretch it starts in, whichever is first; the last one at its stretch's end, else the clip's
+ * end less the tail.
  */
-export function wordTimes(tokens: WordToken[], audio: { durationMs: number; segments?: SpokenSegment[] }): WordTime[] {
+function fromStarts(starts: number[], speech: Span[], durationMs: number, out: Span[]) {
+  let prev = 0;
+  starts.forEach((raw, k) => {
+    const startMs = Math.max(prev, raw);
+    prev = startMs;
+    const stretch = speech.find((s) => s.startMs <= startMs && startMs < s.endMs);
+    const next = k + 1 < starts.length ? Math.max(startMs, starts[k + 1]!) : Infinity;
+    let endMs = Math.min(next, stretch?.endMs ?? Infinity);
+    if (endMs === Infinity) endMs = durationMs - tailOf(durationMs);
+    out.push({ startMs, endMs: Math.max(startMs, endMs) });
+  });
+}
+
+/**
+ * Pieces spread over the speech stretches only: weighted as if the stretches ran end to end, then
+ * each piece goes to the stretch its middle falls in and each stretch shares its time among its own.
+ */
+function overSpeech(pieces: Piece[], speech: Span[], out: Span[]) {
+  const total = speech.reduce((t, s) => t + (s.endMs - s.startMs), 0);
+  const virtual: Span[] = [];
+  spread(pieces, 0, total, virtual);
+  const groups: Piece[][] = speech.map(() => []);
+  let stretch = 0;
+  let before = 0; // speech time in the stretches before `stretch`
+  pieces.forEach((p, k) => {
+    const mid = (virtual[k]!.startMs + virtual[k]!.endMs) / 2;
+    while (stretch < speech.length - 1 && mid >= before + (speech[stretch]!.endMs - speech[stretch]!.startMs)) {
+      before += speech[stretch]!.endMs - speech[stretch]!.startMs;
+      stretch++;
+    }
+    groups[stretch]!.push(p);
+  });
+  groups.forEach((own, i) => {
+    if (own.length) spread(own, speech[i]!.startMs, speech[i]!.endMs, out);
+  });
+}
+
+/**
+ * When each printed word is said, in ms of the clip. A take's real word starts win when there is
+ * one per piece; else its speech stretches share the time among the words with nothing in the
+ * pauses. With segments (a synthesized clip), each segment's span is shared among its own words
+ * and the gaps between segments are pauses. Without any (an older take or clip, or a silence the
+ * listener fills), the whole duration is shared, less a short lead-in and tail.
+ */
+export function wordTimes(tokens: WordToken[], audio: ClipTimings): WordTime[] {
   const pieces: Piece[] = [];
   tokens.forEach((t, i) => t.pieces.forEach((text) => pieces.push({ token: i, text, lineBreakAfter: false })));
   // A new printed line, or the voice changing, is a pause.
@@ -148,11 +212,16 @@ export function wordTimes(tokens: WordToken[], audio: { durationMs: number; segm
     pieces[k]!.lineBreakAfter = a.line !== b.line || a.narrator !== b.narrator;
   }
 
-  const times: { startMs: number; endMs: number }[] = [];
+  const times: Span[] = [];
+  const speech = (audio.speech ?? []).filter((s) => s.endMs > s.startMs).sort((a, b) => a.startMs - b.startMs);
   const segments = (audio.segments ?? []).filter((s) => s.endMs > s.startMs);
   const counts = segments.map((s) => s.text.split(/\s+/).filter(Boolean).length);
   const matches = segments.length > 0 && counts.reduce((a, b) => a + b, 0) === pieces.length;
-  if (matches) {
+  if (pieces.length > 0 && audio.wordStartsMs?.length === pieces.length) {
+    fromStarts(audio.wordStartsMs, speech, Math.max(0, audio.durationMs), times);
+  } else if (pieces.length > 0 && speech.length > 0) {
+    overSpeech(pieces, speech, times);
+  } else if (matches) {
     let at = 0;
     segments.forEach((s, i) => {
       const own = pieces.slice(at, at + counts[i]!);
@@ -166,8 +235,7 @@ export function wordTimes(tokens: WordToken[], audio: { durationMs: number; segm
   } else {
     const d = Math.max(0, audio.durationMs);
     const lead = Math.min(LEAD_MS, d * 0.04);
-    const tail = Math.min(TAIL_MS, d * 0.08);
-    spread(pieces, lead, d - tail, times);
+    spread(pieces, lead, d - tailOf(d), times);
   }
 
   // Back from pieces to printed words; unsaid words sit at the end of the word before them.
@@ -201,4 +269,21 @@ export function wordAt(times: WordTime[], ms: number): number {
     else break;
   }
   return current;
+}
+
+/** A piece that ends a sentence: a full stop, ? or !, with any closing quote or bracket after. */
+const SENTENCE_END = /[.!?…]["'’”)\]]*$/;
+
+/**
+ * The last sentence of a line, as character offsets into its text: what an actor hears as their
+ * cue. It starts after the last sentence end before the line's final words and runs to the last
+ * word the character says; [directions] at the end are left out. Null for a line with no words.
+ */
+export function cueRange(text: string): { start: number; end: number } | null {
+  const tokens = lineTokens(text);
+  const said = tokens.filter((t) => !t.narrator && t.pieces.length > 0);
+  if (!said.length) return null;
+  let first = said.length - 1;
+  while (first > 0 && !SENTENCE_END.test(said[first - 1]!.pieces[said[first - 1]!.pieces.length - 1]!)) first--;
+  return { start: said[first]!.start, end: said[said.length - 1]!.end };
 }

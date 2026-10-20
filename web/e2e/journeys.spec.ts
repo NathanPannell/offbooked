@@ -110,6 +110,16 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await second.getByRole("button", { name: /Start recording/ }).click();
   await expect(second).toHaveURL(/\/i\/[^/]+/);
 
+  // Listening through is practising: a cast member opens on their own part, every one of their
+  // lines highlighted and their cues underlined, with a pause to say each line before it plays.
+  const invitePath = new URL(second.url()).pathname.match(/^\/i\/[^/]+/)![0];
+  await second.goto(`${invitePath}/play`);
+  await expect(second.getByLabel("Your part")).toHaveValue("mine");
+  await expect(second.getByLabel("Your lines")).toHaveValue("pause");
+  await expect(second.locator(".lyric.is-mine")).toHaveCount(2);
+  await expect(second.locator(".lyric-cue").first()).toBeVisible();
+  await expect(second.getByRole("button", { name: /Score me/ })).toHaveCount(0);
+
   // Someone who isn't reading skips straight to the listen-through, with no part and no name.
   const listener = await browser.newContext({ ...testInfo.project.use });
   const ears = await listener.newPage();
@@ -117,6 +127,8 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await ears.getByRole("button", { name: "Skip intro" }).click();
   await ears.getByRole("button", { name: /Skip to the listen-through/ }).click();
   await expect(ears).toHaveURL(/\/i\/[^/]+\/play$/);
+  await expect(ears.getByLabel("Your part")).toHaveValue("");
+  await expect(ears.getByLabel("Your lines")).toHaveCount(0);
   await listener.close();
 
   // Picking a part isn't recording it: the call sheet counts parts started by their recordings.

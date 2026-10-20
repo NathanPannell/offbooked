@@ -1,29 +1,23 @@
-import { Crosshair, Mic, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { Crosshair, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
-import type { Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
+import type { Line, LineAudioApi, RunThrough } from "../api/types";
 import { useWakeLock } from "../audio/wakeLock";
 import { CharacterName } from "../components/CharacterName";
 import { repeatsSceneTitle } from "../routes/director/lineText";
-import { Dialog } from "../components/Dialog";
 import { Loading } from "../components/Loading";
-import { MicHelp } from "../components/MicHelp";
 import { SectionNav } from "../components/SectionNav";
 import { sceneLabel } from "./sceneLabel";
-import { useToast } from "../components/Toast";
-import { WordDiff } from "../components/WordDiff";
-import { plural } from "../lib/format";
 import { useResource } from "../lib/useResource";
 import { saysLine, speakerLabel, voicesOf } from "../lib/voices";
-import { formatVerdictCounts, scoreLabel, verdict, VERDICT_RANK, verdictCounts } from "../stt/score";
 import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
-import { keepInView } from "./follow";
-import { LiveText } from "./LiveText";
+import { followLine } from "./follow";
+import { LineText, LiveText, type CueSpan } from "./LiveText";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
-import { defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
+import { changeSettings, defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
 import { SPEEDS } from "./timing";
-import { usePractice } from "./usePractice";
+import { cueRange } from "./words";
 
 /** After scrolling by hand, how long before the play is followed again. */
 const RESUME_FOLLOW_MS = 4000;
@@ -41,22 +35,18 @@ interface Props {
   load: () => Promise<RunThrough>;
   /** Per-line audio: the player fetches each line's clip as it goes, instead of one stitched file. */
   audio: LineAudioApi;
-  /** Actor only: save a "Score me" practice run. */
-  onPracticeDone?: (results: PracticeResult[]) => Promise<unknown>;
-  /** "mine" opens with the listener's lines on "Pause, then read". */
+  /** "mine" opens with the listener's lines on "Pause, then read" (a cast member's default anyway). */
   initialMode?: "full" | "mine";
   /** One of the actor's parts to open as "your part" (from the recorder of an actor with several). */
   initialRole?: string | null;
 }
 
-export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "full", initialRole = null }: Props) {
-  const toast = useToast();
+export function RunThroughPlayer({ load, audio, initialMode = "full", initialRole = null }: Props) {
   const rt = useResource(load, "runthrough");
   const audioRef = useRef<HTMLAudioElement>(null);
   const [engine, setEngine] = useState<PlayerEngine | null>(null);
   const [stored, setStored] = useState<PlayerSettings | null>(null);
   const [following, setFollowing] = useState(true);
-  const [summaryOpen, setSummaryOpen] = useState(false);
   const lineRefs = useRef(new Map<string, HTMLElement>());
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -84,7 +74,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   }, [productionId]);
   const settings = stored ?? defaultSettings(isActor, initialMode);
   const update = (patch: Partial<PlayerSettings>) => {
-    const next = { ...settings, ...patch };
+    const next = changeSettings(settings, patch);
     setStored(next);
     if (productionId) saveSettings(productionId, next);
   };
@@ -108,7 +98,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   }, [roleIds, lines]);
   const hasRole = settings.role !== "";
   const part = useMemo<Part>(() => (hasRole ? { mine, mode: settings.mode } : NO_PART), [hasRole, mine, settings.mode]);
-  const pausing = hasRole && settings.mode === "pause";
 
   // The play queue: dialogue and stage directions (read by the narrator), in order.
   const queue = useMemo<QueueLine[]>(
@@ -120,7 +109,26 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
   );
   const segmentByLine = useMemo(() => new Map(queue.map((q, index) => [q.lineId, index])), [queue]);
 
-  const practice = usePractice((lineId) => lineById.get(lineId)?.text ?? "");
+  // The listener's cues: the last sentence of the line before each of theirs (in its scene, and
+  // not their own), underlined. Keyed by the cue line, with the line each one cues.
+  const cues = useMemo(() => {
+    const spans = new Map<string, CueSpan>();
+    const cueFor = new Map<string, string>();
+    if (!hasRole) return { spans, cueFor };
+    let before: Line | undefined;
+    for (const l of lines) {
+      if (l.kind !== "dialogue") continue;
+      if (mine.has(l.id) && before && before.sectionId === l.sectionId && !mine.has(before.id)) {
+        const span = cueRange(before.text);
+        if (span) {
+          spans.set(before.id, span);
+          cueFor.set(l.id, before.id);
+        }
+      }
+      before = l;
+    }
+    return { spans, cueFor };
+  }, [hasRole, lines, mine]);
 
   // The engine owns the <audio> element and the clip cache for the life of the screen.
   const linesRef = useRef(lineById);
@@ -159,36 +167,43 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     engine?.setSpeed(settings.speed);
   }, [engine, settings.speed]);
 
-  useEffect(() => {
-    if (engine) engine.gapListener = pausing ? practice.gapListener : null;
-  });
-
-  // "Score me" listens during the pauses, so it only runs in "Pause, then read".
-  const { enabled: practiceOn, disable: stopPractice } = practice;
-  useEffect(() => {
-    if (!pausing && practiceOn) stopPractice();
-  }, [pausing, practiceOn, stopPractice]);
-
   const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
   const currentSeq = currentLine?.seq ?? -Infinity;
 
-  // Hold the current line at the follow height between the pinned row and the player bar, unless
-  // the listener has scrolled away. While it plays, LiveText holds the row being read there, so a
-  // long speech glides up a row at a time. Coming back to it ("Back to current line", or after a
-  // scroll by hand) picks up at the word being read, not the top of a long speech.
-  useEffect(() => {
-    if (!following || !currentSegment) return;
+  // Follows the current line between the pinned row and the player bar (follow.ts): a line that
+  // fits with the end of its cue above it is placed once as it starts and then stays put; a long
+  // one glides up a row at a time as it is read. The cue is the underlined one for the listener's
+  // own lines, else the line played before it in the scene.
+  const followCurrent = useRef<(atStart: boolean) => void>(() => {});
+  followCurrent.current = (atStart) => {
+    if (!currentSegment) return;
     const el = lineRefs.current.get(currentSegment.lineId);
-    const target = el?.querySelector(".rw.is-now") ?? el?.querySelector(".lyric-text") ?? el;
-    if (target) keepInView(target, rootRef.current);
+    const text = el?.querySelector(".lyric-text");
+    if (!el || !text) return;
+    const cueLine = cues.cueFor.get(currentSegment.lineId);
+    const before = queue[state.index - 1];
+    const cue =
+      (cueLine ? lineRefs.current.get(cueLine)?.querySelector(".lyric-cue") : null) ??
+      (before && before.sectionId === currentSegment.sectionId ? lineRefs.current.get(before.lineId)?.querySelector(".lyric-text") : null) ??
+      null;
+    followLine(text, cue, el.querySelector(".rw.is-now"), rootRef.current, atStart);
+  };
+
+  // As each line starts, and on coming back to it ("Back to current line", or after a scroll by
+  // hand), unless the listener has scrolled away.
+  useEffect(() => {
+    if (following && currentSegment) followCurrent.current(true);
   }, [currentSegment, following]);
 
   const playingRef = useRef(false);
   playingRef.current = state.playing;
   const followingRef = useRef(following);
   followingRef.current = following;
-  const shouldFollow = useCallback(() => followingRef.current && playingRef.current, []);
+  // Each new word: only a long line moves the page mid-way.
+  const onAdvance = useCallback(() => {
+    if (followingRef.current && playingRef.current) followCurrent.current(false);
+  }, []);
 
   // Scrolling by hand pauses following for a few seconds; it picks up again if the play is running.
   useEffect(() => {
@@ -239,11 +254,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
   }, [currentLine, characterName, data, state.playing]);
 
-  // A practice run ends with the play: show how it went.
-  useEffect(() => {
-    if (state.ended && practice.enabled && practice.results.size > 0) setSummaryOpen(true);
-  }, [state.ended, practice.enabled, practice.results.size]);
-
   if (rt.loading) return <Loading />;
   if (rt.error || !data) {
     return (
@@ -266,7 +276,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
     .join(" & ");
   const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
   const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
-  const canScore = pausing && onPracticeDone !== undefined;
   const nextSpeed = SPEEDS[(SPEEDS.indexOf(settings.speed) + 1) % SPEEDS.length];
   const speedLabel = `${hasRole ? "Speed of other people's lines" : "Speed"}: ${formatSpeed(settings.speed)}`;
 
@@ -338,25 +347,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
         />
       </div>
 
-      {practice.micError && <MicHelp kind={practice.micError.kind} onRetry={() => void practice.enable()} />}
-      {practice.enabled && (
-        <div className="notice notice-accent practice-bar" role="status" aria-live="polite">
-          <Mic size={18} aria-hidden="true" />
-          <span className="grow">
-            {practice.sttState.status === "unavailable"
-              ? "Accuracy check isn't available on this device."
-              : practice.sttState.status === "loading" || practice.sttState.status === "checking"
-                ? `Accuracy check warming up${practice.sttState.progress ? ` (${Math.round(practice.sttState.progress * 100)}%)` : "…"}`
-                : `Scoring your lines. Headphones on? ${practice.results.size} scored so far.`}
-          </span>
-          {practice.results.size > 0 && (
-            <button type="button" className="btn btn-sm btn-secondary" onClick={() => setSummaryOpen(true)}>
-              How did I do?
-            </button>
-          )}
-        </div>
-      )}
-
       {!hasAudio && (
         <div className="notice notice-accent render-banner" role="status">
           <div className="grow">There are no lines to play yet.</div>
@@ -379,7 +369,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                   const inGap = isCurrent && state.gap !== null;
                   const label = speakerLabel(line, characterById);
                   const who = label.name || undefined;
-                  const result = practice.results.get(line.id);
+                  const cue = cues.spans.get(line.id) ?? null;
                   const classes = [
                     "lyric",
                     `kind-${line.kind}`,
@@ -413,7 +403,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                             {who && <CharacterName name={who} />}
                             {label.voices && <span className="lyric-voices">{label.voices}</span>}
                             {isMine && <span className="sr-only">{skipped ? "(your line, silent)" : "(your line)"}</span>}
-                            {result && <span className={`chip chip-${verdictClass(verdict(result))}`}>{scoreLabel(result)}</span>}
+                            {cue && <span className="sr-only">(your cue)</span>}
                           </span>
                         )}
                         {isCurrent && engine && audioRef.current ? (
@@ -423,11 +413,11 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
                             index={segment}
                             engine={engine}
                             audio={audioRef.current}
-                            shouldFollow={shouldFollow}
-                            root={rootRef}
+                            cue={cue}
+                            onAdvance={onAdvance}
                           />
                         ) : (
-                          <span className="lyric-text">{line.text}</span>
+                          <LineText text={line.text} cue={cue} />
                         )}
                       </button>
                       {inGap && state.gap && (
@@ -482,20 +472,8 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
         <button type="button" className="icon-btn" onClick={() => engine?.next()} disabled={!hasAudio} aria-label="Next line">
           <SkipForward size={24} />
         </button>
-        {canScore ? (
-          <button
-            type="button"
-            className="icon-btn score-btn"
-            aria-pressed={practice.enabled}
-            title="Check my lines as I say them"
-            onClick={() => (practice.enabled ? practice.disable() : void practice.enable())}
-          >
-            <Mic size={20} aria-hidden="true" />
-            <span className="score-btn-label">Score me</span>
-          </button>
-        ) : (
-          <span className="controls-spacer" aria-hidden="true" />
-        )}
+        {/* Balances the speed button, so play stays in the middle. */}
+        <span className="controls-spacer" aria-hidden="true" />
       </div>
 
       <p className="small muted player-waiting" role="status" aria-live="polite">
@@ -505,32 +483,6 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
       <p className="sr-only" aria-live="polite">
         {state.gap ? "Your line. Say it now." : ""}
       </p>
-
-      <Dialog open={summaryOpen} onClose={() => setSummaryOpen(false)} title="How that went">
-        <PracticeSummary
-          results={[...practice.results.values()]}
-          pending={practice.pending}
-          lineText={(id) => lineById.get(id)?.text ?? ""}
-          onJump={(lineId) => {
-            setSummaryOpen(false);
-            const segment = segmentByLine.get(lineId);
-            if (segment !== undefined && engine) {
-              setFollowing(true);
-              engine.seekToSegment(segment, false);
-            }
-          }}
-          onSave={async (results) => {
-            try {
-              await onPracticeDone?.(results);
-              practice.reset();
-              setSummaryOpen(false);
-              toast("Practice saved");
-            } catch (err) {
-              toast(errorMessage(err));
-            }
-          }}
-        />
-      </Dialog>
     </div>
   );
 }
@@ -563,74 +515,6 @@ function BarSelect({
         {children}
       </select>
     </label>
-  );
-}
-
-function verdictClass(v: ReturnType<typeof verdict>): string {
-  return v === "complete" ? "good" : v === "partial" ? "check" : "bad";
-}
-
-function PracticeSummary({
-  results,
-  pending,
-  lineText,
-  onJump,
-  onSave,
-}: {
-  results: PracticeResult[];
-  pending: number;
-  lineText: (id: string) => string;
-  onJump: (lineId: string) => void;
-  onSave: (results: PracticeResult[]) => Promise<void>;
-}) {
-  const [open, setOpen] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const counts = verdictCounts(results);
-  const sorted = [...results].sort((a, b) => VERDICT_RANK[verdict(a)] - VERDICT_RANK[verdict(b)]);
-  return (
-    <div className="stack practice-summary">
-      {results.length > 0 && (
-        <p className="summary-score">
-          <span className="display summary-counts">{formatVerdictCounts(counts)}</span> across {plural(results.length, "line")}
-        </p>
-      )}
-      {pending > 0 && <p className="small muted">Still checking {pending} more…</p>}
-      <ol className="summary-list">
-        {sorted.map((r) => (
-          <li key={r.lineId}>
-            <div className="spread">
-              <button type="button" className="summary-line" onClick={() => onJump(r.lineId)}>
-                {lineText(r.lineId)}
-              </button>
-              <button
-                type="button"
-                className={`chip chip-${verdictClass(verdict(r))}`}
-                aria-expanded={open === r.lineId}
-                onClick={() => setOpen(open === r.lineId ? null : r.lineId)}
-              >
-                {scoreLabel(r)}
-              </button>
-            </div>
-            {open === r.lineId && <WordDiff text={lineText(r.lineId)} ops={r.ops} transcript={r.transcript} />}
-          </li>
-        ))}
-      </ol>
-      <button
-        type="button"
-        className="btn btn-primary"
-        disabled={saving || results.length === 0}
-        onClick={async () => {
-          setSaving(true);
-          try {
-            await onSave(results);
-          } finally {
-            setSaving(false);
-          }
-        }}
-      >
-        Done
-      </button>
-    </div>
   );
 }
 

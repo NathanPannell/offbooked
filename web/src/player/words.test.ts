@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineTokens, wordAt, wordTimes, type WordToken } from "./words";
+import { cueRange, lineTokens, TAIL_MS, wordAt, wordTimes, type WordToken } from "./words";
 
 const words = (text: string, tokens: WordToken[]) => tokens.map((t) => text.slice(t.start, t.end));
 const said = (tokens: WordToken[]) => tokens.flatMap((t) => t.pieces);
@@ -140,5 +140,104 @@ describe("wordTimes", () => {
   it("handles an empty line", () => {
     expect(wordTimes(lineTokens(""), { durationMs: 1000 })).toEqual([]);
     expect(wordAt([], 500)).toBe(-1);
+  });
+});
+
+describe("wordTimes for a recorded take", () => {
+  const text = "Out, damned spot!\nOut, I say!";
+  const tokens = lineTokens(text);
+
+  it("uses the take's real word starts when there is one per spoken word", () => {
+    const starts = [100, 450, 900, 1800, 2100, 2300];
+    const times = wordTimes(tokens, {
+      durationMs: 3000,
+      wordStartsMs: starts,
+      speech: [
+        { startMs: 80, endMs: 1400 },
+        { startMs: 1750, endMs: 2700 },
+      ],
+    });
+    expect(times.map((t) => t.startMs)).toEqual(starts);
+    // Each word runs to the next one's start, or to the end of its stretch of speech.
+    expect(times[0]!.endMs).toBe(450);
+    expect(times[2]!.endMs).toBe(1400); // "spot!" ends with its stretch, not at the next word
+    expect(times[5]!.endMs).toBe(2700);
+    expect(wordAt(times, 1600)).toBe(2);
+    expect(wordAt(times, 1800)).toBe(3);
+  });
+
+  it("ends the last word at the clip's end less the tail without speech stretches", () => {
+    const times = wordTimes(tokens, { durationMs: 3000, wordStartsMs: [100, 450, 900, 1800, 2100, 2300] });
+    expect(times[2]!.endMs).toBe(1800);
+    expect(times[5]!.endMs).toBe(3000 - TAIL_MS);
+  });
+
+  it("never runs a word backwards when the starts are out of order", () => {
+    const times = wordTimes(lineTokens("one two three"), { durationMs: 2000, wordStartsMs: [500, 300, 900] });
+    for (let i = 0; i < times.length; i++) {
+      expect(times[i]!.endMs).toBeGreaterThanOrEqual(times[i]!.startMs);
+      if (i > 0) expect(times[i]!.startMs).toBeGreaterThanOrEqual(times[i - 1]!.startMs);
+    }
+  });
+
+  it("ignores word starts that don't match the words, and spreads them over the speech instead", () => {
+    const speech = [
+      { startMs: 100, endMs: 1300 },
+      { startMs: 2000, endMs: 3000 },
+    ];
+    const times = wordTimes(tokens, { durationMs: 3200, wordStartsMs: [100, 400], speech });
+    // No word starts or ends inside the pause.
+    for (const t of times) expect(t.startMs >= 1300 && t.startMs < 2000).toBe(false);
+    for (const t of times) expect(t.endMs > 1300 && t.endMs <= 2000).toBe(false);
+    // The first sentence in the first stretch, the second in the second.
+    expect(times[0]!.startMs).toBe(100);
+    expect(times[2]!.endMs).toBeLessThanOrEqual(1300);
+    expect(times[3]!.startMs).toBe(2000);
+    expect(times[5]!.endMs).toBeCloseTo(3000, 5);
+    expect(wordAt(times, 1700)).toBe(2); // the pause: "spot!" stays current
+  });
+
+  it("keeps the weighting within a stretch", () => {
+    const [a, b] = wordTimes(lineTokens("Extraordinarily, so"), { durationMs: 2500, speech: [{ startMs: 200, endMs: 2200 }] });
+    expect(a!.startMs).toBe(200);
+    expect(a!.endMs - a!.startMs).toBeGreaterThan(b!.endMs - b!.startMs);
+    expect(b!.startMs).toBeGreaterThan(a!.endMs);
+    expect(b!.endMs).toBeCloseTo(2200, 5);
+  });
+
+  it("falls back to the whole take without word starts or speech", () => {
+    const times = wordTimes(tokens, { durationMs: 4000, wordStartsMs: [], speech: [] });
+    expect(times[0]!.startMs).toBeGreaterThan(0);
+    expect(times[5]!.endMs).toBeCloseTo(4000 - TAIL_MS, 5);
+  });
+});
+
+describe("cueRange", () => {
+  const cue = (text: string) => {
+    const r = cueRange(text);
+    return r ? text.slice(r.start, r.end) : null;
+  };
+
+  it("is the line's last sentence", () => {
+    expect(cue("Who's there? Nay, answer me. Stand and unfold yourself.")).toBe("Stand and unfold yourself.");
+    expect(cue("Long live the king!")).toBe("Long live the king!");
+  });
+
+  it("runs across printed lines of verse", () => {
+    expect(cue("Tis now struck twelve.\nGet thee to bed,\nFrancisco.")).toBe("Get thee to bed,\nFrancisco.");
+  });
+
+  it("leaves out a direction at the end, and starts after one in the middle", () => {
+    expect(cue("Give me some light. Away! [Exit.]")).toBe("Away!");
+    expect(cue("Now go. [To the Servant.] Was it not")).toBe("Was it not");
+  });
+
+  it("keeps a closing quote with its sentence", () => {
+    expect(cue('He said "Go." Then he went')).toBe("Then he went");
+  });
+
+  it("is null for a line with no words", () => {
+    expect(cueRange("")).toBeNull();
+    expect(cueRange("[Exit.]")).toBeNull();
   });
 });

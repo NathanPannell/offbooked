@@ -8,6 +8,9 @@ export interface Clip {
   source: AudioSource;
   /** When each part of a synthesized clip is said, for highlighting words. */
   segments?: SpokenSegment[];
+  /** A recorded take: when each spoken word starts, and where the speech is (see LineAudio). */
+  wordStartsMs?: number[];
+  speech?: { startMs: number; endMs: number }[];
 }
 
 interface Entry {
@@ -141,7 +144,15 @@ export class ClipLoader {
         // Cross-origin download refused: the <audio> element can still stream the signed URL.
       }
     }
-    const clip: Clip = { lineId, url, durationMs: audio.durationMs, source: audio.source, ...(audio.segments?.length ? { segments: audio.segments } : {}) };
+    const clip: Clip = {
+      lineId,
+      url,
+      durationMs: audio.durationMs,
+      source: audio.source,
+      ...(audio.segments?.length ? { segments: audio.segments } : {}),
+      ...(audio.wordStartsMs?.length ? { wordStartsMs: audio.wordStartsMs } : {}),
+      ...(audio.speech?.length ? { speech: audio.speech } : {}),
+    };
     if (this.disposed) {
       if (blob && url) URL.revokeObjectURL(url);
       return clip;

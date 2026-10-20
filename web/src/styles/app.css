@@ -4368,7 +4368,6 @@
   display: none;
 }
 
-.practice-bar,
 .render-banner {
   align-items: center;
 }
@@ -4481,11 +4480,11 @@
   font-weight: 500;
 }
 
-/* The line being read, word by word: said words in ink, the current word underlined in soft red,
-   the words still to come a little muted. */
+/* The line being read, word by word: words already said in bold ink, the next one to be said
+   underlined in ink (it turns bold once said), the words still to come a little muted. The next
+   word's underline is a touch thicker and lower than a cue's, so it reads as "you are here". */
 .lyric-text.is-live .rw {
   color: var(--muted);
-  border-radius: 3px;
   text-decoration-line: underline;
   text-decoration-thickness: 2px;
   text-decoration-color: transparent;
@@ -4493,31 +4492,58 @@
   text-decoration-skip-ink: none;
   transition:
     color 0.12s var(--ease),
-    background-color 0.12s var(--ease),
     text-decoration-color 0.12s var(--ease);
 }
 
 .lyric-text.is-live .rw.is-said {
   color: var(--ink);
+  font-weight: 700;
 }
 
-.lyric-text.is-live .rw.is-now {
+.lyric-text.is-live .rw.is-next {
   color: var(--ink);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-  text-decoration-color: var(--accent-line);
+  text-decoration-color: var(--ink);
+  text-decoration-thickness: 2.5px;
+  text-underline-offset: 7px;
 }
 
-/* A [direction] inside a line, read by the narrator. */
+/* The listener's cue: the last sentence of the line before theirs, underlined (a little lighter
+   than the next word's underline, which can fall inside it). */
+.lyric-cue {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--ink-soft);
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+}
+
+/* A [direction] inside a line, read by the narrator: it stays regular and muted as it is read,
+   and its next-word underline is in the same muted ink. */
 .lyric-text.is-live .rw-dir {
   font-size: 0.82em;
   font-style: italic;
   font-weight: 400;
 }
 
+.lyric-text.is-live .rw-dir.is-said,
+.lyric-text.is-live .rw-dir.is-next {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.lyric-text.is-live .rw-dir.is-next {
+  text-decoration-color: var(--muted);
+}
+
+/* A whole stage direction likewise: regular weight, its own soft ink. */
 .kind-stage_direction .lyric-text.is-live .rw.is-said,
-.kind-stage_direction .lyric-text.is-live .rw.is-now {
+.kind-stage_direction .lyric-text.is-live .rw.is-next {
   color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.kind-stage_direction .lyric-text.is-live .rw.is-next {
+  text-decoration-color: var(--ink-soft);
 }
 
 .lyric.kind-heading {
@@ -4557,20 +4583,39 @@
   text-transform: uppercase;
 }
 
-.is-my-part .lyric.is-mine .lyric-button {
-  box-shadow: inset 3px 0 0 var(--accent);
-  border-radius: 4px 14px 14px 4px;
+/* The listener's own lines, every one of them, under the highlighter. The line being read keeps
+   the plain current-line edge; nothing on them is red. Text stays dark enough for AA on --marker. */
+.is-my-part .lyric.is-mine {
+  color: var(--ink-soft);
 }
 
+.is-my-part .lyric.is-mine.is-past {
+  color: var(--muted);
+}
+
+.is-my-part .lyric.is-mine.is-current {
+  color: var(--ink);
+}
+
+.is-my-part .lyric.is-mine .lyric-button,
+.is-my-part .lyric.is-mine .lyric-button:hover:not(:disabled) {
+  background: var(--marker);
+}
+
+.is-my-part .lyric.is-mine .lyric-button:hover:not(:disabled) {
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+/* "Silent": your lines aren't read out, so they sit a little quieter (still AA on the highlighter). */
 .is-my-part .lyric.is-skipped .lyric-text {
-  opacity: 0.55;
+  color: var(--muted);
 }
 
 .is-my-part .lyric.is-mine.is-current .lyric-button {
-  background: var(--accent-soft);
+  background: var(--marker);
   box-shadow:
-    inset 3px 0 0 var(--accent),
-    0 0 0 1px var(--accent-line);
+    0 0 0 1px var(--line-strong),
+    var(--shadow);
 }
 
 .gap-meter {
@@ -4581,11 +4626,12 @@
   overflow: hidden;
 }
 
+/* The countdown for the listener's own line, in the player and the landing page's demo: ink. */
 .gap-meter > span {
   display: block;
   height: 100%;
   width: 100%;
-  background: var(--accent);
+  background: var(--ink);
   transform-origin: left;
   animation: gap-fill var(--gap-ms) linear forwards;
 }
@@ -4638,7 +4684,7 @@
   border-top: 1px solid var(--line);
 }
 
-/* Speed of everyone else: tap to cycle 1× to 3×. Balanced on the right by "Score me" or a spacer. */
+/* Speed of everyone else: tap to cycle 1× to 3×. Balanced on the right by a spacer. */
 .speed-btn {
   display: inline-grid;
   place-items: center;
@@ -4666,28 +4712,6 @@
 .controls-spacer {
   flex: none;
   width: var(--tap);
-}
-
-/* "Score me", said under its mic so it isn't a mystery icon. */
-.score-btn {
-  align-content: center;
-  gap: 3px;
-  width: auto;
-  min-width: var(--tap);
-  height: auto;
-  min-height: var(--tap);
-  padding: 4px 8px;
-  border-radius: var(--radius);
-}
-
-.score-btn-label {
-  font: 600 11px/1 var(--font-sans);
-  white-space: nowrap;
-}
-
-.score-btn[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-text);
 }
 
 /* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
@@ -4731,10 +4755,6 @@
 .play-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.practice-summary .summary-line {
-  font-size: 15px;
 }
 
 @media (min-width: 900px) {
