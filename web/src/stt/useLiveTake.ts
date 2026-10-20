@@ -1,8 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { CAPTURE_RATE, type LiveCapture } from "../audio/liveCapture";
-import { applyPass, decideAdvance, nextPassInterval, passWindowSeconds, rmsDb, segmentLine, startProgress, startVad, vadStep } from "./live";
+import {
+  applyPass,
+  decideAdvance,
+  nextPassInterval,
+  passWindowSeconds,
+  rmsDb,
+  segmentLine,
+  SPEECH_MS_PER_WORD,
+  startProgress,
+  startVad,
+  VAD_MIN_RUN_MS,
+  vadStep,
+} from "./live";
 import { prepareForAsr } from "./prepare";
 import type { SttSession } from "./session";
+import { addVoiced, notePass, startWordClock, type TakeTiming } from "./wordTiming";
 
 const FRAME_SAMPLES = CAPTURE_RATE / 50; // 20 ms
 const MIN_AUDIO_SAMPLES = CAPTURE_RATE / 2;
@@ -15,6 +28,11 @@ export interface LiveTakeView {
   mode: "live" | "energy";
   /** Tokens [0, cursor) of the line count as spoken. */
   cursor: number;
+  /**
+   * Without a transcript, about how many tokens the actor has said by now, from their speech time
+   * (an average reading pace). Only for keeping the line in view, never for ending the take.
+   */
+  paced: number;
 }
 
 export interface LiveTakeStats {
@@ -34,6 +52,8 @@ interface Options {
   autoAdvance: boolean;
   /** The actor has finished: stop, keep the take and move on. */
   onAdvance: (lineId: string, mode: LiveTakeView["mode"]) => void;
+  /** Filled while a take records with what timing its words needs (`takeWordStarts`); kept after it stops. */
+  timingRef?: { current: TakeTiming | null };
 }
 
 /**
@@ -42,7 +62,7 @@ interface Options {
  * end the take after a pause once the actor has spoken; the transcript only sets how long that
  * pause is. Without the model it only watches the level.
  */
-export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvance, onAdvance }: Options): LiveTakeView | null {
+export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvance, onAdvance, timingRef }: Options): LiveTakeView | null {
   const [view, setView] = useState<LiveTakeView | null>(null);
   const autoRef = useRef(autoAdvance);
   autoRef.current = autoAdvance;
@@ -50,6 +70,8 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
   advanceRef.current = onAdvance;
   const textRef = useRef(text);
   textRef.current = text;
+  const timingOut = useRef(timingRef);
+  timingOut.current = timingRef;
 
   const lineId = recording?.lineId ?? null;
   const startedAt = recording?.startedAt ?? null;
@@ -70,8 +92,23 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
     const controller = new AbortController();
     const cleanups: (() => void)[] = [];
 
-    const publish = () =>
-      setView((v) => (v && v.lineId === lineId && v.cursor === progress.cursor && v.mode === mode ? v : { lineId, mode, cursor: progress.cursor }));
+    // Word timing: the capture's samples start about now, a moment after the recording did.
+    const timing: TakeTiming = {
+      lineId,
+      text: textRef.current,
+      offsetMs: startedAt === null ? 0 : Math.max(0, performance.now() - startedAt),
+      clock: startWordClock(),
+      stretches: [],
+    };
+    if (timingOut.current) timingOut.current.current = timing;
+
+    const paced = () => (mode === "energy" ? Math.min(tokens.length, Math.floor(vad.speechMs / SPEECH_MS_PER_WORD)) : progress.cursor);
+    const publish = () => {
+      const p = paced();
+      setView((v) =>
+        v && v.lineId === lineId && v.cursor === progress.cursor && v.mode === mode && v.paced === p ? v : { lineId, mode, cursor: progress.cursor, paced: p },
+      );
+    };
     publish();
 
     const evaluate = () => {
@@ -98,7 +135,9 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
           for (let start = 0; start < chunk.length; start += FRAME_SAMPLES) {
             const end = Math.min(chunk.length, start + FRAME_SAMPLES);
             vad = vadStep(vad, rmsDb(chunk, start, end), ((end - start) / CAPTURE_RATE) * 1000);
+            if (vad.runMs >= VAD_MIN_RUN_MS) addVoiced(timing.stretches, vad.elapsedMs - vad.runMs, vad.elapsedMs);
           }
+          if (mode === "energy") publish();
           evaluate();
         }),
       );
@@ -110,6 +149,7 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
         analyser.getFloatTimeDomainData(buffer);
         vad = vadStep(vad, rmsDb(buffer), now - last);
         last = now;
+        if (mode === "energy") publish();
         evaluate();
       }, LEVEL_POLL_MS);
       cleanups.push(() => clearInterval(id));
@@ -140,7 +180,8 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
         if (ready && vad.speechMs > 0 && total >= MIN_AUDIO_SAMPLES && total - covered >= MIN_NEW_SAMPLES) {
           const { full, window } = passWindowSeconds(latency);
           const windowed = total > full * CAPTURE_RATE;
-          const prepared = prepareForAsr(capture.slice(windowed ? total - window * CAPTURE_RATE : 0, total));
+          const from = windowed ? total - window * CAPTURE_RATE : 0;
+          const prepared = prepareForAsr(capture.slice(from, total));
           if (!prepared.noSpeech) {
             const passStart = performance.now();
             const heard = await stt.transcribeLive(prepared.audio, controller.signal);
@@ -148,7 +189,10 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
             if (heard !== null) {
               latency = performance.now() - passStart;
               latencies.push(latency);
+              const before = progress.cursor;
               progress = applyPass(progress, tokens, heard, windowed);
+              // The words this pass reached were said in the audio it heard (taken before the pass ran).
+              timing.clock = notePass(timing.clock, before, progress.cursor, (from / CAPTURE_RATE) * 1000, (total / CAPTURE_RATE) * 1000);
             }
           }
           covered = total;

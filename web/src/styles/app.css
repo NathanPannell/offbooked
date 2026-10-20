@@ -3915,67 +3915,137 @@
   color: var(--ink-soft);
 }
 
-/* Before the first take on a device: a quick mic check, with Skip. */
+/* Before the first take on a device: the mic check, in place of the record button, with Skip. */
 .first-mic-check {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
   width: min(480px, 100%);
-  padding: 10px var(--s-3) 10px var(--s-4);
+  padding: var(--s-3) var(--s-4) var(--s-3);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--paper);
+  box-shadow: var(--shadow-sm);
   font-size: var(--text-sm);
 }
 
-.first-mic-check-row {
+.first-mic-check-intro {
+  margin-bottom: var(--s-2);
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.first-mic-check-intro strong {
+  color: var(--ink);
+}
+
+/* The mic check, here and in mic settings: tap, say a line, hear it back. */
+.mic-test {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.mic-test .btn {
+  min-height: var(--tap);
+}
+
+.mic-test-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--s-1) var(--s-2);
-}
-
-.first-mic-check-row .mic-test {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.first-mic-check-row > .btn,
-.mic-test .btn {
   min-height: var(--tap);
 }
 
-.mic-test-live {
+.mic-test.is-idle .mic-test-row {
+  justify-content: flex-start;
+}
+
+.mic-test-skip {
+  margin-left: auto;
+}
+
+/* The stage: a mic in a ring and a big waveform, live while it listens, the clip as it plays back. */
+.mic-test-stage {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  min-height: var(--tap);
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-2);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.mic-test-ring {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* While it listens the ring breathes, so it's clear the mic is open. */
+.mic-test.is-listening .mic-test-ring::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--rec);
+  opacity: 0;
+  animation: mic-listen 1.6s ease-out infinite;
+}
+
+.mic-test.is-playing .mic-test-ring,
+.mic-test.is-heard .mic-test-ring {
+  background: var(--paper-deep);
   color: var(--ink-soft);
 }
 
-.mic-test-live .waveform {
-  height: 32px;
+@keyframes mic-listen {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
 }
 
-.mic-test-question {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  min-height: var(--tap);
+.waveform.waveform-big {
+  height: 64px;
 }
 
-.mic-test-again {
+.mic-test.is-playing .waveform,
+.mic-test.is-heard .waveform {
+  color: var(--accent);
+}
+
+.mic-test-status {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.mic-test-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px var(--s-1);
-  margin-left: -10px;
+  gap: var(--s-1) var(--s-2);
+  margin-left: auto;
 }
 
-.mic-test-again .btn {
-  min-height: var(--tap);
-  padding: 0 10px;
+.mic-test-quiet {
+  color: var(--flag);
+}
+
+.mic-test-ok {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--good);
 }
 
 /* Mic settings, behind the gear. */
@@ -4727,8 +4797,13 @@
   }
 
   .rec-dot,
-  .record-button.is-recording {
+  .record-button.is-recording,
+  .mic-test.is-listening .mic-test-ring::after {
     animation: none;
+  }
+
+  .mic-test.is-listening .mic-test-ring::after {
+    opacity: 0.6;
   }
 
   .pick-up-chevron {

@@ -18,6 +18,8 @@ export interface UploadItem {
   characterId?: string | null;
   mime: string;
   durationMs: number;
+  /** When each spoken word starts, in ms of the recording, from the live take (sent as X-Word-Starts). */
+  wordStartsMs?: number[] | null;
   createdAt: number;
   status: UploadStatus;
   attempts: number;

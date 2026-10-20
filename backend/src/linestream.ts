@@ -4,6 +4,8 @@ import { body, uuidList } from "./input.ts";
 import { placeholderMs, RENDER_SETTINGS, type AudioSource } from "./render/plan.ts";
 import { mixedClip, voiceTakes, type VoiceTake } from "./render/mix.ts";
 import { isCurrentNormalized, normalizedTake, type TakeAudioRow } from "./render/takeaudio.ts";
+import type { Stretch } from "./render/trim.ts";
+import { backfillTiming, servedSpeech, servedWordStarts } from "./taketiming.ts";
 import { TTS_PRIORITY, type SpokenSegment, type TtsClip, type TtsPriority, type TtsRequest, type TtsService } from "./tts/service.ts";
 import type { Voice } from "./tts/voices.ts";
 
@@ -21,6 +23,11 @@ export interface LineAudioView {
   // A synthesized line: when each printed line (and narrated direction) is said, for highlighting
   // words as they are read. Absent for takes and silent lines.
   segments?: SpokenSegment[];
+  // A take (not a mix of several): where the voice is in the clip, split on pauses. Absent for TTS.
+  speech?: Stretch[];
+  // A take: when each spoken word of the line starts in the clip, as the app heard them while it
+  // recorded. Absent when it wasn't heard, or the line has been edited since.
+  wordStartsMs?: number[];
 }
 
 interface LineAudioRow {
@@ -34,6 +41,9 @@ interface LineAudioRow {
   normalizedKey: string | null;
   normalizedSamples: number | null;
   streamKey: string | null;
+  speechMs: number[] | null;
+  trimStartMs: number | null;
+  wordStartsMs: number[] | null;
   shared: boolean; // said by several characters: their takes play mixed (render/mix.ts)
 }
 
@@ -49,7 +59,8 @@ async function rowsFor(ctx: Ctx, productionId: string, lineIds: string[]): Promi
   if (!lineIds.length) return [];
   return ctx.sql<LineAudioRow[]>`
     select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id,
-      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, l.voice_ids is not null as shared
+      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.speech_ms, t.trim_start_ms, t.word_starts_ms,
+      l.voice_ids is not null as shared
     from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'
     where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') and l.id = any(${lineIds}::uuid[])`;
 }
@@ -98,9 +109,25 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       normalizedKey: t.normalizedKey,
       normalizedSamples: t.normalizedSamples,
       streamKey: t.streamKey,
+      speechMs: t.speechMs,
+      trimStartMs: t.trimStartMs,
+      wordStartsMs: t.wordStartsMs,
     });
     if (takes.length > 1) mixes.set(r.id, takes);
   }
+
+  // A take's word timing, in ms of the clip as served. Takes normalized before takes kept their
+  // speech have it worked out once, in the background, for next time.
+  const timingOf = (r: LineAudioRow, durationMs: number, fresh: { speechMs?: number[]; trimStartMs?: number } = {}) => {
+    const speechMs = fresh.speechMs ?? r.speechMs;
+    if (!speechMs && r.takeId && r.storageKey) {
+      const take = { id: r.takeId, storageKey: r.storageKey };
+      ctx.jobs.run("work out a take's speech", () => backfillTiming(ctx, take, durationMs));
+    }
+    const speech = servedSpeech(speechMs, durationMs);
+    const wordStartsMs = servedWordStarts(r.wordStartsMs, fresh.trimStartMs ?? r.trimStartMs, durationMs, r.text);
+    return { ...(speech ? { speech } : {}), ...(wordStartsMs ? { wordStartsMs } : {}) };
+  };
 
   // Takes: the normalized .m4a, made on first use.
   const takeViews = new Map<string, LineAudioView>();
@@ -131,23 +158,27 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       streamKey: r.streamKey,
     };
     if (r.streamKey && r.normalizedSamples && isCurrentNormalized(r.normalizedKey)) {
+      const durationMs = samplesToMs(r.normalizedSamples);
       takeViews.set(r.id, {
         lineId: r.id,
         audioUrl: await ctx.storage.signedUrl(r.streamKey),
-        durationMs: samplesToMs(r.normalizedSamples),
+        durationMs,
         source,
         ready: true,
+        ...timingOf(r, durationMs),
       });
       continue;
     }
     const job = normalizedTake(ctx, productionId, row, { stream: true }).then(
       async (t) => {
+        const durationMs = samplesToMs(t.samples);
         takeViews.set(r.id, {
           lineId: r.id,
           audioUrl: t.streamKey ? await ctx.storage.signedUrl(t.streamKey) : null,
-          durationMs: samplesToMs(t.samples),
+          durationMs,
           source,
           ready: true,
+          ...timingOf(r, durationMs, t),
         });
       },
       (err) => {

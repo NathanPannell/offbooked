@@ -22,6 +22,10 @@ export interface TakePart {
 
 export const partHeaders = (part?: TakePart): Record<string, string> => (part ? { "X-Take-Parts": String(part.total), "X-Take-Part": String(part.index) } : {});
 
+/** When each spoken word of the take starts, in ms of the recording (see docs/api.md, `X-Word-Starts`). */
+export const wordStartHeaders = (wordStartsMs?: readonly number[] | null): Record<string, string> =>
+  wordStartsMs?.length ? { "X-Word-Starts": wordStartsMs.map((ms) => Math.max(0, Math.round(ms))).join(",") } : {};
+
 /** All calls scoped to one actor's invite token. */
 export function actorApi(token: string) {
   const auth: Auth = { kind: "invite", token };
@@ -37,7 +41,15 @@ export function actorApi(token: string) {
     deleteTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}`, { method: "DELETE", auth }),
     restoreTake: (takeId: string) => request<{ linesRecorded: number; linesTotal: number }>(`/invite/takes/${takeId}/restore`, { method: "POST", auth }),
     lines: () => request<{ sections: Section[]; lines: ActorLine[] }>("/invite/lines", { auth }),
-    putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal, part?: TakePart) =>
+    putTake: (
+      lineId: string,
+      audio: Blob,
+      takeId: string,
+      durationMs: number,
+      signal?: AbortSignal,
+      part?: TakePart,
+      wordStartsMs?: readonly number[] | null,
+    ) =>
       request<TakeUploadResult | TakePartResult>(`/invite/lines/${lineId}/take`, {
         method: "PUT",
         auth,
@@ -48,6 +60,7 @@ export function actorApi(token: string) {
           "X-Take-Id": takeId,
           "X-Duration-Ms": String(Math.round(durationMs)),
           ...partHeaders(part),
+          ...wordStartHeaders(wordStartsMs),
         },
       }),
     postStt: (takeId: string, result: SttResult) => request<void>(`/invite/takes/${takeId}/stt`, { auth, json: result }),

@@ -18,15 +18,17 @@ import { useToast } from "../../components/Toast";
 import { claimFirstTakeHint } from "../../audio/micPrefs";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useResource } from "../../lib/useResource";
-import { keepInView, recorderBand, revealAfterTake } from "../../player/follow";
+import { recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
+import { takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
 import { CastProfile } from "./CastProfile";
 import { PickUpParts } from "./PickUpParts";
+import { useFollowWhileRecording } from "./recorderFollow";
 import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake } from "./recordedBy";
 import { Wrapped } from "./Wrapped";
 
@@ -82,18 +84,25 @@ export function RecordSession({
   const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
   /** The move to the next line after a take; cleared on leaving, so it can't open the mic on a screen that's gone. */
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
+  /** False once the screen is gone, so a cue that finishes afterwards doesn't open the mic. */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
       if (advanceTimer.current) clearTimeout(advanceTimer.current);
-    },
-    [],
-  );
+    };
+  }, []);
   const options = useRecordOptions();
   const { autoAdvance, keepRecording } = options;
   /** Hear scene partners: the cue plays before each take, and on a shared line the others play along. */
   const [hearPartners, setHearPartners] = useStoredFlag(HEAR_PARTNERS_KEY, false);
   /** A line whose cue is playing before its take starts. */
   const [cueing, setCueing] = useState<string | null>(null);
+  /** A tap on record while the cue plays: start the take now. */
+  const skipCue = useRef(false);
+  /** What timing the take's words needs, filled by the live take. */
+  const timingRef = useRef<TakeTiming | null>(null);
   /** Client take ids deleted on this screen, so their upload no longer counts as the line's take. */
   const [deleted, setDeleted] = useState(new Set<string>());
   const [pickingUp, setPickingUp] = useState(false);
@@ -132,6 +141,7 @@ export function RecordSession({
     text: actorLines.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
     autoAdvance,
     onAdvance: (_lineId, mode) => void stopRecording({ recordNext: keepRecording && mode === "live" }),
+    timingRef,
   });
   const myItems = useMemo(() => items.filter((i) => i.token === token && (i.kind ?? "invite") === "invite"), [items, token]);
 
@@ -195,26 +205,8 @@ export function RecordSession({
   }, [actorLines, currentId]);
 
   // Karaoke-style follow while a take records: the next word to say stays near the middle of the
-  // screen, with a few rows of what's coming below it. A scroll by hand pauses it for a moment.
-  const scrolledAt = useRef(0);
-  useEffect(() => {
-    const mark = () => (scrolledAt.current = performance.now());
-    window.addEventListener("touchmove", mark, { passive: true });
-    window.addEventListener("wheel", mark, { passive: true });
-    return () => {
-      window.removeEventListener("touchmove", mark);
-      window.removeEventListener("wheel", mark);
-    };
-  }, []);
-  const liveLine = live?.lineId;
-  const liveCursor = live?.mode === "live" ? live.cursor : null;
-  useEffect(() => {
-    if (!recorder.recording || !liveLine || liveCursor === null) return;
-    if (performance.now() - scrolledAt.current < 2500) return;
-    const card = cardRefs.current.get(liveLine);
-    const el = card?.querySelector(".lw-next") ?? [...(card?.querySelectorAll(".lw-lit") ?? [])].pop();
-    if (el) keepInView(el, null, recorderBand);
-  }, [recorder.recording, liveLine, liveCursor]);
+  // screen, between the pinned header and the dock, with a few rows of what's coming below it.
+  useFollowWhileRecording({ recordingLineId: recorder.recording?.lineId ?? null, live, cardRefs, band: () => recorderBand(null) });
 
   const postStt = useCallback(
     (clientTakeId: string, result: SttResult) => {
@@ -269,14 +261,25 @@ export function RecordSession({
 
   const startRecording = async (lineId: string) => {
     if (recorder.recording || cueing) return;
+    // Still inside the tap: lets the cue before a later take play when "Keep recording" moves on by itself.
+    accompaniment.unlock();
     playback.pause();
     setCurrentId(lineId);
     const item = actorLines.find((l) => l.line.id === lineId);
-    if (hearPartners && item?.cue?.audioUrl) {
-      // Hear the cue first, like on stage; a tap on record skips the rest of it.
+    if (hearPartners && item?.cue) {
+      // Hear the whole cue first, like on stage, and only then record; a tap on record skips the rest of it.
       setCueing(lineId);
+      skipCue.current = false;
       setAnnouncement(`Listening to ${item.cue.characterName}'s cue.`);
-      await accompaniment.playThrough(item.cue.audioUrl);
+      let url = item.cue.audioUrl;
+      if (!url) {
+        // Its voice was still being made when the lines loaded: ask again (the server waits a moment for it).
+        const fresh = await api.lines().catch(() => null);
+        if (fresh) setLinesData(fresh);
+        url = fresh?.lines.find((l) => l.line.id === lineId)?.cue?.audioUrl ?? null;
+      }
+      if (url && !skipCue.current) await accompaniment.playThrough(url);
+      if (!alive.current) return;
       setCueing(null);
     }
     if (!(await recorder.start(lineId))) return;
@@ -356,8 +359,10 @@ export function RecordSession({
     }
     const url = URL.createObjectURL(recorded.blob);
     let clientTakeId: string;
+    // When each word started, from following the take as it recorded (null when nothing was heard).
+    const wordStartsMs = takeWordStarts(timingRef.current, lineId, recorded.durationMs);
     try {
-      clientTakeId = await uploader.add({ token, lineId, audio: recorded.blob, durationMs: recorded.durationMs });
+      clientTakeId = await uploader.add({ token, lineId, audio: recorded.blob, durationMs: recorded.durationMs, wordStartsMs });
     } catch {
       URL.revokeObjectURL(url);
       toast("Couldn't save that take on this device. Try again.");
@@ -625,7 +630,13 @@ export function RecordSession({
         note={cueing ? "Listening to the cue… tap to start now." : recorder.recording && firstTakeHint ? FIRST_TAKE_HINT : undefined}
         disabled={!current}
         label={current ? `Record line ${actorLines.indexOf(current) + 1}` : "Record"}
-        onToggle={() => (cueing ? accompaniment.stop() : recorder.recording ? void stopRecording() : current && void startRecording(current.line.id))}
+        onToggle={() => {
+          if (cueing) {
+            skipCue.current = true;
+            accompaniment.stop();
+          } else if (recorder.recording) void stopRecording();
+          else if (current) void startRecording(current.line.id);
+        }}
         onRetry={() => currentId && void startRecording(currentId)}
         onDeviceChange={recorder.setDevice}
         recordedBefore={allLines.some((l) => !!ownTake(l))}

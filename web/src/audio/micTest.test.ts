@@ -1,6 +1,55 @@
 import { describe, expect, it, vi } from "vitest";
-import { recordSample, type TestMic } from "./micTest";
+import { startVad, vadStep } from "../stt/live";
+import { drawLevel, MIC_CHECK_MAX_MS, micCheckDone, recordSample, traceBars, type TestMic } from "./micTest";
 import { MicError } from "./recorder";
+
+describe("when the mic check has heard enough", () => {
+  /** Feeds 50 ms frames of `db` for `ms`, and says whether the check is done after each. */
+  const feed = (steps: [number, number][]) => {
+    let vad = startVad();
+    let doneAt: number | null = null;
+    for (const [db, ms] of steps) {
+      for (let t = 0; t < ms; t += 50) {
+        vad = vadStep(vad, db, 50);
+        if (doneAt === null && micCheckDone(vad)) doneAt = vad.elapsedMs;
+      }
+    }
+    return doneAt;
+  };
+
+  it("plays back once someone has spoken and then stopped for a moment", () => {
+    // Quiet, "hello there" for a second, then quiet: done 0.7 s after they stop.
+    expect(feed([[-70, 500], [-22, 1000], [-70, 2000]])).toBe(2200);
+  });
+
+  it("waits through the short gaps between words", () => {
+    expect(feed([[-70, 300], [-22, 600], [-70, 300], [-22, 600], [-70, 2000]])).toBe(2500);
+  });
+
+  it("doesn't play back on a cough or a tap", () => {
+    expect(feed([[-70, 500], [-10, 100], [-70, 2000]])).toBeNull();
+  });
+
+  it("plays back after a few seconds whatever it heard", () => {
+    expect(feed([[-70, 8000]])).toBe(MIC_CHECK_MAX_MS);
+    expect(feed([[-22, 8000]])).toBe(MIC_CHECK_MAX_MS);
+  });
+});
+
+describe("drawing the mic check", () => {
+  it("scales speech to most of the meter and silence to nothing", () => {
+    expect(drawLevel(new Float32Array(64))).toBe(0);
+    expect(drawLevel(new Float32Array(64).fill(0.05))).toBeGreaterThan(0.3);
+    expect(drawLevel(new Float32Array(64).fill(1))).toBe(1);
+  });
+
+  it("fits a clip's levels into the bars the meter has room for, keeping each peak", () => {
+    expect(traceBars([0.1, 0.9, 0.2, 0.3, 0.5, 0.4], 3)).toEqual([0.9, 0.3, 0.5]);
+    expect(traceBars([0.2, 0.6], 4)).toEqual([0.2, 0.2, 0.6, 0.6]);
+    expect(traceBars([], 4)).toEqual([]);
+    expect(traceBars([0.5], 0)).toEqual([]);
+  });
+});
 
 function fakeMic({ openError, blob = new Blob(["abc"], { type: "audio/webm" }) }: { openError?: Error; blob?: Blob } = {}) {
   const log: string[] = [];

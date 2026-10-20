@@ -9,6 +9,7 @@ import { enforce, LIMITS } from "./ratelimit.ts";
 import { probeDurationSeconds } from "./render/ffmpeg.ts";
 import { scheduleRender } from "./render/queue.ts";
 import { ContentDeletedError, sweepIfDeleted } from "./retention.ts";
+import { parseWordStarts } from "./taketiming.ts";
 import { takeColumns, takeView, type TakeRow } from "./views.ts";
 
 // Take uploads, shared by the actor endpoint and the director's endpoint: same body,
@@ -116,13 +117,16 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
 
   // The newest take is current, whoever recorded it. Older takes are kept until the production's content is deleted (retention.ts).
   const voiceId = u.voiceId ? await u.voiceId() : null;
+  // When each word started, as the app heard them (ms of this recording); dropped when they don't fit the line.
+  const [line] = await sql<{ text: string }[]>`select text from lines where id = ${u.lineId}`;
+  const wordStarts = parseWordStarts(req.headers["x-word-starts"], line?.text ?? "", durationMs);
   const key = `productions/${u.productionId}/takes/${id}.${ext}`;
   await storage.put(key, audio, contentType);
   if (await sweepIfDeleted(ctx, u.productionId)) throw new HttpError(410, "content_deleted", new ContentDeletedError().message);
   await sql.begin(async (tx) => {
     const [inserted] = await tx`
-      insert into takes (id, production_id, line_id, actor_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms, character_id)
-      values (${id}, ${u.productionId}, ${u.lineId}, ${actorId}, ${u.recorder.kind}, ${userId}, ${key}, ${contentType}, ${audio.length}, ${durationMs}, ${voiceId})
+      insert into takes (id, production_id, line_id, actor_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms, character_id, word_starts_ms)
+      values (${id}, ${u.productionId}, ${u.lineId}, ${actorId}, ${u.recorder.kind}, ${userId}, ${key}, ${contentType}, ${audio.length}, ${durationMs}, ${voiceId}, ${wordStarts}::int[])
       on conflict (id) do nothing returning id`;
     if (inserted) await tx`update lines set current_take_id = ${id}, updated_at = now() where id = ${u.lineId}`;
   });
