@@ -1,6 +1,6 @@
-import { LogOut } from "lucide-react";
+import { ArrowLeft, LogOut } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { errorMessage, session } from "../../api/client";
 import { auth } from "../../api/director";
 import { Avatar } from "../../components/Avatar";
@@ -37,6 +37,9 @@ export default function Account() {
 
   return (
     <main className="page page-narrow account-page">
+      <Link className="back-link" to="/app">
+        <ArrowLeft size={16} aria-hidden="true" /> Productions
+      </Link>
       <div className="account-head">
         <Avatar name={castFacingName(user.name, user.email)} size={56} />
         <h1 className="display">Your account</h1>

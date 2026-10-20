@@ -122,6 +122,11 @@
   gap: var(--s-4);
 }
 
+.account-page .input[readonly] {
+  background: var(--paper);
+  color: var(--ink-soft);
+}
+
 .account-actions {
   gap: var(--s-3);
 }
@@ -236,6 +241,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--s-3);
+}
+
+/* The corner call to action keeps its 44px height and fits beside the brand on the narrowest phones. */
+@media (max-width: 360px) {
+  .landing-nav .btn {
+    padding: 0 var(--s-3);
+    font-size: var(--text-sm);
+  }
 }
 
 .hero {

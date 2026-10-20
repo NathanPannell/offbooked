@@ -49,7 +49,7 @@ export function Landing() {
     <div className="landing">
       <nav className="landing-nav" aria-label="Main">
         <Brand to="/" />
-        <Link className="btn btn-primary btn-sm" to={cta.to}>
+        <Link className="btn btn-primary" to={cta.to}>
           {cta.label} <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </nav>
