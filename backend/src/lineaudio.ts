@@ -10,7 +10,7 @@ export interface CueView {
   audioSource: AudioSource;
 }
 
-// Cue audio is the cue line's current take (actor or stand-in) when there is one, else a TTS clip.
+// Cue audio is the cue line's current take (anyone's) when there is one, else a TTS clip.
 // Missing clips are synthesized in the background; the response waits up to waitMs for them and
 // returns the rest as { audioUrl: null, audioSource: "none" }, so a later fetch picks them up and
 // the app can fall back to on-device speech meanwhile.

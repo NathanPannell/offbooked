@@ -2,6 +2,7 @@ import type { FlagCode } from "./parse/flags.ts";
 import type { Config } from "./config.ts";
 import type { Sql } from "./db.ts";
 import { inviteUrl } from "./invite.ts";
+import { takeRecorder } from "./recorders.ts";
 import { RETENTION_DAYS } from "./retention.ts";
 import type { Storage } from "./storage/storage.ts";
 
@@ -27,12 +28,13 @@ export interface ProductionRow {
   actorsDone: number;
 }
 
-// Progress counts a line as recorded once the cast has a take for each of its voices (one voice,
-// or every character who says a shared line). Stand-in takes and TTS fill the run-through but never
-// count. line_voices and voice_take are in migrations/011_shared_lines.sql.
+// Progress counts a line as recorded once there is a take for each of its voices (one voice, or
+// every character who says a shared line), by anyone: a cast member or the director. TTS fills the
+// run-through but never counts. line_voices is in migrations/011_shared_lines.sql, voice_take in
+// 014_open_parts.sql.
 const lineRecorded = (sql: Sql) =>
-  sql`not exists (select 1 from line_voices v where v.line_id = l.id and voice_take(v.line_id, v.shared, v.character_id, true) is null)`;
-const voiceRecorded = (sql: Sql) => sql`voice_take(lv.line_id, lv.shared, lv.character_id, true) is not null`;
+  sql`not exists (select 1 from line_voices v where v.line_id = l.id and voice_take(v.line_id, v.shared, v.character_id) is null)`;
+const voiceRecorded = (sql: Sql) => sql`voice_take(lv.line_id, lv.shared, lv.character_id) is not null`;
 
 export async function productionRows(sql: Sql, where: { ownerId: string; id?: string; includeArchived?: boolean }): Promise<ProductionRow[]> {
   return sql<ProductionRow[]>`
@@ -41,8 +43,8 @@ export async function productionRows(sql: Sql, where: { ownerId: string; id?: st
       p.archived_at, p.content_deleted_at, p.created_at,
       (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue') as lines_total,
       (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue' and ${lineRecorded(sql)}) as lines_recorded,
-      (select count(*)::int from actors a where a.production_id = p.id) as actors_total,
-      (select count(*)::int from actors a where a.production_id = p.id
+      (select count(*)::int from actors a where a.production_id = p.id and a.director_user_id is null) as actors_total,
+      (select count(*)::int from actors a where a.production_id = p.id and a.director_user_id is null
         and exists (select 1 from actor_characters ac join line_voices lv on lv.character_id = ac.character_id where ac.actor_id = a.id)
         and not exists (select 1 from actor_characters ac join line_voices lv on lv.character_id = ac.character_id
                         where ac.actor_id = a.id and not ${voiceRecorded(sql)})) as actors_done
@@ -149,7 +151,12 @@ export const charactersOf = (sql: Sql, productionId: string) =>
 export interface TakeRow {
   id: string;
   lineId: string;
-  recordedBy: "actor" | "standin";
+  recordedBy: "actor" | "director";
+  actorId: string | null;
+  recordedByUserId: string | null;
+  actorName: string | null; // the cast member's first name, for an actor's take
+  userName: string | null; // the director's name and email, for a director's take
+  userEmail: string | null;
   storageKey: string;
   durationMs: number;
   createdAt: Date;
@@ -158,16 +165,29 @@ export interface TakeRow {
   sttOps: unknown[] | null;
 }
 
-export const takeColumns = (sql: Sql) => sql`id, line_id, recorded_by, storage_key, duration_ms, created_at, stt_transcript, stt_accuracy, stt_ops`;
+// Used as `select ${takeColumns(sql)} from takes where …` (the table unaliased).
+export const takeColumns = (sql: Sql) => sql`
+  takes.id, takes.line_id, takes.recorded_by, takes.actor_id, takes.recorded_by_user_id, takes.storage_key, takes.duration_ms,
+  takes.created_at, takes.stt_transcript, takes.stt_accuracy, takes.stt_ops,
+  (select coalesce(a.first_name, split_part(a.name, ' ', 1)) from actors a where a.id = takes.actor_id) as actor_name,
+  (select u.name from users u where u.id = takes.recorded_by_user_id) as user_name,
+  (select u.email from users u where u.id = takes.recorded_by_user_id) as user_email`;
 
-export async function takeView(storage: Storage, t: TakeRow) {
+/** Who is looking: a cast member (their invite) or the director. `mine` on a take is relative to it. */
+export type Viewer = { actorId: string } | { userId: string };
+
+export const isMine = (t: Pick<TakeRow, "recordedBy" | "actorId" | "recordedByUserId">, viewer: Viewer) =>
+  "actorId" in viewer ? t.recordedBy === "actor" && t.actorId === viewer.actorId : t.recordedBy === "director" && t.recordedByUserId === viewer.userId;
+
+export async function takeView(storage: Storage, t: TakeRow, viewer: Viewer) {
   return {
     id: t.id,
     lineId: t.lineId,
     audioUrl: await storage.signedUrl(t.storageKey),
     durationMs: t.durationMs,
     createdAt: iso(t.createdAt)!,
-    recordedBy: t.recordedBy,
+    recordedBy: takeRecorder(t),
+    mine: isMine(t, viewer),
     stt: t.sttTranscript !== null && t.sttAccuracy !== null ? { transcript: t.sttTranscript, accuracy: t.sttAccuracy, ops: t.sttOps ?? [] } : null,
   };
 }
@@ -200,7 +220,7 @@ export async function castRows(sql: Sql, where: { productionId: string; actorId?
       (select count(distinct lv.line_id)::int from line_voices lv join actor_characters ac on ac.character_id = lv.character_id
         where ac.actor_id = a.id and ${voiceRecorded(sql)}) as lines_recorded,
       (select avg(t.stt_accuracy)::float8 from line_voices lv join actor_characters ac on ac.character_id = lv.character_id
-        join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id, true)
+        join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id)
         where ac.actor_id = a.id and t.stt_accuracy is not null) as avg_accuracy
     from actors a
     where a.production_id = ${where.productionId} ${where.actorId ? sql`and a.id = ${where.actorId}` : sql``}

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
+import { notifyActorsDone } from "../email/notify.ts";
 import { notFound } from "../errors.ts";
 import { idOf } from "../input.ts";
 import { cueViews, previousCue, saysLine } from "../lineaudio.ts";
@@ -10,10 +11,10 @@ import { scheduleRender } from "../render/queue.ts";
 import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
 import { linesOf, lineView, productionRows, sectionsOf, sectionView, takeColumns, takeView, type LineRow, type SectionRow, type TakeRow } from "../views.ts";
 
-// Stand-ins: the director records any line for a scene partner. A stand-in take becomes the line's
-// current take until someone records it again, fills the run-through, and never counts toward an
-// actor's progress or the completion emails.
-export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
+// The director records any line: a scene partner, a part nobody has picked, or their own roles. A
+// director's take is an ordinary take: it becomes the line's current take until someone records it
+// again, and counts towards progress and the completion emails like anyone's.
+export function studioRoutes(app: FastifyInstance, ctx: Ctx) {
   const { sql, storage } = ctx;
 
   app.put("/api/lines/:id/take", { bodyLimit: MAX_TAKE_BYTES }, async (req) => {
@@ -26,9 +27,9 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
     const { body, created } = await acceptTake(ctx, req, {
       productionId: line.productionId,
       lineId,
-      recorder: { kind: "standin", userId: user.id },
+      recorder: { kind: "director", userId: user.id },
       lineAllowed: async () => true,
-      // On a shared line, the voice to stand in for (?characterId=), else its first voice.
+      // On a shared line, the voice to record (?characterId=), else its first voice.
       voiceId: async () => {
         const wanted = (req.query as { characterId?: string }).characterId?.toLowerCase();
         const [row] = await sql<{ voiceIds: string[] | null }[]>`select voice_ids from lines where id = ${lineId}`;
@@ -36,21 +37,24 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
         if (!voices) return null;
         return wanted && voices.includes(wanted) ? wanted : voices[0]!;
       },
-      // Same response as the actor upload, with the production's progress (cast actors' takes only).
+      // Same response as the actor upload, with the production's progress.
       counts: async () => {
         const [p] = await productionRows(sql, { ownerId: user.id, id: line.productionId, includeArchived: true });
         return { linesRecorded: p!.linesRecorded, linesTotal: p!.linesTotal };
       },
       messages: {
         lineCap: "You've recorded this line 25 times. Keep your best take.",
-        storageCap: "You've reached the stand-in recording limit for this production.",
+        storageCap: "You've reached the recording limit for this production.",
       },
     });
-    if (created) await scheduleRender(ctx, line.productionId);
+    if (created) {
+      ctx.jobs.run("notify actors done", () => notifyActorsDone(ctx, line.productionId));
+      await scheduleRender(ctx, line.productionId);
+    }
     return body;
   });
 
-  // The director deletes any take in their production, a stand-in or the cast's (Undo: restore).
+  // The director deletes any take in their production, theirs or the cast's (Undo: restore).
   for (const [method, url, deleted] of [
     ["DELETE", "/api/takes/:id", true],
     ["POST", "/api/takes/:id/restore", false],
@@ -81,7 +85,7 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
     const items = lines.flatMap((line, i) =>
       line.kind === "dialogue" && line.sectionId === section.id ? [{ line, cue: previousCue(lines, i, (prev) => prev.characterId === line.characterId) }] : [],
     );
-    return { section: sectionView(section), lines: await standinItems(p.id, items, null) };
+    return { section: sectionView(section), lines: await studioItems(p.id, items, null, user.id) };
   });
 
   // A character's studio: every line they say (shared ones too) across the play, with the same
@@ -101,17 +105,22 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
     return {
       character,
       sections: sections.filter((s) => used.has(s.id)).map(sectionView),
-      lines: await standinItems(p.id, items, character),
+      lines: await studioItems(p.id, items, character, user.id),
     };
   });
 
-  async function standinItems(productionId: string, items: { line: LineRow; cue: LineRow | null }[], voice: { id: string; name: string } | null) {
+  async function studioItems(
+    productionId: string,
+    items: { line: LineRow; cue: LineRow | null }[],
+    voice: { id: string; name: string } | null,
+    userId: string,
+  ) {
     // A character's own take on a shared line, else each line's current take.
     const voiceTakeIds = voice
       ? new Map(
           (
             await sql<{ lineId: string; takeId: string | null }[]>`
-              select lv.line_id, voice_take(lv.line_id, lv.shared, lv.character_id, false) as take_id
+              select lv.line_id, voice_take(lv.line_id, lv.shared, lv.character_id) as take_id
               from line_voices lv where lv.character_id = ${voice.id} and lv.shared and lv.production_id = ${productionId}`
           ).map((r) => [r.lineId, r.takeId]),
         )
@@ -152,7 +161,7 @@ export function standinRoutes(app: FastifyInstance, ctx: Ctx) {
                   .filter(Boolean)
                   .join(" & ")
               : (names.get(line.characterId!) ?? "")),
-          take: take ? await takeView(storage, take) : null,
+          take: take ? await takeView(storage, take, { userId }) : null,
           audioSource,
           cue: cues[i] ?? null,
           together: voice ? (together.get(line.id) ?? []) : [],

@@ -137,9 +137,8 @@ describe("shared lines", { skip: dbSkip }, () => {
   });
 
   test("groups aren't parts on the call sheet or the cast link", async () => {
-    const sheet = (await get(`/api/productions/${pid}/call-sheet`)).json().characters as { name: string; lineCount: number; sharedLines: number }[];
+    const sheet = (await get(`/api/productions/${pid}/call-sheet`)).json().characters as { name: string; lineCount: number }[];
     assert.ok(!sheet.some((c) => c.name === "ALL" || c.name === "ANGELO, ESCALUS"));
-    assert.equal(sheet.find((c) => c.name === "ESCALUS")!.sharedLines, 2);
     const { joinUrl } = (await get(`/api/productions/${pid}/join-link`)).json();
     const join = (await t.app.inject({ method: "GET", url: `/api/join/${joinUrl.split("/join/")[1]}` })).json();
     assert.ok(!join.characters.some((c: { name: string }) => c.name === "ALL"));
@@ -263,15 +262,15 @@ describe("shared lines", { skip: dbSkip }, () => {
 
   test("deleting a take falls back to the previous one, and Undo puts it back", async () => {
     const line = byText("We must");
-    const standin = () =>
+    const record = () =>
       t.app.inject({
         method: "PUT",
         url: `/api/lines/${line.id}/take`,
         headers: { ...bearer(director), "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "700" },
         payload: wav,
       });
-    const first = (await standin()).json().take.id;
-    const second = (await standin()).json().take.id;
+    const first = (await record()).json().take.id;
+    const second = (await record()).json().take.id;
     const current = async () =>
       (await t.ctx.sql<{ currentTakeId: string | null }[]>`select current_take_id from lines where id = ${line.id}`)[0]!.currentTakeId;
     assert.equal(await current(), second);
@@ -290,10 +289,12 @@ describe("shared lines", { skip: dbSkip }, () => {
         .json()
         .lines.find((l: { line: { id: string } }) => l.line.id === shared.id).take as { id: string } | null;
     const take = (await mine())!;
+    const recorded = async () => (await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded as number;
+    const before = await recorded();
     const del = await t.app.inject({ method: "DELETE", url: `/api/invite/takes/${take.id}`, headers: { authorization: `Invite ${angeloToken}` } });
     assert.equal(del.statusCode, 200, del.body);
     assert.equal(await mine(), null);
-    assert.equal((await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded, 0, "the shared line isn't complete any more");
+    assert.equal(await recorded(), before - 1, "the shared line isn't complete any more");
     const other = await t.app.inject({ method: "DELETE", url: `/api/invite/takes/${take.id}`, headers: { authorization: `Invite ${escalusToken}` } });
     assert.equal(other.statusCode, 404);
     const back = await t.app.inject({ method: "POST", url: `/api/invite/takes/${take.id}/restore`, headers: { authorization: `Invite ${angeloToken}` } });

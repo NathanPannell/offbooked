@@ -11,13 +11,13 @@ import { scheduleRender } from "./render/queue.ts";
 import { ContentDeletedError, sweepIfDeleted } from "./retention.ts";
 import { takeColumns, takeView, type TakeRow } from "./views.ts";
 
-// Take uploads, shared by the actor endpoint and the director's stand-in endpoint: same body,
+// Take uploads, shared by the actor endpoint and the director's endpoint: same body,
 // headers, idempotency, caps and response.
 
 export const MAX_TAKE_BYTES = 8 * 1024 * 1024; // per request: a longer take comes in parts
 export const MAX_TAKE_PARTS = 12; // so a take is at most 96 MB (well over an hour of phone audio)
 export const MAX_TAKES_PER_LINE = 25; // per recorder
-export const MAX_RECORDER_BYTES = 200 * 1024 * 1024; // per actor, or per director per production for stand-ins
+export const MAX_RECORDER_BYTES = 200 * 1024 * 1024; // per actor, or per director per production
 // Only a safety net (the app stops a take left running for an hour): takes have no real length cap.
 const MAX_TAKE_MS = 65 * 60_000;
 const AUDIO_TYPES: Record<string, string> = {
@@ -31,7 +31,7 @@ const AUDIO_TYPES: Record<string, string> = {
   "audio/wave": "wav",
 };
 
-export type Recorder = { kind: "actor"; actorId: string } | { kind: "standin"; userId: string };
+export type Recorder = { kind: "actor"; actorId: string } | { kind: "director"; userId: string };
 
 export interface TakeUpload {
   productionId: string;
@@ -48,14 +48,17 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
   const takeId = req.headers["x-take-id"];
   if (!isUuid(takeId)) throw badRequest("X-Take-Id must be a UUID.");
   const id = takeId.toLowerCase();
-  const standin = u.recorder.kind === "standin";
+  const director = u.recorder.kind === "director";
   const actorId = u.recorder.kind === "actor" ? u.recorder.actorId : null;
-  const userId = u.recorder.kind === "standin" ? u.recorder.userId : null;
+  const userId = u.recorder.kind === "director" ? u.recorder.userId : null;
 
   const respond = async (created: boolean) => {
     const [take] = await sql<TakeRow[]>`select ${takeColumns(sql)} from takes where id = ${id}`;
     const c = await u.counts();
-    return { body: { take: await takeView(storage, take!), linesRecorded: c.linesRecorded, linesTotal: c.linesTotal }, created };
+    return {
+      body: { take: await takeView(storage, take!, actorId ? { actorId } : { userId: userId! }), linesRecorded: c.linesRecorded, linesTotal: c.linesTotal },
+      created,
+    };
   };
 
   // A repeated X-Take-Id returns the same take; the id can't be reused for another recording.
@@ -63,7 +66,7 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
     select actor_id, recorded_by_user_id, recorded_by, line_id from takes where id = ${id}`;
   if (existing) {
     const same =
-      existing.lineId === u.lineId && (standin ? existing.recordedBy === "standin" && existing.recordedByUserId === userId : existing.actorId === actorId);
+      existing.lineId === u.lineId && (director ? existing.recordedBy === "director" && existing.recordedByUserId === userId : existing.actorId === actorId);
     if (!same) throw conflict("take_id_conflict", "That take id was already used for another recording.");
     return respond(false);
   }
@@ -92,13 +95,13 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
     audio = joined.audio;
   }
 
-  const who = standin ? `standin:${userId}` : actorId!;
+  const who = director ? `director:${userId}` : actorId!;
   await enforce(sql, ctx.log, `take:${who}`, LIMITS.takeUpload, "You're recording very fast. Wait a minute and try again.");
-  const [usage] = standin
+  const [usage] = director
     ? await sql<{ lineTakes: number; bytes: number }[]>`
-        select (select count(*)::int from takes where recorded_by_user_id = ${userId} and recorded_by = 'standin' and line_id = ${u.lineId}) as line_takes,
+        select (select count(*)::int from takes where recorded_by_user_id = ${userId} and recorded_by = 'director' and line_id = ${u.lineId}) as line_takes,
                (select coalesce(sum(bytes), 0)::float8 from takes
-                where recorded_by_user_id = ${userId} and recorded_by = 'standin' and production_id = ${u.productionId}) as bytes`
+                where recorded_by_user_id = ${userId} and recorded_by = 'director' and production_id = ${u.productionId}) as bytes`
     : await sql<{ lineTakes: number; bytes: number }[]>`
         select (select count(*)::int from takes where actor_id = ${actorId} and line_id = ${u.lineId}) as line_takes,
                (select coalesce(sum(bytes), 0)::float8 from takes where actor_id = ${actorId}) as bytes`;
