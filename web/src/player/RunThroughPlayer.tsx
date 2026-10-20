@@ -15,7 +15,7 @@ import { PlayerEngine, type PlayerState } from "./engine";
 import { followLine } from "./follow";
 import { LineText, LiveText, type CueSpan } from "./LiveText";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
-import { defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
+import { changeSettings, defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
 import { SPEEDS } from "./timing";
 import { cueRange } from "./words";
 
@@ -74,7 +74,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   }, [productionId]);
   const settings = stored ?? defaultSettings(isActor, initialMode);
   const update = (patch: Partial<PlayerSettings>) => {
-    const next = { ...settings, ...patch };
+    const next = changeSettings(settings, patch);
     setStored(next);
     if (productionId) saveSettings(productionId, next);
   };

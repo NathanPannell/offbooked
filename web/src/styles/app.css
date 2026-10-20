@@ -4438,7 +4438,8 @@
 }
 
 /* The line being read, word by word: words already said in bold ink, the next one to be said
-   underlined in ink (it turns bold once said), the words still to come a little muted. */
+   underlined in ink (it turns bold once said), the words still to come a little muted. The next
+   word's underline is a touch thicker and lower than a cue's, so it reads as "you are here". */
 .lyric-text.is-live .rw {
   color: var(--muted);
   text-decoration-line: underline;
@@ -4459,6 +4460,8 @@
 .lyric-text.is-live .rw.is-next {
   color: var(--ink);
   text-decoration-color: var(--ink);
+  text-decoration-thickness: 2.5px;
+  text-underline-offset: 7px;
 }
 
 /* The listener's cue: the last sentence of the line before theirs, underlined (a little lighter
@@ -4471,16 +4474,33 @@
   text-decoration-skip-ink: none;
 }
 
-/* A [direction] inside a line, read by the narrator. */
+/* A [direction] inside a line, read by the narrator: it stays regular and muted as it is read,
+   and its next-word underline is in the same muted ink. */
 .lyric-text.is-live .rw-dir {
   font-size: 0.82em;
   font-style: italic;
   font-weight: 400;
 }
 
+.lyric-text.is-live .rw-dir.is-said,
+.lyric-text.is-live .rw-dir.is-next {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.lyric-text.is-live .rw-dir.is-next {
+  text-decoration-color: var(--muted);
+}
+
+/* A whole stage direction likewise: regular weight, its own soft ink. */
 .kind-stage_direction .lyric-text.is-live .rw.is-said,
-.kind-stage_direction .lyric-text.is-live .rw.is-now {
+.kind-stage_direction .lyric-text.is-live .rw.is-next {
   color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.kind-stage_direction .lyric-text.is-live .rw.is-next {
+  text-decoration-color: var(--ink-soft);
 }
 
 .lyric.kind-heading {
@@ -4563,22 +4583,18 @@
   overflow: hidden;
 }
 
+/* The countdown for the listener's own line, in the player and the landing page's demo: ink. */
 .gap-meter > span {
   display: block;
   height: 100%;
   width: 100%;
-  background: var(--accent);
+  background: var(--ink);
   transform-origin: left;
   animation: gap-fill var(--gap-ms) linear forwards;
 }
 
 .gap-meter.is-paused > span {
   animation-play-state: paused;
-}
-
-/* In the player the countdown for the listener's own line is ink, not red. */
-.player .gap-meter > span {
-  background: var(--ink);
 }
 
 @keyframes gap-fill {

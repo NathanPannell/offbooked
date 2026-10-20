@@ -13,6 +13,11 @@ export interface PlayerSettings {
   role: Role;
   mode: MyLineMode;
   speed: Speed;
+  /**
+   * The listener picked `mode` themselves. Only then is a stored mode used: a change of speed or
+   * part also saves the mode in force, and that one (an old default, say) shouldn't stick.
+   */
+  modePicked?: boolean;
 }
 
 const MODES: MyLineMode[] = ["read", "skip", "pause"];
@@ -27,15 +32,25 @@ export function defaultSettings(isActor: boolean, initialMode: "full" | "mine"):
   return { role: isActor ? MY_PART : "", mode: isActor || initialMode === "mine" ? "pause" : "read", speed: 1 };
 }
 
-/** Stored settings, checked against what this production and listener allow. */
+/** The settings after a change; picking a mode marks it as the listener's own choice. */
+export function changeSettings(current: PlayerSettings, patch: Partial<PlayerSettings>): PlayerSettings {
+  return { ...current, ...patch, ...(patch.mode !== undefined ? { modePicked: true } : {}) };
+}
+
+/**
+ * Stored settings, checked against what this production and listener allow. A stored mode only
+ * counts when the listener picked it (`modePicked`); otherwise the default for them applies.
+ */
 export function parseSettings(raw: string | null, fallback: PlayerSettings, roles: Set<Role>): PlayerSettings {
   if (!raw) return fallback;
   try {
     const v = JSON.parse(raw) as Partial<PlayerSettings>;
+    const picked = v.modePicked === true && MODES.includes(v.mode as MyLineMode);
     return {
       role: typeof v.role === "string" && (v.role === "" || roles.has(v.role)) ? v.role : fallback.role,
-      mode: MODES.includes(v.mode as MyLineMode) ? (v.mode as MyLineMode) : fallback.mode,
+      mode: picked ? (v.mode as MyLineMode) : fallback.mode,
       speed: isSpeed(v.speed) ? v.speed : fallback.speed,
+      ...(picked ? { modePicked: true } : {}),
     };
   } catch {
     return fallback;
