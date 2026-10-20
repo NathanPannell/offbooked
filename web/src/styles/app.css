@@ -5155,6 +5155,17 @@
   font-size: inherit;
 }
 
+/* The prompt's text wraps on its own; the ✕ stays at the end of the first row. */
+.name-line:not(.name-line-form) {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.name-line:not(.name-line-form) > .grow {
+  min-width: 0;
+  padding-top: 2px;
+}
+
 .name-line-close {
   margin: -10px -8px -10px 0;
 }
