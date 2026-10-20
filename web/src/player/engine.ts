@@ -58,7 +58,7 @@ type Phase =
   | { kind: "pause"; index: number; next: number }; // the pause between two lines
 
 /** Recorded takes time the listener's pause; TTS and silent lines are timed from their words. */
-const recorded = (source: string | undefined) => source === "actor" || source === "standin";
+const recorded = (source: string | undefined) => source === "actor" || source === "director";
 
 /**
  * Plays the run-through line by line through one <audio> element: each line's clip, then a short

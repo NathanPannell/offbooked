@@ -29,7 +29,7 @@ interface LineAudioRow {
   characterId: string | null;
   text: string;
   takeId: string | null;
-  recordedBy: "actor" | "standin" | null;
+  recordedBy: "actor" | "director" | null;
   storageKey: string | null;
   normalizedKey: string | null;
   normalizedSamples: number | null;
@@ -107,7 +107,7 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
   const takeJobs: Promise<unknown>[] = [];
   for (const [lineId, takes] of mixes) {
     const r = rows.get(lineId)!;
-    const source = takes.some((t) => t.recordedBy === "actor") ? "actor" : "standin";
+    const source = takes.some((t) => t.recordedBy === "actor") ? "actor" : "director";
     const job = mixedClip(ctx, productionId, takes).then(
       async (m) => {
         takeViews.set(lineId, { lineId, audioUrl: await ctx.storage.signedUrl(m.streamKey), durationMs: samplesToMs(m.samples), source, ready: true });
@@ -238,7 +238,7 @@ export const playPriority = (prefetch: unknown): TtsPriority => (prefetch === "1
 // shows these as tags.
 export async function lineSources(ctx: Ctx, productionId: string): Promise<Record<string, AudioSource>> {
   const rows = await ctx.sql<
-    { id: string; kind: string; characterId: string | null; text: string; recordedBy: "actor" | "standin" | null; takeId: string | null }[]
+    { id: string; kind: string; characterId: string | null; text: string; recordedBy: "actor" | "director" | null; takeId: string | null }[]
   >`
     select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id, t.recorded_by
     from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'

@@ -30,7 +30,7 @@ export const mixHash = (takeIds: string[]) =>
 export interface VoiceTake extends TakeAudioRow {
   lineId: string;
   characterId: string;
-  recordedBy: "actor" | "standin";
+  recordedBy: "actor" | "director";
 }
 
 // Each shared line's current take per voice (newest take for that character: see voice_take in
@@ -38,7 +38,7 @@ export interface VoiceTake extends TakeAudioRow {
 export async function voiceTakes(sql: Sql, productionId: string, lineIds?: string[]): Promise<Map<string, VoiceTake[]>> {
   const rows = await sql<VoiceTake[]>`
     select lv.line_id, lv.character_id, t.id, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.recorded_by
-    from line_voices lv join takes t on t.id = voice_take(lv.line_id, true, lv.character_id, false)
+    from line_voices lv join takes t on t.id = voice_take(lv.line_id, true, lv.character_id)
     where lv.production_id = ${productionId} and lv.shared ${lineIds ? sql`and lv.line_id = any(${lineIds}::uuid[])` : sql``}
     order by lv.seq, lv.ord`;
   const out = new Map<string, VoiceTake[]>();

@@ -251,7 +251,7 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     // A line with recordings can't be deleted.
     const recorded = script.lines.find((l) => l.kind === "dialogue")!;
     await t.ctx.sql`insert into takes (id, production_id, line_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms)
-                    select gen_random_uuid(), p.id, ${recorded.id}, 'standin', p.owner_id, 'x', 'audio/webm', 1, 1000 from productions p where p.id = ${pid}`;
+                    select gen_random_uuid(), p.id, ${recorded.id}, 'director', p.owner_id, 'x', 'audio/webm', 1, 1000 from productions p where p.id = ${pid}`;
     const refused = await t.app.inject({ method: "DELETE", url: `/api/lines/${recorded.id}`, headers: bearer(alice) });
     assert.equal(refused.statusCode, 409);
     assert.equal(refused.json().error.code, "has_recordings");
@@ -328,10 +328,10 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
 
     const doubled = (await send("POST", `/api/productions/${pid}/cast`, { name: "Jo", characterIds: [char("QUEEN").id, char("HORATIO").id] })).json().member;
     assert.equal(doubled.characterIds.length, 2);
-    // Giving HORATIO to someone else takes it from Jo.
+    // Parts aren't owned: giving HORATIO to Riz too leaves it with Jo.
     await send("PATCH", `/api/cast/${member.id}`, { characterIds: [char("HAMLET").id, char("HORATIO").id], phone: "+1 555 0100" });
     const cast = (await get(`/api/productions/${pid}/cast`)).json();
-    assert.deepEqual(cast.cast.find((m: { id: string }) => m.id === doubled.id).characterIds, [char("QUEEN").id]);
+    assert.deepEqual(cast.cast.find((m: { id: string }) => m.id === doubled.id).characterIds, [char("HORATIO").id, char("QUEEN").id]);
     assert.equal(cast.cast.find((m: { id: string }) => m.id === member.id).phone, "+1 555 0100");
     assert.ok(cast.uncastCharacterIds.includes(char("LAERTES").id));
     assert.ok(!cast.uncastCharacterIds.includes(char("HORATIO").id));

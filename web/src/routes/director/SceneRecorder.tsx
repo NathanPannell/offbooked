@@ -14,10 +14,7 @@ import { useResource } from "../../lib/useResource";
 import { latestForLine } from "../../upload/queue";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "../actor/LineCard";
-import { takeAuthor, type AuthorContext } from "../actor/recordedBy";
-
-/** Older servers only say whether a take is the cast's or a director's; newer ones name who recorded it. */
-const AUTHORS: AuthorContext = { me: "director", actorName: "the cast", directorName: "a director" };
+import { takeAuthor } from "../actor/recordedBy";
 
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -175,7 +172,7 @@ function SceneLines({
           current
             ? {
                 ...current,
-                lines: current.lines.map((l) => (l.line.id === item.lineId ? { ...l, take: { ...result.take, mine: true } } : l)),
+                lines: current.lines.map((l) => (l.line.id === item.lineId ? { ...l, take: { ...result.take, mine: true }, audioSource: "director" } : l)),
               }
             : current!,
         );
@@ -355,7 +352,7 @@ function SceneLines({
                   score={null}
                   playing={playback.playing}
                   noCueLabel="Opens the scene"
-                  author={l.take ? takeAuthor(l.take, AUTHORS) : null}
+                  author={l.take ? takeAuthor(l.take) : null}
                   progress={playback.progress}
                   onPlay={playback.play}
                   onPlayTogether={playback.playTogether}

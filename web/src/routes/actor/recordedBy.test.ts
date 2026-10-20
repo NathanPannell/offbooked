@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ActorLine, Take } from "../../api/types";
-import { lineTake, nextToRecord, opensOnWrapped, ownTake, recordedByLabel, takeAuthor, type AuthorContext } from "./recordedBy";
+import { lineTake, nextToRecord, opensOnWrapped, ownTake, recordedByLabel, takeAuthor } from "./recordedBy";
 
-const actorCtx: AuthorContext = { me: "actor", actorName: "Someone in the cast", directorName: "Jo" };
-const directorCtx: AuthorContext = { me: "director", actorName: "the cast", directorName: "Jo" };
-
-function take(id: string, extra: Partial<Take> = {}): Take {
-  return { id, lineId: `l-${id}`, audioUrl: `https://audio/${id}`, durationMs: 1200, createdAt: "2026-10-20T00:00:00Z", stt: null, ...extra };
+function take(id: string, by: { kind: "actor" | "director"; name: string }, mine: boolean): Take {
+  return { id, lineId: `l-${id}`, audioUrl: `https://audio/${id}`, durationMs: 1200, createdAt: "2026-10-20T00:00:00Z", stt: null, recordedBy: by, mine };
 }
 
 function line(id: string, extra: Partial<ActorLine> = {}): ActorLine {
@@ -20,60 +17,58 @@ function line(id: string, extra: Partial<ActorLine> = {}): ActorLine {
   };
 }
 
-const robin = (id: string) => take(id, { recordedBy: { kind: "actor", name: "Robin" }, mine: false });
-const mine = (id: string) => take(id, { recordedBy: { kind: "actor", name: "Riz" }, mine: true });
+const mine = (id: string) => take(id, { kind: "actor", name: "Riz" }, true);
+const robinNow = {
+  source: "actor" as const,
+  by: "Robin",
+  recordedBy: { kind: "actor" as const, name: "Robin" },
+  mine: false as const,
+  audioUrl: "https://audio/robin",
+};
+const directorNow = {
+  source: "director" as const,
+  by: "Jo",
+  recordedBy: { kind: "director" as const, name: "Jo" },
+  mine: false as const,
+  audioUrl: "https://audio/jo",
+};
 
 describe("who recorded a take", () => {
-  it("reads the name and whether it's mine from the server", () => {
-    expect(takeAuthor(robin("t1"), actorCtx)).toEqual({ kind: "actor", name: "Robin", mine: false });
-    expect(takeAuthor(take("t2", { recordedBy: { kind: "director", name: "Jo" }, mine: true }), directorCtx)).toEqual({
-      kind: "director",
-      name: "Jo",
-      mine: true,
+  it("reads the name and whether it's mine", () => {
+    expect(takeAuthor(take("t1", { kind: "actor", name: "Robin" }, false))).toEqual({ kind: "actor", name: "Robin", mine: false });
+    expect(takeAuthor(take("t2", { kind: "director", name: "Jo" }, true))).toEqual({ kind: "director", name: "Jo", mine: true });
+    expect(recordedByLabel(takeAuthor(take("t1", { kind: "actor", name: "Robin" }, false)))).toBe("Recorded by Robin");
+    expect(recordedByLabel(takeAuthor(mine("t3")))).toBe("Recorded by you");
+  });
+
+  it("uses what plays now when the line has no take of the actor's own", () => {
+    expect(lineTake(line("a", { current: robinNow }))).toEqual({
+      url: "https://audio/robin",
+      durationMs: null,
+      author: { kind: "actor", name: "Robin", mine: false },
     });
-    expect(recordedByLabel(takeAuthor(robin("t1"), actorCtx))).toBe("Recorded by Robin");
-    expect(recordedByLabel(takeAuthor(mine("t3"), actorCtx))).toBe("Recorded by you");
-  });
-
-  it("falls back on older servers", () => {
-    // The actor's recorder only ever got their own takes.
-    expect(takeAuthor(take("t1"), actorCtx).mine).toBe(true);
-    expect(takeAuthor(take("t1", { recordedBy: "actor" }), actorCtx).mine).toBe(true);
-    // In a studio, a stand-in was the director's own and anything else the cast's.
-    expect(takeAuthor(take("t2", { recordedBy: "standin" }), directorCtx)).toEqual({ kind: "director", name: "Jo", mine: true });
-    expect(takeAuthor(take("t3", { recordedBy: "actor" }), directorCtx)).toEqual({ kind: "actor", name: "the cast", mine: false });
-  });
-
-  it("uses what plays now when the line has no take of its own", () => {
-    const l = line("a", { current: { source: "actor", by: "Robin", audioUrl: "https://audio/robin" } });
-    expect(lineTake(l, actorCtx)).toEqual({ url: "https://audio/robin", durationMs: null, author: { kind: "actor", name: "Robin", mine: false } });
-    const standin = line("b", { current: { source: "standin", by: null, audioUrl: "https://audio/jo" } });
-    expect(lineTake(standin, actorCtx)?.author).toEqual({ kind: "director", name: "Jo", mine: false });
-    expect(lineTake(line("c"), actorCtx)).toBeNull();
-    expect(lineTake(line("d", { take: mine("t") }), actorCtx)?.author.mine).toBe(true);
+    expect(lineTake(line("b", { current: directorNow }))?.author).toEqual({ kind: "director", name: "Jo", mine: false });
+    expect(lineTake(line("c"))).toBeNull();
+    expect(lineTake(line("d", { take: mine("t") }))?.author.mine).toBe(true);
   });
 
   it("only counts the person's own take as theirs", () => {
-    expect(ownTake(line("a", { take: mine("t1") }), actorCtx)?.id).toBe("t1");
-    expect(ownTake(line("b", { take: robin("t2") }), actorCtx)).toBeNull();
-    expect(ownTake(line("c"), actorCtx)).toBeNull();
+    expect(ownTake(line("a", { take: mine("t1") }))?.id).toBe("t1");
+    expect(ownTake(line("b", { take: take("t2", { kind: "director", name: "Jo" }, false) }))).toBeNull();
+    expect(ownTake(line("c", { current: robinNow }))).toBeNull();
+    expect(ownTake(line("d"))).toBeNull();
   });
 });
 
 describe("where the recorder opens", () => {
   it("lands someone who picked up a part others recorded on the lines, not on wrapped", () => {
-    const pickedUp = [line("a", { take: robin("t1") }), line("b", { current: { source: "actor", by: "Robin", audioUrl: "u" } })];
-    expect(opensOnWrapped(pickedUp, actorCtx)).toBe(false);
+    expect(opensOnWrapped([line("a", { current: robinNow }), line("b", { current: directorNow })])).toBe(false);
   });
 
   it("opens on wrapped once every line is in and some of it is theirs", () => {
-    expect(opensOnWrapped([line("a", { take: mine("t1") }), line("b", { take: robin("t2") })], actorCtx)).toBe(true);
-    expect(opensOnWrapped([line("a", { take: mine("t1") }), line("b")], actorCtx)).toBe(false);
-    expect(opensOnWrapped([], actorCtx)).toBe(false);
-  });
-
-  it("still opens on wrapped for an older server's own takes", () => {
-    expect(opensOnWrapped([line("a", { take: take("t1") })], actorCtx)).toBe(true);
+    expect(opensOnWrapped([line("a", { take: mine("t1") }), line("b", { current: robinNow })])).toBe(true);
+    expect(opensOnWrapped([line("a", { take: mine("t1") }), line("b")])).toBe(false);
+    expect(opensOnWrapped([])).toBe(false);
   });
 });
 

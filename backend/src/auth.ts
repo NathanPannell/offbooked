@@ -51,7 +51,7 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
   const token = credential(req, "Invite");
   const parsed = token ? parseInviteToken(ctx.config.inviteSecret, token) : null;
   await enforce(ctx.sql, ctx.log, `invite-ip:${req.ip}`, LIMITS.inviteIp);
-  if (!parsed) throw unauthorized("This link isn't valid. Ask your director for a new one.");
+  if (!parsed) throw unauthorized("This link doesn't work. Ask your director for the cast link.");
   const [row] = await ctx.sql<
     {
       id: string;
@@ -73,7 +73,7 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
       u.email as director_email
     from actors a join productions p on p.id = a.production_id join users u on u.id = p.owner_id
     where a.id = ${parsed.actorId}`;
-  if (!row) throw unauthorized("This link isn't valid. Ask your director for a new one.");
+  if (!row) throw unauthorized("This link doesn't work. Ask your director for the cast link.");
   const directorName = castFacingName(row.directorName, row.directorEmail);
   const gone = (message: string) => new HttpError(410, "invite_expired", message, { directorName, productionTitle: row.title });
   if (row.archivedAt) throw gone("This production has wrapped, so this link no longer works.");

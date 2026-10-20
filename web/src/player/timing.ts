@@ -43,13 +43,12 @@ export function isSpeed(value: unknown): value is Speed {
   return SPEEDS.includes(value as Speed);
 }
 
-/** The small tag shown beside a line in the run-through, or null for the cast's own recording. */
+/** The small tag shown beside a line when listening, or null for a recording (the cast's or the director's). */
 export function audioSourceTag(source: AudioSource): string | null {
   switch (source) {
     case "actor":
+    case "director":
       return null;
-    case "standin":
-      return "stand-in";
     case "tts":
       return "TTS";
     case "none":

@@ -10,43 +10,28 @@ export interface TakeAuthor {
   mine: boolean;
 }
 
-export interface AuthorContext {
-  /** Who is looking: an actor in their recorder, or the director in a part's studio. */
-  me: "actor" | "director";
-  /** Names for older servers, which say only whether a take is the cast's or a director's. */
-  actorName: string;
-  directorName: string;
+/** Who recorded a take. */
+export function takeAuthor(take: Take): TakeAuthor {
+  return { kind: take.recordedBy.kind, name: take.recordedBy.name, mine: take.mine };
 }
 
-/** Who recorded a take. Older servers send no name, and in the actor's recorder only their own takes. */
-export function takeAuthor(take: Take, ctx: AuthorContext): TakeAuthor {
-  const by = take.recordedBy;
-  if (by && typeof by === "object") return { kind: by.kind, name: by.name, mine: take.mine ?? false };
-  const kind = by === "standin" ? "director" : "actor";
-  return { kind, name: kind === "director" ? ctx.directorName : ctx.actorName, mine: take.mine ?? kind === ctx.me };
-}
-
-/** The take that plays for a line now, and who recorded it: the line's take, else what plays in its place. */
-export function lineTake(l: ActorLine, ctx: AuthorContext): { url: string; durationMs: number | null; author: TakeAuthor } | null {
-  if (l.take) return { url: l.take.audioUrl, durationMs: l.take.durationMs, author: takeAuthor(l.take, ctx) };
-  if (l.current) {
-    const kind = l.current.source === "standin" ? "director" : "actor";
-    const name = l.current.by ?? (kind === "director" ? ctx.directorName : ctx.actorName);
-    return { url: l.current.audioUrl, durationMs: null, author: { kind, name, mine: false } };
-  }
+/** The take that plays for a line now, and who recorded it: the actor's own, else someone else's in its place. */
+export function lineTake(l: ActorLine): { url: string; durationMs: number | null; author: TakeAuthor } | null {
+  if (l.take) return { url: l.take.audioUrl, durationMs: l.take.durationMs, author: takeAuthor(l.take) };
+  if (l.current) return { url: l.current.audioUrl, durationMs: null, author: { ...l.current.recordedBy, mine: false } };
   return null;
 }
 
 /** The person's own take on a line, if the line's take is theirs. */
-export function ownTake(l: ActorLine, ctx: AuthorContext): Take | null {
-  return l.take && takeAuthor(l.take, ctx).mine ? l.take : null;
+export function ownTake(l: ActorLine): Take | null {
+  return l.take?.mine ? l.take : null;
 }
 
 export function recordedByLabel(author: TakeAuthor): string {
   return author.mine ? "Recorded by you" : `Recorded by ${author.name}`;
 }
 
-/** Recorded by anyone: the cast, a director, or whoever had the part before. */
+/** Recorded by anyone: this actor, another cast member or the director. */
 export function lineRecorded(l: ActorLine): boolean {
   return !!l.take || !!l.current;
 }
@@ -56,8 +41,8 @@ export function lineRecorded(l: ActorLine): boolean {
  * person. Someone who picks up a part others have already recorded lands on the lines instead,
  * to listen and record their own.
  */
-export function opensOnWrapped(lines: readonly ActorLine[], ctx: AuthorContext): boolean {
-  return lines.length > 0 && lines.every(lineRecorded) && lines.some((l) => !!ownTake(l, ctx));
+export function opensOnWrapped(lines: readonly ActorLine[]): boolean {
+  return lines.length > 0 && lines.every(lineRecorded) && lines.some((l) => !!ownTake(l));
 }
 
 /**

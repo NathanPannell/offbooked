@@ -214,8 +214,8 @@ interface ParseProgress {
 // GET /api/productions/:id/script gains `progress: ParseProgress | null` (non-null while status is "parsing").
 // Poll it every ~1.5 s while parsing. All parts are labelled in parallel, so progress jumps in bursts.
 
-type AudioSource = "actor" | "standin" | "tts" | "none";
-// TimingEntry gains `source: AudioSource` (`recorded` stays: true for actor or standin).
+type AudioSource = "actor" | "director" | "tts" | "none"; // "director" was "standin" before 2026-10-20
+// TimingEntry gains `source: AudioSource` (`recorded` stays: true for a cast member's or the director's take).
 // ActorLine.cue gains `audioSource: AudioSource` (cue audio is a take when one exists, else TTS).
 ```
 
@@ -232,25 +232,27 @@ type AudioSource = "actor" | "standin" | "tts" | "none";
 | --- | --- | --- | --- |
 | GET | `/api/productions/:id/join-link` | director | `{ joinUrl }` (`${APP_URL}/join/<token>`) |
 | POST | `/api/productions/:id/join-link/reset` | director | `{ joinUrl }`: the old link stops working |
-| GET | `/api/join/:token` | none | `{ production: { id, title, directorName }, characters: { id, name, lineCount, takenBy: string \| null }[] }`, sorted by line count. 409 `script_not_ready` while parsing; 410 when archived; 404 for a bad or reset link. |
-| POST | `/api/join/:token/claim` | none | `{ characterIds: string[], firstName }` → `{ inviteToken, inviteUrl }`. Creates a cast member who owns those characters, then the web app goes straight to `/i/<inviteToken>`. 409 `character_taken` if someone got there first. Store the invite token per join link in localStorage, so reopening the cast link on the same device goes back to that actor's recording screen. |
+| GET | `/api/join/:token` | none | `{ production: { id, title, directorName }, characters: PartCard[] }` (see "Open parts" below), sorted by line count. 409 `script_not_ready` while parsing; 410 when archived; 404 for a bad or reset link. |
+| POST | `/api/join/:token/claim` | none | `{ characterIds: string[], firstName }` → `{ inviteToken, inviteUrl }`. Creates a cast member who has picked those characters, then the web app goes straight to `/i/<inviteToken>`. Parts aren't owned: any part can be picked, however many others have picked it. Store the invite token per join link in localStorage, so reopening the cast link on the same device goes back to that actor's recording screen. |
 
-## Stand-ins and TTS (backend agent fills these in; shapes are fixed here)
+## The director's takes and TTS
 
-- Every dialogue line always has audio in the run-through, in this order: the latest take (by the cast actor or a stand-in), otherwise a TTS voice. Each character gets a consistent synthetic voice, and different characters get different voices where possible.
-- The director (or anyone they share the director account with) can record a stand-in take for any line:
+Until 2026-10-20 a director's take was a "stand-in" that never counted. Since then it is an ordinary take (see "Open parts" below); this section is updated to match.
+
+- Every dialogue line always has audio in the run-through, in this order: the latest take (by anyone in the cast or the director), otherwise a TTS voice. Each character gets a consistent synthetic voice, and different characters get different voices where possible.
+- The director (or anyone they share the director account with) can record a take for any line:
   - `PUT /api/lines/:lineId/take` (director auth): same body, headers and response as the actor take upload.
   - `GET /api/productions/:id/sections/:sectionId/lines` (director): `{ section, lines: { line: Line, characterName: string, take: Take \| null, audioSource: AudioSource, cue: ActorLine["cue"] }[] }` for recording a whole scene, partner by partner.
-- When an actor later records their own line it becomes the current take; older takes are kept.
-- Takes gain `recordedBy: "actor" | "standin"`.
+- Whoever records a line last makes the current take; older takes are kept.
+- Takes carry `recordedBy: { kind: "actor" | "director", name }` and `mine` (see "Open parts").
 
-### Stand-ins and TTS: details as built
+### The director's takes and TTS: details as built
 
-- The stand-in upload response's `linesRecorded`/`linesTotal` are production progress, counting actor takes only (stand-ins never count as an actor's progress or trigger "finished" emails).
-- `ActorLine.take` is the actor's own latest take, never a stand-in.
+- The director's upload response's `linesRecorded`/`linesTotal` are production progress, counting every take.
+- `ActorLine.take` is the actor's own latest take, never someone else's (that is `current`).
 - A cue whose TTS clip is still being synthesized comes back with `audioUrl: null, audioSource: "none"` (the lines endpoints wait up to `TTS_CUE_WAIT_MS`, default 2.5 s); it fills in on the next fetch.
 - `GET` run-through may queue a render (first open, or when stale with nothing queued).
-- Stand-in takes count as recordings for the "script can't be replaced once recorded" rule.
+- The director's takes count as recordings for the "script can't be replaced once recorded" rule.
 - `/health` reports `tts: "piper <version>" | null` and never fails because of it; without Piper, unrecorded lines render as silence (`source: "none"`).
 
 # Additions (2026-10-14): line-by-line playback
@@ -271,7 +273,7 @@ interface LineAudio {
   lineId: string;
   audioUrl: string | null;  // signed .m4a (AAC, 48 kHz mono); null for a silent line or one not ready yet
   durationMs: number;       // the clip's length; for a silent line, the render's placeholder silence
-  source: AudioSource;      // "actor" | "standin" | "tts" | "none"
+  source: AudioSource;      // "actor" | "director" | "tts" | "none"
   ready: boolean;           // false while the clip is still being made: ask again
 }
 
@@ -323,10 +325,9 @@ The director's cast page shows the cast link, a read-only call sheet and a way t
 
 | Method | Path | Auth | Response |
 | --- | --- | --- | --- |
-| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, takenBy: string \| null, mine: boolean }[] }`: every character with dialogue, biggest parts first. `takenBy` is the first name of whoever took the part; `mine` is true for a part the director took with `record-as`. `linesRecorded` counts the cast's own takes only (not stand-ins or TTS). |
-| POST | `/api/productions/:id/record-as` | director (own production) | `{ characterId }` → `{ inviteToken, inviteUrl }`. The director gets one cast member per production (`actors.director_user_id`), created on first use with their first name and already opened, so `/i/<inviteToken>` goes straight to recording. The character is added to that cast member unless it is already theirs. 409 `character_taken` if someone else has the part; 404 for a character outside the production; 400 for a missing or malformed id. |
+| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, topRecorder: { name, others } \| null, mine: boolean }[] }`: every character with dialogue, biggest parts first. Changed 2026-10-20, see "Open parts". |
 
-- The director's cast member records ordinary actor takes (`recorded_by = 'actor'`), so they count as progress and the part can't be claimed through the cast link. No "finished all lines" email is sent for it.
+- `POST /api/productions/:id/record-as` (the director's own cast member) was removed on 2026-10-20: the director records any part in its studio (`PUT /api/lines/:id/take`). Its old takes became director takes (migration `014_open_parts.sql`).
 
 ### Shared lines, deleting takes, studios and renaming (2026-10-17)
 
@@ -335,19 +336,18 @@ A line several characters say together ("ANGELO, ESCALUS", "ALL", "BOTH") is a *
 - `Character` gains `group: boolean`, `everyone: boolean` (ALL-style) and `memberIds: string[]` (a named group's characters, in order).
 - `Line` gains `voiceIds: string[] | null`: who says a shared line, in order; null for a line of one voice (`characterId`). A named group's lines get its members. An ALL line first gets everyone who speaks in its scene, then Claude Haiku reads the scene (entrances, exits, who is addressed) and narrows it to who is on stage; a director's pick replaces either.
 - `PATCH /api/lines/:id` takes `voiceIds`: two or more characters make (or reuse) the group named after them (`"HAMLET, QUEEN"`) and set the line's character to it; one makes it that character's line; on an ALL line the list replaces the guess, and `null` puts the guess back.
-- Each voice's actor records the line. A take on a shared line records which character it voices (`takes.character_id`). The line plays every voice's current take mixed into one clip (`render/mix.ts`, cached in `take_mixes`), in line-by-line playback and the stitched render. Progress counts a shared line for each voice that has an actor take; the production counts it once every voice is in.
+- Each voice is recorded separately. A take on a shared line records which character it voices (`takes.character_id`). The line plays every voice's current take mixed into one clip (`render/mix.ts`, cached in `take_mixes`), in line-by-line playback and the stitched render. Progress counts a shared line for each voice that has a take (anyone's); the production counts it once every voice is in.
 - `GET /api/invite/lines` items gain `together: { characterId, characterName, audioUrl, audioSource }[]`: the others who say a shared line and their current takes (null `audioUrl` until recorded). `take` is the actor's own latest take.
-- `PUT /api/lines/:id/take?characterId=` (stand-in): on a shared line, the voice it stands in for (default its first voice).
-- Call sheet rows gain `sharedLines` (how many of the part's lines are shared) and `actorId`.
+- `PUT /api/lines/:id/take?characterId=` (director): on a shared line, the voice it records (default its first voice).
 
 | Method | Path | Auth | Response |
 | --- | --- | --- | --- |
 | DELETE | `/api/invite/takes/:takeId` | invite (own takes) | `{ linesRecorded, linesTotal }`. Deletes the take: the line falls back to its newest remaining take, else TTS. 404 for someone else's take. |
 | POST | `/api/invite/takes/:takeId/restore` | invite (own takes) | `{ linesRecorded, linesTotal }`. Undo for the delete. |
-| DELETE | `/api/takes/:id` | director (own production) | 204. Deletes any take in the production, a stand-in or the cast's. |
+| DELETE | `/api/takes/:id` | director (own production) | 204. Deletes any take in the production, the director's or the cast's. |
 | POST | `/api/takes/:id/restore` | director (own production) | 204. Undo. |
 | PATCH | `/api/invite/me` | invite | `{ name }` → `{ actor: { id, name, firstName } }`. The actor fixes their name; `firstName` is its first word. |
-| GET | `/api/productions/:id/characters/:characterId/lines` | director (own production) | `{ character: { id, name }, sections, lines: SectionLine[] }`: a character's studio, every line they say (shared ones too), each like a scene's stand-in line plus `together` and `voiceId` (set on shared lines). |
+| GET | `/api/productions/:id/characters/:characterId/lines` | director (own production) | `{ character: { id, name }, sections, lines: SectionLine[] }`: a character's studio, every line they say (shared ones too), each like a scene's line plus `together` and `voiceId` (set on shared lines). |
 
 - Deleting a take only hides it (`takes.deleted_at`). Like every recording, its audio is kept, and restore brings it back.
 
@@ -359,14 +359,54 @@ The parse is taken as read: there is no review step. Lines are saved unflagged, 
 
 | Method | Path | Auth | Response |
 | --- | --- | --- | --- |
-| POST | `/api/productions/:id/characters/:characterId/unassign` | director (own production) | 204. Takes the part away from whoever has it. Their takes stay and keep playing (and still count for the part); the part is free on the cast link and for picking up. |
-| GET | `/api/invite/parts` | invite | `{ parts: { id, name, lineCount, linesNeeded }[] }`: free parts (no group, nobody has it), most lines needing a voice first. `linesNeeded` counts lines no cast member has recorded. |
-| POST | `/api/invite/parts` | invite | `{ characterIds }` → `{ characters: { id, name }[] }` (all the actor's parts now). 409 `character_taken` if one was taken meanwhile. |
+| GET | `/api/invite/parts` | invite | `{ parts: PartCard[] }`: every part the actor hasn't picked (no groups), most lines needing a voice first. Changed 2026-10-20, see "Open parts". |
+| POST | `/api/invite/parts` | invite | `{ characterIds }` → `{ characters: { id, name }[] }` (all the actor's parts now). Never 409s since 2026-10-20; picking a part twice is harmless. |
 
-- `GET /api/invite/lines` items gain `current: { source: "actor" | "standin", by: string | null, audioUrl } | null`: what plays now on the line when it isn't the actor's own take (a stand-in, or a take by whoever had the part before; `by` is their first name). `take` is now only the actor's own take, on every line.
-- The recorder counts a line as done once it has the actor's own take or an earlier cast member's (which they can record over); a stand-in or the computer voice still needs them.
+- `GET /api/invite/lines` items gain `current`: what plays now on the line when it isn't the actor's own take. Its shape changed on 2026-10-20, see "Open parts". `take` is only the actor's own take, on every line.
+- `POST /api/productions/:id/characters/:characterId/unassign` was removed on 2026-10-20: parts aren't owned, so there is nothing to take away.
+- The recorder counts a line as done once it has any take (the actor's own, another cast member's or the director's), which the actor can record over; only the computer voice still needs them.
 - Scoring leaves stage directions out of the words to say: anything in `[brackets]`, and a `(parenthesised)` direction that opens or closes the line.
 
 ### Long takes in parts (2026-10-18)
 
 Takes have no practical length limit (the server refuses only past 65 minutes; the app stops a take left running for an hour). A take bigger than one request (8 MB) is sent as byte ranges of the same file: each request carries `X-Take-Parts: n` (2–12) and `X-Take-Part: i` (0-based), with the same `X-Take-Id`, `Content-Type` and `X-Duration-Ms`. Until every part is in, the answer is `{ partial: true, parts, missing: number[] }`; the request that completes it answers like a one-request upload. Parts wait in the server's temp folder (not storage) and are joined into the exact recorded file. A part sent after the take is saved returns the take. The web app sends takes over 6 MB in parts and resends any part reported missing.
+
+### Open parts (2026-10-20)
+
+Parts aren't owned. Anyone can pick any part (on the cast link or with "pick up more lines") and record any line, and the director's takes are ordinary takes. Picking a part only says what you mean to record; it never takes it from anyone. A cast member who opens the cast link on a new phone just picks their part again. Migration `014_open_parts.sql` drops the one-actor-per-character rule, renames stand-in takes to `recorded_by = 'director'` (and turns takes recorded through the old `record-as` cast member into director takes), and replaces `voice_take` with a three-argument version that counts every take.
+
+```ts
+interface RecordedBy {
+  kind: "actor" | "director";
+  name: string;            // a first name: the cast member's, or the director's as the cast sees it
+}
+
+// Every take object (Take) in GET /api/invite/lines, the director's section and character lines, and
+// both take upload responses: `recordedBy` (was the string "actor" | "standin") and
+mine: boolean;             // the caller recorded it: the invite's cast member, or the signed-in director
+
+// GET /api/invite/lines `current`, when another person's take plays on the actor's line:
+current: { source: "actor" | "director"; by: string; recordedBy: RecordedBy; mine: false; audioUrl: string } | null;
+
+interface TopRecorder {
+  name: string;            // whoever recorded the most of the part's lines (counting the takes that play now)
+  others: number;          // how many other people recorded the rest; ties go to whoever recorded first
+}
+
+interface PartCard {       // GET /api/join/:token characters, GET /api/invite/parts parts
+  id: string;
+  name: string;
+  lineCount: number;
+  linesRecorded: number;   // lines with a take by anyone
+  linesNeeded: number;     // lineCount - linesRecorded
+  topRecorder: TopRecorder | null;
+}
+
+// GET /api/productions/:id/call-sheet characters:
+{ id, name, lineCount, linesRecorded, topRecorder: TopRecorder | null, mine: boolean } // mine: the director recorded some of its lines
+```
+
+- Progress counts takes by anyone: a line is recorded once each voice has a take. That covers production and cast-member progress, the call sheet, the cast status, the actor-done email (sent once per cast member, whoever finished their lines) and cast completion (every part someone picked has a take for every line). TTS never counts.
+- `AudioSource` (`LineAudio.source`, `RunThrough.sources`, render timing, cue and `together` `audioSource`): `"standin"` is now `"director"`.
+- Removed: `POST /api/productions/:id/record-as`, `POST /api/productions/:id/characters/:characterId/unassign`, call sheet `takenBy`, `actorId` and `sharedLines`, join card `takenBy`, and the `character_taken` error.
+- A personal link (`/i/:token`) whose token doesn't check out is 401 "This link doesn't work. Ask your director for the cast link."

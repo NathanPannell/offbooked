@@ -826,10 +826,6 @@
   background: var(--accent-soft);
 }
 
-.act-roles .is-taken {
-  opacity: 0.55;
-}
-
 .act-lyric {
   font-family: var(--font-serif);
   font-size: 15px;
@@ -2600,27 +2596,67 @@
   gap: var(--s-2);
 }
 
-.record-yourself .quiet-link {
-  align-self: center;
+.record-yourself-chevron {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.15s ease;
 }
 
-.record-yourself-form {
-  flex-direction: row;
-  flex-wrap: wrap;
+.record-yourself.is-open .record-yourself-chevron {
+  transform: rotate(180deg);
 }
 
-.record-yourself-form .field {
-  flex: 1 1 220px;
-  min-width: 0;
+/* The parts to record, opened in place under the button. */
+.record-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4) var(--s-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.record-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+}
+
+.record-picker-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.record-picker-part {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 44px;
+  padding: 10px 2px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.record-picker-part:hover .record-picker-name,
+.record-picker-part:focus-visible .record-picker-name {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.record-picker-name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {
   .cast-link {
     padding: var(--s-5) var(--s-4);
-  }
-
-  .record-yourself-form .btn {
-    flex: 1 1 100%;
   }
 }
 
@@ -2685,17 +2721,9 @@
   text-align: center;
 }
 
-.cast-link .reset-confirm {
-  margin-top: var(--s-1);
-}
-
-.reset-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--radius);
-  background: var(--bad-soft);
+/* "My roles", then everyone else's. */
+.sheet-group {
+  margin: var(--s-3) 0 calc(-1 * var(--s-1));
 }
 
 .sheet-list {
@@ -2738,14 +2766,6 @@
   text-underline-offset: 4px;
 }
 
-.sheet-shared {
-  white-space: nowrap;
-}
-
-.sheet-shared svg {
-  vertical-align: -1px;
-}
-
 .sheet-more {
   flex: none;
   width: 36px;
@@ -2776,36 +2796,8 @@
 /* A call-sheet row's ⋯ menu. */
 .sheet-menu {
   display: flex;
-  flex-direction: column;
-  margin: var(--s-2) 0 var(--s-1) auto;
-  width: max-content;
-  max-width: 100%;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: #fff;
-  box-shadow: var(--shadow-sm);
-}
-
-.sheet-menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  min-height: 44px;
-  padding: 0 var(--s-3);
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  font-size: var(--text-sm);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sheet-menu-item:hover,
-.sheet-menu-item:focus-visible {
-  background: var(--paper);
+  justify-content: flex-end;
+  margin: var(--s-2) 0 var(--s-1);
 }
 
 /* Picking up more parts (recorder dialog, wrapped screen, no lines left). */
@@ -2856,10 +2848,14 @@
 
 .sheet-who {
   color: var(--ink-soft);
+  font-weight: 600;
 }
 
-.sheet-who.muted {
+/* Nobody has recorded the part: quieter than a name. */
+.sheet-who.is-none {
   color: var(--muted);
+  font-weight: 400;
+  font-style: italic;
 }
 
 .sheet-progress {
@@ -2885,10 +2881,6 @@
   gap: 4px;
   color: var(--good);
   font-weight: 600;
-}
-
-.sheet-record {
-  flex: none;
 }
 
 @media (max-width: 640px) {
@@ -3085,7 +3077,7 @@
     background var(--fast) var(--ease);
 }
 
-.role-card:hover:not(.is-taken) {
+.role-card:hover {
   border-color: var(--edge-strong);
   box-shadow: var(--shadow);
 }
@@ -3100,17 +3092,6 @@
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.role-card.is-taken {
-  border-style: dashed;
-  border-color: var(--line-strong);
-  background: var(--paper);
-  cursor: not-allowed;
-}
-
-.role-card.is-taken .character-name {
-  color: var(--faint);
-}
-
 .role-name {
   padding-right: 26px;
 }
@@ -3121,6 +3102,12 @@
 
 .role-meta {
   color: var(--muted);
+}
+
+/* Who recorded most of the part ("Robin + 1"): anyone can still pick it. */
+.role-by {
+  color: var(--ink-soft, var(--muted));
+  font-weight: 600;
 }
 
 .role-check {
@@ -3140,10 +3127,6 @@
 .role-card.is-picked .role-check {
   border-color: var(--accent);
   background: var(--accent);
-}
-
-.role-card.is-taken .role-check {
-  display: none;
 }
 
 .join-dock {

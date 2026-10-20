@@ -10,12 +10,16 @@ import { InAppBanner } from "../../components/InAppBanner";
 import { Loading } from "../../components/Loading";
 import { joinNames, plural } from "../../lib/format";
 import { recallJoin, rememberJoin } from "../../lib/joinMemory";
+import { recorderDescription, recorderLabel } from "../../lib/recorders";
 import { usePrewarmStt } from "../../stt/useStt";
 import { Onboarding, onboardingSeen } from "./Onboarding";
 
 const RETRY_MS = 10_000;
 
-/** The whole-cast link: see the parts, pick yours, give a first name, start recording. */
+/**
+ * The whole-cast link: see the parts, pick yours, give a first name, start recording. Parts aren't
+ * owned: any part can be picked, even one someone else is recording (or yours, again, on a new phone).
+ */
 export default function JoinPage() {
   const { token = "" } = useParams();
   const remembered = useMemo(() => recallJoin(token), [token]);
@@ -35,7 +39,7 @@ function Join({ token }: { token: string }) {
   // First time on this device: a short intro before picking a part (skippable).
   const [intro, setIntro] = useState(() => !onboardingSeen());
   // Load the speech model while they pick a part and type a name, so it is ready by the first take.
-  usePrewarmStt(!!info?.characters.some((c) => !c.takenBy));
+  usePrewarmStt(!!info?.characters.length);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,8 +48,8 @@ function Join({ token }: { token: string }) {
         if (cancelled) return;
         setInfo(result);
         setError(null);
-        // Drop any pick someone else has taken since.
-        setPicked((p) => new Set([...p].filter((id) => result.characters.some((c) => c.id === id && !c.takenBy))));
+        // Drop any pick that's no longer a part (merged into another meanwhile).
+        setPicked((p) => new Set([...p].filter((id) => result.characters.some((c) => c.id === id))));
       },
       (err) => !cancelled && setError(err),
     );
@@ -102,12 +106,11 @@ function Join({ token }: { token: string }) {
   }
 
   const data = info!;
-  if (intro && data.characters.some((c) => !c.takenBy)) {
+  if (intro && data.characters.length > 0) {
     return <Onboarding productionTitle={data.production.title} directorName={data.production.directorName} onDone={() => setIntro(false)} />;
   }
   const chosen = data.characters.filter((c) => picked.has(c.id));
   const lines = chosen.reduce((n, c) => n + c.lineCount, 0);
-  const open = data.characters.filter((c) => !c.takenBy);
 
   const toggle = (id: string) =>
     setPicked((p) => {
@@ -128,14 +131,13 @@ function Join({ token }: { token: string }) {
       navigate(`/i/${inviteToken}`, { replace: true });
     } catch (err) {
       setBusy(false);
-      if (err instanceof ApiError && err.code === "character_taken") {
-        setClaimError("Someone just picked one of those. We've updated the list: choose again.");
-        setAttempt((n) => n + 1);
-      } else if (err instanceof ApiError && err.status === 409) {
+      if (err instanceof ApiError && err.status === 409) {
         setError(err);
         setInfo(null);
       } else {
         setClaimError(errorMessage(err));
+        // A part may have been merged into another meanwhile: refresh the list (stale picks drop).
+        if (err instanceof ApiError && err.status === 400) setAttempt((n) => n + 1);
       }
     }
   };
@@ -154,17 +156,16 @@ function Join({ token }: { token: string }) {
         <fieldset className="role-cards">
           <legend className="sr-only">Characters</legend>
           {data.characters.map((c) => {
-            const taken = !!c.takenBy;
             const on = picked.has(c.id);
+            const by = recorderLabel(c.topRecorder);
             return (
-              <label key={c.id} className={`role-card ${on ? "is-picked" : ""} ${taken ? "is-taken" : ""}`}>
+              <label key={c.id} className={`role-card ${on ? "is-picked" : ""}`}>
                 <input
                   type="checkbox"
                   checked={on}
-                  disabled={taken}
                   onChange={() => toggle(c.id)}
                   className="sr-only"
-                  aria-label={`${c.name}, ${taken ? `taken by ${c.takenBy}` : plural(c.lineCount, "line")}`}
+                  aria-label={`${c.name}, ${plural(c.lineCount, "line")}, ${c.linesRecorded} recorded, ${recorderDescription(c.topRecorder)}`}
                 />
                 <span className="role-check" aria-hidden="true">
                   {on && <Check size={14} strokeWidth={3.5} />}
@@ -172,12 +173,19 @@ function Join({ token }: { token: string }) {
                 <span className="role-name">
                   <CharacterName name={c.name} />
                 </span>
-                <span className="role-meta small">{taken ? `Taken by ${c.takenBy}` : plural(c.lineCount, "line")}</span>
+                <span className="role-meta small nums" aria-hidden="true">
+                  {plural(c.lineCount, "line")}
+                  {c.linesRecorded > 0 && ` · ${c.linesRecorded} recorded`}
+                </span>
+                {by && (
+                  <span className="role-by small" aria-hidden="true">
+                    {by}
+                  </span>
+                )}
               </label>
             );
           })}
         </fieldset>
-        {open.length === 0 && <p className="notice">Every part has been claimed. If one of them is yours, ask your director for your own link.</p>}
 
         <div className={`join-dock ${chosen.length ? "is-ready" : ""}`}>
           {chosen.length > 0 ? (

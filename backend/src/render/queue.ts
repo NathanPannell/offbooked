@@ -15,12 +15,12 @@ const MAX_DEBOUNCE_MS = 120_000;
 
 export interface RenderInput extends PlanLine {
   characterId: string;
-  cast: boolean; // one of the line's voices has an actor
-  actorRecorded: boolean; // every cast voice's actor has recorded this line (stand-ins don't count)
+  cast: boolean; // someone in the cast picked one of the line's voices
+  castRecorded: boolean; // every picked voice has a take (by anyone: the cast or the director)
   mixTakeIds?: string[]; // a shared line voiced by several takes: takeId is then "mix-<hash>"
 }
 
-// Dialogue lines in order with their current takes (the newest take, by the actor or a stand-in).
+// Dialogue lines in order with their current takes (the newest take, by anyone).
 // A shared line uses its voices' takes: one plays as it is, several are mixed (mix.ts).
 export async function renderInputs(sql: Sql, productionId: string): Promise<RenderInput[]> {
   const lines = await sql<(RenderInput & { shared: boolean })[]>`
@@ -29,7 +29,7 @@ export async function renderInputs(sql: Sql, productionId: string): Promise<Rend
       exists (select 1 from line_voices lv join actor_characters ac on ac.character_id = lv.character_id where lv.line_id = l.id) as cast,
       not exists (select 1 from line_voices lv where lv.line_id = l.id
                     and exists (select 1 from actor_characters ac where ac.character_id = lv.character_id)
-                    and voice_take(lv.line_id, lv.shared, lv.character_id, true) is null) as actor_recorded
+                    and voice_take(lv.line_id, lv.shared, lv.character_id) is null) as cast_recorded
     from lines l left join takes t on t.id = l.current_take_id
     where l.production_id = ${productionId} and l.kind = 'dialogue'
     order by l.seq`;
@@ -38,7 +38,7 @@ export async function renderInputs(sql: Sql, productionId: string): Promise<Rend
   for (const l of lines) {
     const takes = byVoice.get(l.lineId);
     if (!takes?.length) continue;
-    l.takeSource = takes.some((t) => t.recordedBy === "actor") ? "actor" : "standin";
+    l.takeSource = takes.some((t) => t.recordedBy === "actor") ? "actor" : "director";
     if (takes.length === 1) l.takeId = takes[0]!.id;
     else {
       l.mixTakeIds = takes.map((t) => t.id);
@@ -180,8 +180,8 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
   try {
     const { lines, requests } = await planInputs(ctx, job.productionId);
     const hash = contentHash(lines);
-    // Completion counts only the cast actors' own takes, never stand-ins or TTS.
-    const allCastRecorded = lines.some((l) => l.cast) && lines.every((l) => !l.cast || l.actorRecorded);
+    // The cast is complete once every part someone picked is recorded (by anyone; TTS never counts).
+    const allCastRecorded = lines.some((l) => l.cast) && lines.every((l) => !l.cast || l.castRecorded);
 
     const [cached] = job.forced
       ? []

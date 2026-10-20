@@ -25,7 +25,7 @@ import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
 import { NameEditor } from "./NameEditor";
 import { PickUpParts } from "./PickUpParts";
-import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake, type AuthorContext } from "./recordedBy";
+import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake } from "./recordedBy";
 import { Wrapped } from "./Wrapped";
 
 const ADVANCE_DELAY_MS = 700;
@@ -104,8 +104,6 @@ export function RecordSession({
   const [pickingUp, setPickingUp] = useState(false);
   /** The one hint on the device's first take, shown while it records. */
   const [firstTakeHint, setFirstTakeHint] = useState(false);
-  const directorName = invite.production.directorName;
-  const ctx: AuthorContext = useMemo(() => ({ me: "actor", actorName: "someone in the cast", directorName }), [directorName]);
 
   const recorder = useTakeRecorder({
     onLimit: () => {
@@ -161,7 +159,7 @@ export function RecordSession({
     [allLines, uploadFor],
   );
   /** The actor's own take is on the line: saved, or recorded on this screen. */
-  const hasOwn = useCallback((l: ActorLine) => !!ownTake(l, ctx) || localTakes.has(l.line.id) || !!uploadFor(l.line.id), [ctx, localTakes, uploadFor]);
+  const hasOwn = useCallback((l: ActorLine) => !!ownTake(l) || localTakes.has(l.line.id) || !!uploadFor(l.line.id), [localTakes, uploadFor]);
   const recordedCount = actorLines.filter((l) => isRecorded(l.line.id)).length;
   const total = actorLines.length;
   const allRecorded = total > 0 && recordedCount === total;
@@ -186,20 +184,20 @@ export function RecordSession({
   // Resume at the first unrecorded line.
   useEffect(() => {
     if (currentId || actorLines.length === 0) return;
-    const first = actorLines.find((l) => !lineRecorded(l)) ?? actorLines.find((l) => !ownTake(l, ctx)) ?? actorLines[0]!;
+    const first = actorLines.find((l) => !lineRecorded(l)) ?? actorLines.find((l) => !ownTake(l)) ?? actorLines[0]!;
     setCurrentId(first.line.id);
     if (first !== actorLines[0]) setTimeout(() => scrollToLine(first.line.id), 100);
     // Someone who picked up lines others recorded lands here, to listen and record their own.
-    if (opensOnWrapped(actorLines, ctx)) setView("wrapped");
+    if (opensOnWrapped(actorLines)) setView("wrapped");
     setScores((s) => {
       const next = new Map(s);
       for (const l of actorLines) {
-        const own = ownTake(l, ctx);
+        const own = ownTake(l);
         if (own?.stt && !next.has(l.line.id)) next.set(l.line.id, { takeKey: own.id, result: own.stt });
       }
       return next;
     });
-  }, [actorLines, currentId, ctx]);
+  }, [actorLines, currentId]);
 
   // Karaoke-style follow while a take records: the next word to say stays near the middle of the
   // screen, with a few rows of what's coming below it. A scroll by hand pauses it for a moment.
@@ -443,7 +441,7 @@ export function RecordSession({
   const deletableTake = (l: ActorLine): string | null => {
     const local = localTakes.get(l.line.id);
     if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
-    return ownTake(l, ctx)?.id ?? null;
+    return ownTake(l)?.id ?? null;
   };
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
   const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
@@ -503,7 +501,7 @@ export function RecordSession({
             <Plus size={22} />
           </button>
           {recordedCount > 0 && (
-            <Link className="icon-btn" to={`/i/${token}/play${activePart ? `?part=${activePart}` : ""}`} aria-label="Listen to the run-through">
+            <Link className="icon-btn" to={`/i/${token}/play${activePart ? `?part=${activePart}` : ""}`} aria-label="Listen through the play">
               <Headphones size={22} />
             </Link>
           )}
@@ -552,7 +550,7 @@ export function RecordSession({
         {total === 0 && (
           <section className="card stack empty-parts">
             <h2 className="display">No lines right now</h2>
-            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Your director has moved your part on. Pick up a free part to keep recording." />
+            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Pick up a part to keep recording." />
           </section>
         )}
         <SectionNav sections={sections} idPrefix="rec-section-" />
@@ -581,7 +579,7 @@ export function RecordSession({
                       recording={recorder.recording?.lineId === l.line.id}
                       localTake={localTakes.get(l.line.id) ?? null}
                       upload={uploadFor(l.line.id)}
-                      author={lineTake(l, ctx)?.author ?? null}
+                      author={lineTake(l)?.author ?? null}
                       score={scores.get(l.line.id) ?? null}
                       playing={playback.playing}
                       liveCursor={live?.lineId === l.line.id && live.mode === "live" ? live.cursor : null}
