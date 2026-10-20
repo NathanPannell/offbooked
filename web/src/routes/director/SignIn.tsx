@@ -53,9 +53,7 @@ export default function SignIn() {
         <form className="raised message-card stack" onSubmit={submit}>
           <div className="stack" style={{ gap: 6 }}>
             <h1 className="display">Welcome in</h1>
-            <p className="muted">
-              No password. We'll email you a link.
-            </p>
+            <p className="muted">No password. We'll email you a link.</p>
           </div>
           <label className="field">
             <span>Email</span>

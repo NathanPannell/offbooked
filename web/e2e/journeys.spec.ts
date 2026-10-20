@@ -62,10 +62,12 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await expect(page.getByText("0 of 2 parts started")).toBeVisible();
 
   // With no name set, the cast would see the start of the director's email: offer to change it.
-  await expect(page.getByText(/^Your cast will see “Director /)).toBeVisible();
+  // (Words with digits in the email's start are left out, so it reads "Director", not "Director 1729…".)
+  await expect(page.getByText(/^Your cast will see “Director/)).toBeVisible();
+  await page.getByRole("button", { name: "Change it" }).click();
   await page.getByPlaceholder("Your name").fill("Sam");
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText(/^Your cast will see “Director /)).toHaveCount(0);
+  await expect(page.getByText(/^Your cast will see “Director/)).toHaveCount(0);
 
   // The dates reached the server: archiving says the day everything is deleted.
   await page.getByRole("button", { name: "Archive production" }).click();
@@ -76,6 +78,9 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await expect(page.getByText("Link copied")).toBeVisible();
   const joinUrl = await page.evaluate(() => navigator.clipboard.readText());
   expect(joinUrl).toMatch(/^http:\/\/localhost:4173\/join\/[^/]+$/);
+  // Sharing the link was the Cast step's job, so it's no longer marked as next.
+  await page.getByRole("button", { name: "Script", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Cast, next step" })).toHaveCount(0);
 
   // The cast member opens the link on their own device, with no account.
   const actor = await browser.newContext({ ...testInfo.project.use });
@@ -101,6 +106,7 @@ test("a director uploads a script and shares the cast link, and a cast member op
 
   // Picking a part isn't recording it: the call sheet counts parts started by their recordings.
   await page.reload();
+  await page.getByRole("button", { name: "Cast", exact: true }).click();
   await expect(page.getByText("0 of 2 parts started")).toBeVisible();
   await actor.close();
   await other.close();

@@ -358,13 +358,7 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
         <>
           <div className="link-ticket">
             <span className="link-ticket-url mono">{link.data ? link.data.replace(/^https?:\/\//, "") : "Making your link…"}</span>
-            <button
-              type="button"
-              className="icon-btn link-ticket-copy"
-              disabled={!link.data}
-              aria-label="Copy the cast link"
-              onClick={() => void copy()}
-            >
+            <button type="button" className="icon-btn link-ticket-copy" disabled={!link.data} aria-label="Copy the cast link" onClick={() => void copy()}>
               <Copy size={18} />
             </button>
           </div>

@@ -13,8 +13,7 @@ function fakeUploader() {
       listeners.add(l);
       return () => listeners.delete(l);
     },
-    save: (takeId: string, serverId: string) =>
-      listeners.forEach((l) => l({ takeId } as UploadItem, { take: { id: serverId } } as TakeUploadResult)),
+    save: (takeId: string, serverId: string) => listeners.forEach((l) => l({ takeId } as UploadItem, { take: { id: serverId } } as TakeUploadResult)),
   };
 }
 
