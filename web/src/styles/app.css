@@ -4931,6 +4931,12 @@
   color: var(--accent-text);
 }
 
+/* Focus moves to each screen's heading for screen readers; it isn't something to click, so no ring. */
+.onboarding-slide h1:focus {
+  outline: none;
+  box-shadow: none;
+}
+
 .onboarding-slide h1 {
   font-size: clamp(32px, 9vw, 44px);
   font-weight: 400;
@@ -5053,9 +5059,24 @@
   margin: -10px -8px -10px 0;
 }
 
+/* Field, Save and Cancel on one row, even on a phone. */
+.name-line-form {
+  flex-wrap: nowrap;
+  gap: var(--s-1);
+}
+
 .name-line-form .input {
-  flex: 1 1 160px;
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+.name-line-form .btn {
+  flex: none;
+  padding: 0 var(--s-3);
+}
+
+.name-line-form:has(.field-error) {
+  flex-wrap: wrap;
 }
 
 .name-line-form .field-error {
