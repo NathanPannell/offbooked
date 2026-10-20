@@ -79,12 +79,19 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
     const b = body(req.body);
     const title = b.title === undefined ? undefined : requiredString(b, "title", 200);
     const dates = performanceDates(b, { startsOn: p.performanceStartsOn, endsOn: p.performanceEndsOn });
-    await ctx.sql`update productions set
+    const endChanged = dates.endsOn !== p.performanceEndsOn;
+    // A new final date only lands while the old one isn't due yet (checked again here, in the same
+    // statement, so a pass starting at 12:00 UTC can't delete a show whose date just moved).
+    const updated = await ctx.sql`update productions set
       title = ${title ?? p.title},
       performance_starts_on = ${dates.startsOn},
       performance_ends_on = ${dates.endsOn}
-      where id = ${p.id}`;
-    if (dates.endsOn !== p.performanceEndsOn) ctx.retention.kick();
+      where id = ${p.id}
+        ${endChanged ? ctx.sql`and content_deleted_at is null and (performance_ends_on is null or (((performance_ends_on + ${RETENTION_DAYS}::int) + time '12:00') at time zone 'UTC') > now())` : ctx.sql``}
+      returning id`;
+    if (!updated.length)
+      throw conflict("content_due", "This production's script and recordings are due for deletion, so its final performance can't be changed.");
+    if (endChanged) ctx.retention.kick();
     return { production: productionView(await ownedProduction(ctx, user, p.id)) };
   });
 

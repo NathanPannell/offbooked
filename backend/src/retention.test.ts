@@ -134,6 +134,13 @@ describe("content retention", { skip: dbSkip }, () => {
     inAYear.setUTCFullYear(inAYear.getUTCFullYear() + 1);
     assert.equal(plain.performanceStartsOn, null);
     assert.equal(plain.performanceEndsOn, inAYear.toISOString().slice(0, 10));
+
+    // The update itself checks the database: a production whose content is gone keeps its dates.
+    await t.ctx.sql`update productions set content_deleted_at = now() where id = ${plain.id}`;
+    const late = await send("PATCH", `/api/productions/${plain.id}`, { performanceEndsOn: day(20) });
+    assert.equal(late.statusCode, 409);
+    assert.equal(late.json().error.code, "content_due");
+    assert.equal((await send("PATCH", `/api/productions/${plain.id}`, { title: "Renamed" })).statusCode, 200, "other fields can still change");
   });
 
   test("the migration backfills a final date of 2027-10-20 and keeps the old date as the opening", async () => {
