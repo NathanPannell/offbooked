@@ -76,9 +76,9 @@ function ProfileForm({
     setError(null);
     try {
       if (nextName !== name) await onRename(nextName);
-      if (nextEmail) await onEmail(nextEmail);
+      const state = nextEmail ? await onEmail(nextEmail) : null;
       onDone();
-      toast(nextEmail ? "Check your inbox for a link" : "Saved");
+      toast(!state ? "Saved" : state.sent ? "Check your inbox for a link" : "Already verified");
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -90,8 +90,9 @@ function ProfileForm({
     setBusy(true);
     setError(null);
     try {
-      await onEmail();
-      toast("Sent again. Check your inbox");
+      const state = await onEmail();
+      toast(state.sent ? "Sent again. Check your inbox" : state.hasEmail ? "Already verified" : "Add your email first");
+      if (!state.sent && !state.hasEmail) setChanging(true);
     } catch (err) {
       setError(errorMessage(err));
     } finally {

@@ -255,6 +255,8 @@ export interface Invite {
 export interface EmailState {
   hasEmail: boolean;
   pendingEmail: boolean;
+  /** This request sent a verification email (false: nothing waiting, or that address is already verified). */
+  sent: boolean;
   /** The verification link, when the server logs emails instead of sending them (local runs). */
   devLink?: string;
 }

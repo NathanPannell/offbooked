@@ -86,6 +86,10 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     if (!String(raw).trim()) return done(null, {});
     jsonParser(req, raw as string, done);
   });
+  // HTML forms in the email pages (verify's Confirm button, one-click List-Unsubscribe).
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, raw, done) =>
+    done(null, Object.fromEntries(new URLSearchParams(raw as string))),
+  );
   app.addContentTypeParser(/^audio\//, { parseAs: "buffer", bodyLimit: MAX_TAKE_BYTES }, (_req, raw, done) => done(null, raw));
 
   // API responses depend on the Authorization header, not the URL, so browsers must never reuse them.

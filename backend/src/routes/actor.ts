@@ -221,7 +221,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
   // verified address gets the completion emails or keeps the cast member's details after the show.
   app.post("/api/invite/contact", async (req) => {
     const s = await requireActor(ctx, req);
-    return requestVerification(ctx, s, optionalEmail(body(req.body), "email"));
+    return requestVerification(ctx, s, optionalEmail(body(req.body), "email"), req.ip);
   });
 
   app.get("/api/invite/runthrough", async (req) => {
