@@ -4,6 +4,7 @@ import type { Ctx } from "../context.ts";
 import { HttpError, badRequest, conflict } from "../errors.ts";
 import { body, requiredString, uuidList } from "../input.ts";
 import { inviteToken, inviteUrl, joinUrl, parseJoinToken } from "../invite.ts";
+import { castFacingName } from "../names.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
 
 interface JoinProduction {
@@ -12,7 +13,7 @@ interface JoinProduction {
   joinVersion: number;
   archivedAt: Date | null;
   scriptStatus: string;
-  directorName: string | null;
+  directorName: string;
 }
 
 // One link for the whole cast: open it, pick your characters, give a first name, start recording.
@@ -25,11 +26,13 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     const parsed = parseJoinToken(config.inviteSecret, token);
     const invalid = () => new HttpError(404, "not_found", "This link isn't valid. Ask your director for the cast link.");
     if (!parsed) throw invalid();
-    const [p] = await sql<JoinProduction[]>`
-      select p.id, p.title, p.join_version, p.archived_at, p.script_status, u.name as director_name
+    const [row] = await sql<(Omit<JoinProduction, "directorName"> & { directorName: string | null; directorEmail: string })[]>`
+      select p.id, p.title, p.join_version, p.archived_at, p.script_status, u.name as director_name, u.email as director_email
       from productions p join users u on u.id = p.owner_id where p.id = ${parsed.productionId}`;
-    if (!p || p.joinVersion !== parsed.version) throw invalid();
-    const directorName = p.directorName || "Your director";
+    if (!row || row.joinVersion !== parsed.version) throw invalid();
+    const { directorEmail, ...rest } = row;
+    const directorName = castFacingName(row.directorName, directorEmail);
+    const p = { ...rest, directorName };
     if (p.archivedAt)
       throw new HttpError(410, "invite_expired", "This production has wrapped, so this link no longer works.", { directorName, productionTitle: p.title });
     if (p.scriptStatus !== "ready")
@@ -51,7 +54,7 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get("/api/join/:token", async (req) => {
     const p = await production((req.params as { token: string }).token, req.ip);
     return {
-      production: { id: p.id, title: p.title, directorName: p.directorName || "Your director" },
+      production: { id: p.id, title: p.title, directorName: p.directorName },
       characters: (await characters(p.id)).filter((c) => c.lineCount > 0),
     };
   });

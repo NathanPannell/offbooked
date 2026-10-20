@@ -1,6 +1,7 @@
 import type { Ctx } from "../context.ts";
 import { hmac, safeEqual } from "../crypto.ts";
 import { inviteUrl } from "../invite.ts";
+import { castFacingName } from "../names.ts";
 import { consume, LIMITS } from "../ratelimit.ts";
 import type { Email } from "./mailer.ts";
 import { actorDoneEmail, castCompleteEmail, runthroughReadyEmail } from "./templates.ts";
@@ -81,7 +82,7 @@ export async function notifyCastComplete(ctx: Ctx, productionId: string): Promis
     await sendOnce(ctx, { kind: "runthrough_ready", productionId, actorId: a.id, to: a.email }, (to) =>
       runthroughReadyEmail(to, {
         title: p.title,
-        directorName: p.ownerName || "Your director",
+        directorName: castFacingName(p.ownerName, p.ownerEmail),
         url: `${inviteUrl(ctx.config.appUrl, ctx.config.inviteSecret, a.id, a.tokenVersion)}/play`,
         unsubscribeUrl: unsubscribeUrl(ctx, to),
       }),

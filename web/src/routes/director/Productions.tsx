@@ -1,22 +1,17 @@
 import { ArrowRight, Plus } from "lucide-react";
-import { useState, type FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, Navigate } from "react-router";
 import { errorMessage } from "../../api/client";
-import { auth, productions } from "../../api/director";
+import { productions } from "../../api/director";
 import type { Production } from "../../api/types";
-import { EmptyStage } from "../../components/Illustrations";
 import { Loading } from "../../components/Loading";
 import { useResource } from "../../lib/useResource";
-import { useDirector } from "./DirectorLayout";
 import { nextStep } from "./nextStep";
 
 export default function Productions() {
-  const { user } = useDirector();
   const list = useResource(() => productions.list().then((r) => r.productions), "productions");
 
   return (
     <main className="page">
-      {!user.name && <NamePrompt />}
       {list.loading ? (
         <Loading />
       ) : list.error ? (
@@ -27,17 +22,8 @@ export default function Productions() {
           </button>
         </div>
       ) : list.data!.length === 0 ? (
-        <section className="welcome-empty">
-          <EmptyStage />
-          <p className="eyebrow">Welcome{user.name ? `, ${user.name}` : ""}</p>
-          <h1 className="display">Let's get your cast off book.</h1>
-          <p className="lede">
-            Add your script, share one link with the cast, and everyone records their lines from their phone. You get the whole play back as a run-through.
-          </p>
-          <Link className="btn btn-primary btn-lg" to="/app/new">
-            Start a production <ArrowRight size={18} aria-hidden="true" />
-          </Link>
-        </section>
+        // Nothing to list yet: go straight to setting one up.
+        <Navigate to="/app/new" replace />
       ) : (
         <>
           <div className="page-head">
@@ -88,32 +74,5 @@ function Seats({ recorded, total }: { recorded: number; total: number }) {
       ))}
       <span className="mono nums seats-label">{percent}%</span>
     </div>
-  );
-}
-
-function NamePrompt() {
-  const { setUser } = useDirector();
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const save = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      setUser((await auth.updateMe(name.trim())).user);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  };
-  return (
-    <form className="name-prompt" onSubmit={save}>
-      <label className="field grow">
-        <span>First, what should your cast call you?</span>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sam" autoComplete="given-name" />
-        <span className="field-hint">Your cast sees “Sam invited you”.</span>
-      </label>
-      <button className="btn btn-primary" disabled={!name.trim()}>
-        Save
-      </button>
-      {error && <p className="field-error">{error}</p>}
-    </form>
   );
 }

@@ -6,6 +6,7 @@ import { badRequest, conflict, notFound } from "../errors.ts";
 import { isUuid } from "../crypto.ts";
 import { body, idOf, optionalEmail, optionalString, requiredString, uuidList } from "../input.ts";
 import { inviteToken, inviteUrl } from "../invite.ts";
+import { castFacingName } from "../names.ts";
 import { inferInBackground } from "../shared.ts";
 import { castMemberView, castRows } from "../views.ts";
 
@@ -130,7 +131,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
     const b = body(req.body);
     if (!isUuid(b.characterId)) throw badRequest("Pick a character.");
     const characterId = b.characterId.toLowerCase();
-    const name = user.name?.trim() || "Director";
+    const name = castFacingName(user.name, user.email);
     const firstName = name.split(/\s+/)[0]!;
     const actor = await sql.begin(async (tx) => {
       const [character] = await tx<{ id: string; ownerId: string | null }[]>`
