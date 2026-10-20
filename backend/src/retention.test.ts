@@ -231,6 +231,8 @@ describe("content retention", { skip: dbSkip }, () => {
         },
       }),
     };
+    // A cast member who left an email (to hear when the play is ready) keeps their details; Riz didn't.
+    await t.ctx.sql`insert into actors (production_id, name, first_name, email, phone) values (${doomed.id}, 'Mo Lee', 'Mo', 'mo@example.test', '555')`;
     assert.equal(await deleteProductionContent(ctx, doomed.id), null, "not due yet: nothing is touched");
     assert.equal(sweeps, 0);
     assert.equal(await count("lines", doomed.id), await count("lines", kept.id));
@@ -247,7 +249,17 @@ describe("content retention", { skip: dbSkip }, () => {
     assert.equal(tomb!.title, "Doomed");
     assert.ok(tomb!.archivedAt && tomb!.contentDeletedAt);
     assert.equal(tomb!.scriptStatus, "none");
-    assert.equal(await count("actors", doomed.id), 1, "actors stay so their links say the show has wrapped");
+    assert.equal(await count("actors", doomed.id), 2, "actors stay so their links say the show has wrapped");
+    const cast = await t.ctx.sql<{ name: string; firstName: string | null; email: string | null; phone: string | null }[]>`
+      select name, first_name, email, phone from actors where production_id = ${doomed.id} order by email nulls first`;
+    assert.deepEqual(cast[0], { name: "", firstName: null, email: null, phone: null }, "details not tied to an email are cleared");
+    assert.deepEqual(cast[1], { name: "Mo Lee", firstName: "Mo", email: "mo@example.test", phone: "555" }, "details tied to an email are kept");
+    const keptCast = await t.ctx.sql<{ firstName: string | null }[]>`select first_name from actors where production_id = ${kept.id}`;
+    assert.deepEqual(
+      keptCast.map((a) => a.firstName),
+      ["Riz"],
+      "the other production's cast is untouched",
+    );
 
     // TTS clips are shared by hash and stay; the other production is untouched.
     assert.equal((await t.ctx.sql<{ n: number }[]>`select count(*)::int as n from tts_clips`)[0]!.n, clips);
