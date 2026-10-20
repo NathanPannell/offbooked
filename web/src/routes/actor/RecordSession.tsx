@@ -574,7 +574,7 @@ export function RecordSession({
         )}
         {total === 0 && (
           <section className="card stack empty-parts">
-            <h2 className="display">Record lines for another character</h2>
+            <h2 className="display">No lines right now</h2>
             <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} />
             <Link className="btn btn-ghost" to={`/i/${token}/play`}>
               <Headphones size={18} aria-hidden="true" /> Just listen through the play

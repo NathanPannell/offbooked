@@ -53,17 +53,12 @@ export function Wrapped({
   const failed = unsaved.filter((i) => i.status === "failed");
   const results = lines.map((l) => scores.get(l.line.id)?.result).filter((r) => !!r);
   const counts = verdictCounts(results);
-  // Lines that didn't sound complete, under their scenes in script order.
-  const toReview = byScene(
-    lines.flatMap((l) => {
-      const score = scores.get(l.line.id);
-      return score && verdict(score.result) !== "complete" ? [{ ...l, score }] : [];
-    }),
-  );
+  // Every line of the part (all the actor's lines without one), under its scene in script order.
+  const scenes = byScene(lines);
   const scoring = pendingScores > 0;
   const partName = partId ? invite.characters.find((c) => c.id === partId)?.name : undefined;
   const nextPart = otherParts.find((p) => p.left > 0);
-  const showSummary = results.length > 0 || scoring;
+  const allComplete = results.length > 0 && counts.partial === 0 && counts.unattempted === 0;
 
   if (saving.length > 0 || failed.length > 0) {
     return (
@@ -123,49 +118,43 @@ export function Wrapped({
         <h2 className="row" style={{ gap: 8 }}>
           <ListChecks size={20} aria-hidden="true" /> How your lines went
         </h2>
-        {!showSummary ? (
-          <p className="muted">
-            {sttState.status === "unavailable"
-              ? "Accuracy check isn't available on this device. Listen back to any line to check it."
-              : "No lines checked yet. Listen back to any line to check it."}
+        {results.length > 0 && (
+          <p className="summary-score">
+            <span className="display summary-counts">{formatVerdictCounts(counts)}</span> across {plural(results.length, "line")} checked
           </p>
-        ) : (
-          <>
-            {results.length > 0 && (
-              <p className="summary-score">
-                <span className="display summary-counts">{formatVerdictCounts(counts)}</span> across {plural(results.length, "line")} checked
-              </p>
-            )}
-            {scoring && (
-              <p className="small muted">
-                {sttState.status === "ready" ? "Still checking" : "Accuracy check warming up. Then checking"} {pendingScores}{" "}
-                {pendingScores === 1 ? "line" : "lines"}…
-              </p>
-            )}
-            {toReview.length > 0 ? (
-              <>
-                <p className="small">Tap a line to re-record it.</p>
-                {toReview.map((scene) => (
-                  <div key={scene.sectionId} className="summary-scene">
-                    <h3 className="eyebrow">{scene.title}</h3>
-                    <ul className="summary-list">
-                      {scene.items.map((l) => (
-                        <li key={l.line.id}>
-                          <button type="button" className="summary-line" onClick={() => onReview(l.line.id)}>
-                            <span className="grow">{l.line.text}</span>
-                            <span className={`chip ${VERDICT_CHIP[verdict(l.score.result)]}`}>{scoreLabel(l.score.result)}</span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </>
-            ) : (
-              !scoring && results.length > 0 && <p>Every line sounded complete.</p>
-            )}
-          </>
         )}
+        {scoring && (
+          <p className="small muted">
+            {sttState.status === "ready" ? "Still checking" : "Accuracy check warming up. Then checking"} {pendingScores}{" "}
+            {pendingScores === 1 ? "line" : "lines"}…
+          </p>
+        )}
+        {results.length === 0 && !scoring && (
+          <p className="muted">
+            {sttState.status === "unavailable" ? "Accuracy check isn't available on this device." : "No lines checked yet."} Listen back to any line to check
+            it.
+          </p>
+        )}
+        {allComplete && !scoring && <p>Every line sounded complete.</p>}
+        {scenes.length > 0 && <p className="small">Tap a line to re-record it.</p>}
+        {scenes.map((scene) => (
+          <div key={scene.sectionId} className="summary-scene">
+            <h3 className="eyebrow">{scene.title}</h3>
+            <ul className="summary-list">
+              {scene.items.map((l) => {
+                const result = scores.get(l.line.id)?.result;
+                return (
+                  <li key={l.line.id}>
+                    <button type="button" className="summary-line" onClick={() => onReview(l.line.id)}>
+                      <span className="grow">{l.line.text}</span>
+                      {result && <span className={`chip ${VERDICT_CHIP[verdict(result)]}`}>{scoreLabel(result)}</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </section>
 
       <section className="card pick-up-card">
