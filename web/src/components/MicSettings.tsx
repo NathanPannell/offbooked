@@ -200,7 +200,8 @@ export function MicTestView({
             </p>
             {heard ? (
               <span className="mic-test-actions">
-                {aside}
+                {/* "Sounds good" ends the check: Skip only stays when it heard almost nothing. */}
+                {clip && !clip.heardVoice && aside}
                 <button type="button" className="btn btn-ghost btn-sm" onClick={onRun}>
                   <RotateCcw size={15} aria-hidden="true" /> Try again
                 </button>
