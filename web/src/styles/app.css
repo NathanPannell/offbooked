@@ -1393,10 +1393,6 @@
   transition: background var(--fast) var(--ease);
 }
 
-.upload-drop h2 {
-  font-size: var(--text-xl);
-}
-
 .upload-drop .muted {
   max-width: 30em;
 }
@@ -1669,7 +1665,7 @@
   gap: var(--s-4);
 }
 
-/* The script page pins one row under the tabs: sharing with the cast on the left, scenes on the right. */
+/* The script page pins one row under the tabs: the scene jump. */
 .review-bar {
   position: sticky;
   top: var(--steps-pin, 0px);

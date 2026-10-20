@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 /**
  * A small (i) that explains something. A mouse shows it on hover; a click, tap or Enter pins it
- * open (or closes it again), and Escape or a tap elsewhere closes it. Screen readers get the text
+ * open, a second one closes it, and so do Escape and a tap elsewhere. Screen readers get the text
  * as the button's description.
  */
 export function InfoTip({ label, children }: { label: string; children: ReactNode }) {
@@ -49,7 +49,13 @@ export function InfoTip({ label, children }: { label: string; children: ReactNod
         aria-label={label}
         aria-describedby={id}
         aria-expanded={open}
-        onClick={() => setPinned((p) => !p)}
+        onClick={() => {
+          // The first click pins it open (a mouse may already be showing it); the next one closes it.
+          if (pinned) {
+            setPinned(false);
+            setHovered(false);
+          } else setPinned(true);
+        }}
       >
         <Info size={16} aria-hidden="true" />
       </button>

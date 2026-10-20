@@ -1,16 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Character, Line } from "../../api/types";
 import { longDate } from "../../lib/format";
-import {
-  localToday,
-  performanceDatesProblem,
-  readingLine,
-  readingLines,
-  readSummary,
-  scriptFileProblem,
-  sendSetup,
-  type SetupApi,
-} from "./setup";
+import { localToday, performanceDatesProblem, readingLine, readingLines, readSummary, scriptFileProblem, sendSetup, type SetupApi } from "./setup";
 
 const file = (name: string, type = "", size = 1000) => ({ name, type, size });
 

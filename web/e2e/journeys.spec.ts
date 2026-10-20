@@ -53,6 +53,10 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await createProduction(page, "Hamlet (e2e)");
   await expect(page.getByText("Read 4 lines across 2 parts")).toBeVisible();
   await expect(page.getByRole("button", { name: "Share with the cast" })).toHaveCount(0);
+  // With a production to go back to, setting up another one can be cancelled.
+  await page.goto("/app/new");
+  await expect(page.getByRole("link", { name: "Cancel" })).toBeVisible();
+  await page.goBack();
   await page.getByRole("button", { name: "Cast, next step" }).click();
   await expect(page.getByRole("heading", { name: "Invite your cast" })).toBeVisible();
   await expect(page.getByText("0 of 2 parts taken")).toBeVisible();

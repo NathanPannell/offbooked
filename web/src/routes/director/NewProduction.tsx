@@ -80,10 +80,13 @@ export default function NewProduction() {
       await sendSetup(setupApi, { title, performanceStartsOn: startsOn, performanceEndsOn: endsOn, file: script }, productionId, setProductionId);
       setPhase("reading");
     } catch (err) {
+      // The server is already reading this production's script (an earlier upload whose answer got
+      // lost on the way back): wait for that read instead.
+      if (err instanceof ApiError && err.code === "parse_in_progress") return setPhase("reading");
       setPhase("form");
       setErrors({
         form:
-          err instanceof ApiError && err.status === 409
+          err instanceof ApiError && err.code === "has_recordings"
             ? "This production already has recordings, so its script can't be replaced."
             : `We couldn't send the script. ${errorMessage(err)}`,
       });
@@ -141,7 +144,16 @@ export default function NewProduction() {
               {errors.file}
             </p>
           )}
-          <button type="button" className="quiet-link" style={{ alignSelf: "flex-start" }} onClick={() => setPhase("form")}>
+          <button
+            type="button"
+            className="quiet-link"
+            style={{ alignSelf: "flex-start" }}
+            onClick={() => {
+              // The file that failed to read goes too, so it isn't sent again by mistake.
+              setFile(null);
+              setPhase("form");
+            }}
+          >
             <RotateCcw size={14} aria-hidden="true" /> Change the title or dates
           </button>
         </section>
@@ -178,7 +190,7 @@ export default function NewProduction() {
           )}
         </label>
 
-        <fieldset className="field date-range" aria-describedby={errors.dates ? "np-dates-error" : undefined}>
+        <fieldset className="field date-range">
           <legend className="field-label date-range-legend">
             Performance dates
             <InfoTip label="About performance dates">We delete the script and every recording 7 days after the final performance.</InfoTip>
@@ -193,6 +205,7 @@ export default function NewProduction() {
                 required
                 value={startsOn}
                 aria-invalid={(!!errors.dates && !startsOn) || undefined}
+                aria-describedby={errors.dates ? "np-dates-error" : undefined}
                 onChange={(e) => {
                   const value = e.target.value;
                   setStartsOn(value);
@@ -214,6 +227,7 @@ export default function NewProduction() {
                 min={startsOn && startsOn > today ? startsOn : today}
                 value={endsOn}
                 aria-invalid={(!!errors.dates && !!startsOn) || undefined}
+                aria-describedby={errors.dates ? "np-dates-error" : undefined}
                 onChange={(e) => setEndsOn(e.target.value)}
               />
             </label>
