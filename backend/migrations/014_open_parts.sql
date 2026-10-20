@@ -11,13 +11,17 @@ alter table takes drop constraint if exists takes_recorded_by_check;
 update takes set recorded_by = 'director' where recorded_by = 'standin';
 update takes t set recorded_by = 'director', recorded_by_user_id = a.director_user_id, actor_id = null
 from actors a where a.id = t.actor_id and a.director_user_id is not null;
+-- That cast member's picks go too: the director records in the studio, and a part counts as picked
+-- (for cast completion) only when someone in the cast picked it.
+delete from actor_characters ac using actors a where a.id = ac.actor_id and a.director_user_id is not null;
 alter table takes add constraint takes_recorded_by_check check (recorded_by in ('actor', 'director'));
 alter table takes add constraint takes_recorder check (
   (recorded_by = 'actor' and actor_id is not null) or (recorded_by = 'director' and recorded_by_user_id is not null));
 drop index if exists takes_line_actor_idx;
 
 -- The newest take that voices `voice` on a line: on a single-voice line any take; on a shared line a
--- take recorded for that character, or an older actor take (no character) by someone who picked it.
+-- take recorded for that character, or an actor take by someone who picked it (one take can voice
+-- several of a line's characters when the same person picked them; mix.ts plays it once).
 -- Replaces voice_take(line, shared, voice, actor_only): every take counts now. The old one stays
 -- until the next migration so the container still serving during a deploy keeps working.
 create or replace function voice_take(line uuid, shared boolean, voice uuid) returns uuid

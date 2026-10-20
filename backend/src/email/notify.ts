@@ -56,8 +56,10 @@ async function productionInfo(ctx: Ctx, productionId: string): Promise<Productio
 }
 
 // After any take: tells the director about each cast member whose parts are now fully recorded and
-// who hasn't had the email yet. Lines count whoever recorded them, the director included. The
-// director's own cast member (from before parts were open) never gets one.
+// who hasn't had the email yet. Lines count whoever recorded them, the director included, but only
+// someone who has recorded at least one of those lines themselves gets one: not a pick on a second
+// phone, nor someone whose part others recorded. The director's own cast member (from before parts
+// were open) never gets one.
 export async function notifyActorsDone(ctx: Ctx, productionId: string): Promise<void> {
   const done = (await castRows(ctx.sql, { productionId })).filter((a) => a.linesTotal > 0 && a.linesRecorded >= a.linesTotal);
   if (!done.length) return;
@@ -65,7 +67,11 @@ export async function notifyActorsDone(ctx: Ctx, productionId: string): Promise<
     (
       await ctx.sql<{ id: string }[]>`
         select a.id from actors a where a.id = any(${done.map((a) => a.id)}::uuid[])
-          and (a.director_user_id is not null or exists (select 1 from notifications n where n.kind = 'actor_done' and n.actor_id = a.id))`
+          and (a.director_user_id is not null
+               or exists (select 1 from notifications n where n.kind = 'actor_done' and n.actor_id = a.id)
+               or not exists (select 1 from takes t join line_voices lv on lv.line_id = t.line_id
+                              join actor_characters ac on ac.character_id = lv.character_id and ac.actor_id = a.id
+                              where t.actor_id = a.id and t.deleted_at is null))`
     ).map((r) => r.id),
   );
   const p = await productionInfo(ctx, productionId);

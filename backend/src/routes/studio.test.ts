@@ -166,7 +166,7 @@ describe("the director's takes and TTS", { skip: dbSkip }, () => {
     assert.deepEqual([(await member()).linesRecorded, (await member()).status], [mine.length, "done"]);
     assert.equal((await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded, mine.length + 1);
     assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(horatio.inviteUrl) })).json().linesRecorded, mine.length);
-    assert.ok(t.mailer.sent.some((m) => m.subject === `Jo finished all ${mine.length} lines`));
+    assert.ok(!t.mailer.sent.some((m) => m.subject.startsWith("Jo finished")), "Jo hasn't recorded any of them yet");
 
     // The director's take isn't the actor's own: it plays now, and the actor can record over it.
     const own = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(horatio.inviteUrl) })).json().lines;
@@ -174,7 +174,7 @@ describe("the director's takes and TTS", { skip: dbSkip }, () => {
     assert.deepEqual(own[0].current.recordedBy, { kind: "director", name: "Alice" });
     for (const l of mine) assert.equal((await actorTake(horatio, l.id)).statusCode, 200);
     await t.ctx.jobs.idle();
-    assert.equal(t.mailer.sent.filter((m) => m.subject.startsWith("Jo finished all")).length, 1, "the email goes once");
+    assert.equal(t.mailer.sent.filter((m) => m.subject === `Jo finished all ${mine.length} lines`).length, 1, "once Jo records, the email goes, once");
 
     // Hamlet is still the computer voice for most lines: the cast isn't complete.
     await render();

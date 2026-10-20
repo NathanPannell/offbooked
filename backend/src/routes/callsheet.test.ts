@@ -121,16 +121,30 @@ describe("call sheet: open parts, top recorders and the director's takes", { ski
     assert.deepEqual([card.linesRecorded, card.linesNeeded, card.topRecorder], [marcellus.length, 0, { name: "Alice", others: 0 }]);
   });
 
-  test("a cast member whose lines the director recorded is done: actor progress and the email", async () => {
-    const sam = await claim("Sam", ["POLONIUS"]);
-    for (const l of linesOf("POLONIUS")) assert.equal((await directorTake(l.id)).statusCode, 200);
+  test("the director's takes finish a cast member's lines: actor progress and the email", async () => {
+    const sam = await claim("Sam", ["QUEEN"]);
+    const [first, ...rest] = linesOf("QUEEN");
+    assert.equal((await upload(sam, first!.id)).statusCode, 200);
+    for (const l of rest) assert.equal((await directorTake(l.id)).statusCode, 200);
     await t.ctx.jobs.idle();
     const invite = (await t.app.inject({ method: "GET", url: "/api/invite", headers: asInvite(sam) })).json();
     assert.equal(invite.linesRecorded, invite.linesTotal);
     assert.ok(t.mailer.sent.some((m) => m.subject === `Sam finished all ${invite.linesTotal} lines`));
     const items = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: asInvite(sam) })).json().lines;
-    assert.deepEqual(items[0].current.recordedBy, { kind: "director", name: "Alice" });
-    assert.equal(items[0].current.mine, false);
+    assert.deepEqual(items[1].current.recordedBy, { kind: "director", name: "Alice" });
+    assert.equal(items[1].current.mine, false);
+  });
+
+  test("no actor-done email for someone who recorded none of their lines, or for a second pick of a finished part", async () => {
+    const zed = await claim("Zed", ["POLONIUS"]);
+    for (const l of linesOf("POLONIUS")) assert.equal((await directorTake(l.id)).statusCode, 200);
+    await claim("Sam", ["QUEEN"]); // Sam again, on another phone
+    assert.equal((await directorTake(linesOf("KING")[0]!.id)).statusCode, 200);
+    await t.ctx.jobs.idle();
+    const invite = (await t.app.inject({ method: "GET", url: "/api/invite", headers: asInvite(zed) })).json();
+    assert.equal(invite.linesRecorded, invite.linesTotal, "Zed's part is fully recorded");
+    assert.ok(!t.mailer.sent.some((m) => m.subject.startsWith("Zed finished")), "but Zed recorded none of it");
+    assert.equal(t.mailer.sent.filter((m) => m.subject.startsWith("Sam finished")).length, 1, "and Sam's second phone sends no second email");
   });
 
   test("there is no unassigning a part and no recording through a cast member of the director's own", async () => {

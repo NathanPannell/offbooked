@@ -136,6 +136,8 @@ function Join({ token }: { token: string }) {
         setInfo(null);
       } else {
         setClaimError(errorMessage(err));
+        // A part may have been merged into another meanwhile: refresh the list (stale picks drop).
+        if (err instanceof ApiError && err.status === 400) setAttempt((n) => n + 1);
       }
     }
   };
