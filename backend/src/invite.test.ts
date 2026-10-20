@@ -23,8 +23,8 @@ test("forged, bumped or garbled tokens are rejected", () => {
   assert.equal(parseInviteToken("secret", `${id}.1.${sig!.slice(0, 21)}x`), null);
 });
 
-test("invites expire 14 days after the performance, or 120 days after creation", () => {
+test("invites expire when the content is deleted, 7 days after the final performance, or 120 days after creation", () => {
   const created = new Date("2026-01-01T00:00:00Z");
-  assert.equal(inviteExpiresAt("2026-03-01", created).toISOString(), "2026-03-16T00:00:00.000Z");
+  assert.equal(inviteExpiresAt("2026-03-01", created).toISOString(), "2026-03-08T12:00:00.000Z");
   assert.equal(inviteExpiresAt(null, created).toISOString(), "2026-05-01T00:00:00.000Z");
 });

@@ -1,17 +1,12 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
-const SCRIPT = `HAMLET
-Who's there?
+// Four speeches for two parts, as a Word file: scripts are PDF or .docx only.
+const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "hamlet.docx");
 
-HORATIO
-Friends to this ground.
-
-HAMLET
-Stand, and unfold yourself.
-
-HORATIO
-Long live the king!
-`;
+/** YYYY-MM-DD, `days` from today. */
+const dayFromNow = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
 async function signInAsDirector(page: Page): Promise<void> {
   await page.goto("/signin");
@@ -23,25 +18,60 @@ async function signInAsDirector(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/app\/new$/);
 }
 
+/** Sets up a play on one screen (title, dates, script) and waits on it until the script is read. */
 async function createProduction(page: Page, title: string): Promise<void> {
   await page.goto("/app/new");
   await page.getByLabel("Title").fill(title);
-  await page.getByRole("button", { name: "Next: add the script" }).click();
-  await expect(page).toHaveURL(/\/app\/p\/[^/?]+/);
-  await page.locator('input[type="file"]').setInputFiles({ name: "hamlet.txt", mimeType: "text/plain", buffer: Buffer.from(SCRIPT) });
-  await expect(page.getByRole("heading", { name: "Send this to your cast" })).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel("First performance").fill(dayFromNow(30));
+  await page.getByLabel("Final performance").fill(dayFromNow(33));
+  await page.locator('input[type="file"]').setInputFiles(SCRIPT);
+  await expect(page.getByText("hamlet.docx")).toBeVisible();
+  await page.getByRole("button", { name: "Read the script" }).click();
+  // Reading happens right here; once it's done the director lands on their script.
+  await expect(page).toHaveURL(/\/app\/p\/[^/?]+\?tab=script$/, { timeout: 30_000 });
+  await expect(page.getByText("Stand, and unfold yourself.")).toBeVisible();
 }
 
 test("a director uploads a script and shares the cast link, and a cast member opens it", async ({ page, browser }, testInfo) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAsDirector(page);
 
-  // Once the script is read, the next step is sharing it: the cast page opens with the parts found.
+  // A first production can't be cancelled back to an empty list, and the form checks its fields.
+  await page.goto("/app/new");
+  await expect(page.getByRole("link", { name: "Cancel" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Read the script" }).click();
+  await expect(page.getByText("Give the production a title.")).toBeVisible();
+  await expect(page.getByText("Add the script as a PDF or Word file.")).toBeVisible();
+  await page.locator('input[type="file"]').setInputFiles({ name: "hamlet.txt", mimeType: "text/plain", buffer: Buffer.from("HAMLET\nWho's there?\n") });
+  await expect(page.getByText("That file won't work. Use a PDF or a Word .docx file.")).toBeVisible();
+  await page.getByRole("button", { name: "About performance dates" }).click();
+  await expect(page.getByRole("tooltip")).toHaveText("We delete the script and every recording 7 days after the final performance.");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toBeHidden();
+
+  // Once the script is read, the director lands on it, with the cast marked as the next step.
   await createProduction(page, "Hamlet (e2e)");
+  await expect(page.getByText("Read 4 lines across 2 parts")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Share with the cast" })).toHaveCount(0);
+  // With a production to go back to, setting up another one can be cancelled.
+  await page.goto("/app/new");
+  await expect(page.getByRole("link", { name: "Cancel" })).toBeVisible();
+  await page.goBack();
+  await page.getByRole("button", { name: "Cast, next step" }).click();
+  await expect(page.getByRole("heading", { name: "Invite your cast" })).toBeVisible();
   await expect(page.getByText("0 of 2 parts taken")).toBeVisible();
-  await page.getByRole("button", { name: "Script", exact: true }).click();
-  await expect(page.getByText("Stand, and unfold yourself.")).toBeVisible();
-  await page.getByRole("button", { name: "Cast", exact: true }).click();
+
+  // With no name set, the cast would see the start of the director's email: offer to change it.
+  await expect(page.getByText(/^Your cast will see “Director /)).toBeVisible();
+  await page.getByPlaceholder("Your name").fill("Sam");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/^Your cast will see “Director /)).toHaveCount(0);
+
+  // The dates reached the server: archiving says the day everything is deleted.
+  await page.getByRole("button", { name: "Archive production" }).click();
+  await expect(page.getByText(/The script and every recording are deleted on .+, 7 days after the final performance\./)).toBeVisible();
+  await page.getByRole("button", { name: "Keep it" }).click();
+
   await page.getByRole("button", { name: "Copy the cast link" }).click();
   await expect(page.getByText("Link copied")).toBeVisible();
   const joinUrl = await page.evaluate(() => navigator.clipboard.readText());

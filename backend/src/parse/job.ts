@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { inferInBackground } from "../shared.ts";
 import type { Ctx } from "../context.ts";
 import type { Tx } from "../db.ts";
@@ -23,7 +24,12 @@ export async function startScriptParse(ctx: Ctx, productionId: string, source: S
   const key = `productions/${productionId}/scripts/${scriptId}.${ext}`;
   const bytes = source.kind === "text" ? (source.data ?? Buffer.from(source.text, "utf8")) : source.data;
   await ctx.storage.put(key, bytes, contentType);
+  if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();
   await ctx.sql.begin(async (tx) => {
+    // The row lock orders this with deleteProductionContent's transaction: a script inserted first
+    // is deleted with the rest; one that comes second sees the production is gone.
+    const [p] = await tx<{ contentDeletedAt: Date | null }[]>`select content_deleted_at from productions where id = ${productionId} for update`;
+    if (p?.contentDeletedAt) throw new ContentDeletedError();
     await tx`insert into scripts (id, production_id, source_kind, storage_key, raw_text)
              values (${scriptId}, ${productionId}, ${source.kind}, ${key}, ${source.kind === "text" ? source.text : null})`;
     await tx`update productions set script_status = 'parsing', script_error = null where id = ${productionId}`;
@@ -67,7 +73,7 @@ export async function runScriptParse(ctx: Ctx, scriptId: string): Promise<void> 
     if (current) inferInBackground(ctx, script.productionId);
     if (!current) await ctx.sql`update scripts set status = 'failed', error = 'Replaced by a newer upload', completed_at = now() where id = ${scriptId}`;
   } catch (err) {
-    const message = err instanceof ScriptInputError ? err.message : "Something went wrong while reading the script. Try again, or paste the text instead.";
+    const message = err instanceof ScriptInputError ? err.message : "Something went wrong while reading the script. Try again.";
     if (!(err instanceof ScriptInputError)) ctx.log.error({ err, scriptId }, "script parse failed");
     await ctx.sql`update scripts set status = 'failed', error = ${message}, completed_at = now() where id = ${scriptId}`;
     await ctx.sql`update productions set script_status = 'failed', script_error = ${message}

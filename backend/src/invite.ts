@@ -1,4 +1,5 @@
 import { hmac, isUuid, safeEqual } from "./crypto.ts";
+import { RETENTION_DAYS } from "./retention.ts";
 
 // Derived, never stored: base64url(actorId bytes) "." tokenVersion "." HMAC(actorId:tokenVersion)[0..22].
 export function inviteToken(secret: string, actorId: string, tokenVersion: number): string {
@@ -25,9 +26,10 @@ export function inviteUrl(appUrl: string, secret: string, actorId: string, token
 
 const DAY_MS = 86_400_000;
 
-// Valid through the end of performanceDate + 14 days, or 120 days after the actor was added.
-export function inviteExpiresAt(performanceDate: string | null, actorCreatedAt: Date): Date {
-  if (performanceDate) return new Date(Date.parse(`${performanceDate}T00:00:00Z`) + 15 * DAY_MS);
+// Valid until the production's content is deleted (12:00 UTC, RETENTION_DAYS after the final
+// performance), or 120 days after the actor was added when there is no final date.
+export function inviteExpiresAt(performanceEndsOn: string | null, actorCreatedAt: Date): Date {
+  if (performanceEndsOn) return new Date(Date.parse(`${performanceEndsOn}T12:00:00Z`) + RETENTION_DAYS * DAY_MS);
   return new Date(actorCreatedAt.getTime() + 120 * DAY_MS);
 }
 

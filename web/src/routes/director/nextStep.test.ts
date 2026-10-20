@@ -5,7 +5,9 @@ import { nextStep } from "./nextStep";
 const production = (over: Partial<Production> = {}, progress: Partial<Production["progress"]> = {}): Production => ({
   id: "p",
   title: "Hamlet",
-  performanceDate: null,
+  performanceStartsOn: null,
+  performanceEndsOn: "2027-10-20",
+  contentDeletesOn: "2027-10-27",
   createdAt: "2026-10-01T00:00:00Z",
   archived: false,
   scriptStatus: "ready",

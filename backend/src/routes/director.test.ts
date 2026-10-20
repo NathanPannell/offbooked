@@ -34,8 +34,8 @@ describe("productions, script corrections and cast", { skip: dbSkip }, () => {
     assert.equal(p.scriptStatus, "ready");
     assert.equal(p.archived, false);
     assert.deepEqual(p.progress, { linesTotal: 36, linesRecorded: 0, actorsTotal: 0, actorsDone: 0 });
-    const updated = (await send("PATCH", `/api/productions/${pid}`, { performanceDate: "2027-05-01" })).json().production;
-    assert.equal(updated.performanceDate, "2027-05-01");
+    const updated = (await send("PATCH", `/api/productions/${pid}`, { performanceStartsOn: "2027-04-28", performanceEndsOn: "2027-05-01" })).json().production;
+    assert.deepEqual([updated.performanceStartsOn, updated.performanceEndsOn, updated.contentDeletesOn], ["2027-04-28", "2027-05-01", "2027-05-08"]);
     assert.equal(updated.title, "Hamlet");
     assert.equal((await get("/api/productions")).json().productions.length, 1);
     const full = (await get(`/api/productions/${pid}/script`)).json();

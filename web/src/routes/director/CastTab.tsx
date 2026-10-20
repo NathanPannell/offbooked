@@ -1,8 +1,8 @@
-import { Check, ChevronDown, Copy, Headphones, Merge, Mic, MoreHorizontal, Share2, UserMinus, Users } from "lucide-react";
+import { Check, ChevronDown, Copy, Headphones, Merge, Mic, MoreHorizontal, Share2, UserMinus, Users, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { errorMessage } from "../../api/client";
-import { cast as castApi, joinLink, script as scriptApi } from "../../api/director";
+import { auth, cast as castApi, joinLink, script as scriptApi } from "../../api/director";
 import type { CallSheetCharacter, Production } from "../../api/types";
 import { CharacterName } from "../../components/CharacterName";
 import { Confetti } from "../../components/Confetti";
@@ -11,9 +11,11 @@ import { Loading } from "../../components/Loading";
 import { ProgressBar } from "../../components/ProgressBar";
 import { useToast } from "../../components/Toast";
 import { plural, titleCase } from "../../lib/format";
+import { castFacingName } from "../../lib/names";
 import { copyText, shareOrCopy } from "../../lib/share";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useInterval, useResource, type Resource } from "../../lib/useResource";
+import { useDirector } from "./DirectorLayout";
 import { suggestMerges } from "./duplicateCharacters";
 
 /**
@@ -78,6 +80,7 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
 
   return (
     <div className="cast">
+      <NamePrompt />
       <section className="cast-actions" aria-label="Get the lines recorded">
         <CastLink production={production} link={link} />
         <RecordYourself parts={parts} opening={opening} onRecord={(id) => void recordAs(id)} />
@@ -433,9 +436,12 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
 
   return (
     <section className="cast-link raised" aria-labelledby="cast-link-title">
-      <h2 id="cast-link-title" className="display cast-link-title">
-        Send this to your cast
-      </h2>
+      <div className="stack" style={{ gap: 4 }}>
+        <h2 id="cast-link-title" className="display cast-link-title">
+          Invite your cast
+        </h2>
+        <p className="muted">Send one link. Everyone picks their part and records their lines on their phone.</p>
+      </div>
       {link.error ? (
         <div className="notice notice-error" role="alert">
           {errorMessage(link.error)}{" "}
@@ -458,11 +464,78 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
             </button>
           </div>
           <button type="button" className="btn btn-primary btn-lg cast-link-share" onClick={share} disabled={!link.data}>
-            <Share2 size={18} aria-hidden="true" /> Share the cast link
+            <Share2 size={18} aria-hidden="true" /> Share link with your cast
           </button>
           {link.data && <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />}
         </>
       )}
+    </section>
+  );
+}
+
+/**
+ * Until a director sets their name, the cast sees the start of their email. The first visits to
+ * the cast page say so and offer to change it, until it's set or dismissed.
+ */
+function NamePrompt() {
+  const { user, setUser } = useDirector();
+  const toast = useToast();
+  const key = `offbooked.namePrompt.${user.id}`;
+  const [dismissed, setDismissed] = useState(() => readStorage(key) === "dismissed");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fallback = castFacingName(null, user.email);
+  if (user.name?.trim() || dismissed) return null;
+
+  const dismiss = () => {
+    writeStorage(key, "dismissed");
+    setDismissed(true);
+  };
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { user: updated } = await auth.updateMe(name.trim());
+      setUser(updated);
+      toast(`Your cast will see “${updated.name}”`);
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="name-prompt notice" aria-labelledby="name-prompt-text">
+      <form className="name-prompt-form" onSubmit={save}>
+        <label id="name-prompt-text" htmlFor="name-prompt-input" className="name-prompt-text">
+          Your cast will see “{fallback}”. Change it?
+        </label>
+        <div className="name-prompt-row">
+          <input
+            id="name-prompt-input"
+            className="input"
+            value={name}
+            maxLength={100}
+            autoComplete="name"
+            placeholder="Your name"
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button className="btn btn-secondary" disabled={busy || !name.trim()}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+        {error && (
+          <p className="field-error" role="alert">
+            {error}
+          </p>
+        )}
+      </form>
+      <button type="button" className="icon-btn name-prompt-close" onClick={dismiss} aria-label={`Keep “${fallback}”`} title="Dismiss">
+        <X size={18} />
+      </button>
     </section>
   );
 }

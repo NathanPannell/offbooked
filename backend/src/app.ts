@@ -97,6 +97,11 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     }
   });
 
+  // Retention catch-up rides on real requests, never on a timer or a health check (retention.ts).
+  app.addHook("onRequest", async (req) => {
+    if (req.url.startsWith("/api/")) ctx.retention.touch();
+  });
+
   app.register(async (api) => {
     authRoutes(api, ctx);
     productionRoutes(api, ctx);

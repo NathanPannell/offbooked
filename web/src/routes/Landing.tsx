@@ -18,7 +18,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "What scripts work?",
-    a: "PDFs with real text in them, Word .docx files and plain text, up to 20 MB. You can also paste the script straight in. Scanned pages without a text layer don't work yet. We keep your line breaks and indentation, so verse and lyrics stay as written.",
+    a: "PDFs with real text in them and Word .docx files, up to 20 MB. Scanned pages without a text layer don't work yet. We keep your line breaks and indentation, so verse and lyrics stay as written.",
   },
   {
     q: "Is it free?",
@@ -100,7 +100,7 @@ export function Landing() {
           <li className="act">
             <p className="act-label mono">Act I</p>
             <h3>Upload your script.</h3>
-            <p className="muted">PDF, Word or plain text. Offbooked finds every scene, character and line, and shows you the few it wasn't sure about.</p>
+            <p className="muted">A PDF or a Word file. Offbooked finds every scene, character and line.</p>
             <ActParse />
           </li>
           <li className="act">

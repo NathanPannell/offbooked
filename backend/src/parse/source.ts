@@ -17,7 +17,7 @@ export function detectSourceKind(data: Buffer, filename = ""): SourceKind {
     throw new ScriptInputError("That file looks like a zip archive. Upload a PDF, a Word .docx file or plain text.");
   }
   if (/\.doc$/i.test(filename) || data.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0]))) {
-    throw new ScriptInputError("Old Word .doc files aren't supported. Save it as .docx or PDF, or paste the text.");
+    throw new ScriptInputError("Old Word .doc files aren't supported. Save it as .docx or PDF.");
   }
   if (looksBinary(data)) throw new ScriptInputError("We can't read that kind of file. Upload a PDF, a Word .docx file or plain text.");
   return "text";
