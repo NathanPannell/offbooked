@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { AUDIO_URL_TTL_SECONDS, assertSafeKey, type Storage } from "./storage.ts";
+import { AUDIO_URL_TTL_SECONDS, assertSafeKey, assertSafePrefix, type Storage } from "./storage.ts";
 
 // Files under STORAGE_DIR. Signed GET URLs point at the API's own /api/files route.
 export class LocalStorage implements Storage {
@@ -37,6 +37,20 @@ export class LocalStorage implements Storage {
     } catch {
       return false;
     }
+  }
+
+  async deletePrefix(prefix: string): Promise<number> {
+    assertSafePrefix(prefix);
+    const dir = path.join(this.root, ...prefix.split("/").filter(Boolean));
+    let count: number;
+    try {
+      count = (await readdir(dir, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).length;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0;
+      throw err;
+    }
+    await rm(dir, { recursive: true, force: true });
+    return count;
   }
 
   async signedUrl(key: string, ttlSeconds = AUDIO_URL_TTL_SECONDS): Promise<string> {

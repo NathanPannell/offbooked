@@ -2,6 +2,7 @@ import type { FlagCode } from "./parse/flags.ts";
 import type { Config } from "./config.ts";
 import type { Sql } from "./db.ts";
 import { inviteUrl } from "./invite.ts";
+import { RETENTION_DAYS } from "./retention.ts";
 import type { Storage } from "./storage/storage.ts";
 
 // Database rows (camelCased by the postgres transform) and their API shapes from docs/api.md.
@@ -12,10 +13,13 @@ export interface ProductionRow {
   id: string;
   ownerId: string;
   title: string;
-  performanceDate: string | null;
+  performanceStartsOn: string | null;
+  performanceEndsOn: string | null;
+  contentDeletesOn: string | null;
   scriptStatus: "none" | "parsing" | "ready" | "failed";
   scriptError: string | null;
   archivedAt: Date | null;
+  contentDeletedAt: Date | null;
   createdAt: Date;
   linesTotal: number;
   linesRecorded: number;
@@ -32,8 +36,9 @@ const voiceRecorded = (sql: Sql) => sql`voice_take(lv.line_id, lv.shared, lv.cha
 
 export async function productionRows(sql: Sql, where: { ownerId: string; id?: string; includeArchived?: boolean }): Promise<ProductionRow[]> {
   return sql<ProductionRow[]>`
-    select p.id, p.owner_id, p.title, p.performance_date::text as performance_date, p.script_status, p.script_error,
-      p.archived_at, p.created_at,
+    select p.id, p.owner_id, p.title, p.performance_starts_on::text as performance_starts_on, p.performance_ends_on::text as performance_ends_on,
+      (p.performance_ends_on + ${RETENTION_DAYS}::int)::text as content_deletes_on, p.script_status, p.script_error,
+      p.archived_at, p.content_deleted_at, p.created_at,
       (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue') as lines_total,
       (select count(*)::int from lines l where l.production_id = p.id and l.kind = 'dialogue' and ${lineRecorded(sql)}) as lines_recorded,
       (select count(*)::int from actors a where a.production_id = p.id) as actors_total,
@@ -52,7 +57,9 @@ export function productionView(p: ProductionRow) {
   return {
     id: p.id,
     title: p.title,
-    performanceDate: p.performanceDate,
+    performanceStartsOn: p.performanceStartsOn,
+    performanceEndsOn: p.performanceEndsOn,
+    contentDeletesOn: p.contentDeletesOn,
     createdAt: iso(p.createdAt)!,
     archived: Boolean(p.archivedAt),
     scriptStatus: p.scriptStatus,

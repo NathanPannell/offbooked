@@ -110,7 +110,7 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
   if (durationMs === null) throw badRequest("We couldn't read that recording. Try recording it again.");
   if (durationMs > MAX_TAKE_MS) throw badRequest("That take is over an hour long. Record it in shorter pieces.");
 
-  // The newest take is current, whoever recorded it. Older takes are kept forever.
+  // The newest take is current, whoever recorded it. Older takes are kept until the production's content is deleted (retention.ts).
   const voiceId = u.voiceId ? await u.voiceId() : null;
   const key = `productions/${u.productionId}/takes/${id}.${ext}`;
   await storage.put(key, audio, contentType);

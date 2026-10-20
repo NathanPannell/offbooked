@@ -40,7 +40,7 @@ export async function ownedProduction(ctx: Ctx, user: Director, productionId: st
 
 export interface ActorSession {
   actor: { id: string; name: string; firstName: string | null; email: string | null; tokenVersion: number; createdAt: Date };
-  production: { id: string; title: string; performanceDate: string | null; directorName: string };
+  production: { id: string; title: string; performanceEndsOn: string | null; directorName: string };
   characterIds: string[];
 }
 
@@ -61,13 +61,13 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
       createdAt: Date;
       productionId: string;
       title: string;
-      performanceDate: string | null;
+      performanceEndsOn: string | null;
       archivedAt: Date | null;
       directorName: string | null;
     }[]
   >`
     select a.id, a.name, a.first_name, a.email, a.token_version, a.created_at, p.id as production_id, p.title,
-      p.performance_date::text as performance_date, p.archived_at, u.name as director_name
+      p.performance_ends_on::text as performance_ends_on, p.archived_at, u.name as director_name
     from actors a join productions p on p.id = a.production_id join users u on u.id = p.owner_id
     where a.id = ${parsed.actorId}`;
   if (!row) throw unauthorized("This link isn't valid. Ask your director for a new one.");
@@ -75,13 +75,13 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
   const gone = (message: string) => new HttpError(410, "invite_expired", message, { directorName, productionTitle: row.title });
   if (row.archivedAt) throw gone("This production has wrapped, so this link no longer works.");
   if (parsed.tokenVersion !== row.tokenVersion) throw gone("This link was replaced with a new one. Ask your director for the latest link.");
-  if (inviteExpiresAt(row.performanceDate, row.createdAt) < new Date()) throw gone("This link has expired. Ask your director for a new one.");
+  if (inviteExpiresAt(row.performanceEndsOn, row.createdAt) < new Date()) throw gone("This link has expired. Ask your director for a new one.");
   await enforce(ctx.sql, ctx.log, `invite:${row.id}`, LIMITS.inviteActor);
   const chars = await ctx.sql<{ characterId: string }[]>`select character_id from actor_characters where actor_id = ${row.id}`;
   await ctx.sql`update actors set last_active_at = now() where id = ${row.id}`;
   return {
     actor: { id: row.id, name: row.name, firstName: row.firstName, email: row.email, tokenVersion: row.tokenVersion, createdAt: row.createdAt },
-    production: { id: row.productionId, title: row.title, performanceDate: row.performanceDate, directorName },
+    production: { id: row.productionId, title: row.title, performanceEndsOn: row.performanceEndsOn, directorName },
     characterIds: chars.map((c) => c.characterId),
   };
 }

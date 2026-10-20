@@ -1,6 +1,6 @@
-import { GetObjectCommand, HeadObjectCommand, NotFound, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, NotFound, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { AUDIO_URL_TTL_SECONDS, assertSafeKey, type Storage } from "./storage.ts";
+import { AUDIO_URL_TTL_SECONDS, assertSafeKey, assertSafePrefix, type Storage } from "./storage.ts";
 
 // S3-compatible bucket (Railway buckets use virtual-host style URLs). Range requests are native.
 export class S3Storage implements Storage {
@@ -37,6 +37,20 @@ export class S3Storage implements Storage {
     } catch (err) {
       if (err instanceof NotFound || (err as { name?: string }).name === "NotFound") return false;
       throw err;
+    }
+  }
+
+  // Lists a page (up to 1000 keys), deletes it in one request, and repeats until the prefix is empty.
+  async deletePrefix(prefix: string): Promise<number> {
+    assertSafePrefix(prefix);
+    let count = 0;
+    for (;;) {
+      const page = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, MaxKeys: 1000 }));
+      const keys = (page.Contents ?? []).flatMap((o) => (o.Key ? [{ Key: o.Key }] : []));
+      if (!keys.length) return count;
+      const res = await this.client.send(new DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: keys, Quiet: true } }));
+      if (res.Errors?.length) throw new Error(`Deleting ${prefix} failed for ${res.Errors.length} objects: ${res.Errors[0]?.Message ?? "unknown error"}`);
+      count += keys.length;
     }
   }
 
