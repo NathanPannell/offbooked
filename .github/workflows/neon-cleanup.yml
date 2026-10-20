@@ -1,6 +1,7 @@
 # Deletes a PR's own Neon branch when the PR merges or closes, so throwaway branches never pile
 # up (each one can hold a compute). A PR's branch is named `dev-<head branch>`, lowercased, with
-# anything other than a-z, 0-9 and - turned into - (`fix/smooth-staging` → `dev-fix-smooth-staging`).
+# each run of characters other than a-z, 0-9 and - turned into one -, no - at either end
+# (`fix/smooth-staging` → `dev-fix-smooth-staging`).
 # It only ever deletes a branch with that exact name: never production, dev, the default branch or
 # anything not starting with `dev-`. A PR without a Neon branch is a no-op.
 name: Neon cleanup

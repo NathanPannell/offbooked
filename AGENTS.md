@@ -40,7 +40,7 @@ npm run format     # format:check in CI
 
 Never point `DATABASE_URL` at Neon for tests or the e2e run. Use a throwaway local Postgres (a Docker container, or `initdb` into `<workspace>/.claude/tmp/`).
 
-Neon branches: the project (`mute-math-90372176`) keeps `production` (default) and `dev` (local development). A PR that needs its own Neon branch (say, to try a migration on real data) names it `dev-<head branch>`, lowercased, with anything other than a-z, 0-9 and - turned into - (`fix/smooth-staging` → `dev-fix-smooth-staging`), creates it with `expires_at` 7 days out, and gives it a 0.25 CU compute with the 300 s suspend timeout. `.github/workflows/neon-cleanup.yml` deletes that branch when the PR merges or closes (secret `NEON_API_KEY`, variable `NEON_PROJECT_ID`); it never touches `production`, `dev`, the default branch or a name not starting with `dev-`. Don't make Neon branches under any other name.
+Neon branches: the project (`mute-math-90372176`) keeps `production` (default) and `dev` (local development). A PR that needs its own Neon branch (say, to try a migration on real data) names it `dev-<head branch>`, lowercased, each run of characters other than a-z, 0-9 and - turned into one -, and no - at either end (`fix/smooth-staging` → `dev-fix-smooth-staging`), creates it with `expires_at` 7 days out, and gives it a 0.25 CU compute with the 300 s suspend timeout. `.github/workflows/neon-cleanup.yml` deletes that branch when the PR merges or closes (secret `NEON_API_KEY`, variable `NEON_PROJECT_ID`); it never touches `production`, `dev`, the default branch or a name not starting with `dev-`. Don't make Neon branches under any other name.
 
 `/health` returns 503 when ffmpeg is not on `PATH`, so locally it is only 200 if ffmpeg is installed.
 

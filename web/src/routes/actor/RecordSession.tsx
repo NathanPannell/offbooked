@@ -77,6 +77,14 @@ export function RecordSession({
   const stopRef = useRef<() => void>(() => {});
   /** The latest startRecording, for timers set up by an earlier render. */
   const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
+  /** The move to the next line after a take; cleared on leaving, so it can't open the mic on a screen that's gone. */
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    },
+    [],
+  );
   const options = useRecordOptions();
   const { autoAdvance, keepRecording } = options;
   /** Hear scene partners: the cue plays before each take, and on a shared line the others play along. */
@@ -380,7 +388,8 @@ export function RecordSession({
 
   const goToNext = (lineId: string, recordNext = false) => {
     const next = nextLine(lineId);
-    setTimeout(() => {
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null;
       if (next) {
         setCurrentId(next);
         scrollToLine(next);

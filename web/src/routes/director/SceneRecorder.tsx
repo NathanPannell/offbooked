@@ -152,6 +152,14 @@ function SceneLines({
   const stopRef = useRef<(opts?: { recordNext?: boolean }) => void>(() => {});
   /** The latest start, for the timer that records the next line. */
   const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
+  /** The move to the next line after a take; cleared on leaving, so it can't open the mic on a screen that's gone. */
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    },
+    [],
+  );
   const recorder = useTakeRecorder({
     onLimit: () => {
       onError("That take ran for an hour, so we stopped and kept it.");
@@ -276,14 +284,17 @@ function SceneLines({
       URL.revokeObjectURL(url);
       return onError("Couldn't save that take on this device. Try again.");
     }
-    // On to the next line in view that nobody has recorded.
+    // On to the next line in view that nobody has recorded, else just the next one. "Keep recording"
+    // only carries on into a line nobody has recorded, never over someone's take.
     const index = shown.findIndex((l) => l.line.id === lineId);
-    const next = shown.slice(index + 1).find((l) => !l.take && !localTakes.has(l.line.id)) ?? shown[index + 1];
+    const unrecorded = shown.slice(index + 1).find((l) => !l.take && !localTakes.has(l.line.id));
+    const next = unrecorded ?? shown[index + 1];
     if (next) {
-      setTimeout(() => {
+      advanceTimer.current = setTimeout(() => {
+        advanceTimer.current = null;
         setCurrentId(next.line.id);
         scrollTo(next.line.id);
-        if (recordNext) void startRef.current(next.line.id);
+        if (recordNext && unrecorded) void startRef.current(next.line.id);
       }, 600);
     }
   };

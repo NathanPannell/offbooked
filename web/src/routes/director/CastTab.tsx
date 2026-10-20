@@ -99,7 +99,7 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
           <span className="call-sheet-summary">
             <span className="call-sheet-title">Cast and recordings</span>
             <span className="small muted">
-              {linesRecorded.toLocaleString()} of {plural(linesTotal, "line")} recorded · {started} of {plural(parts.length, "part")} started
+              {linesRecorded.toLocaleString("en-US")} of {plural(linesTotal, "line")} recorded · {started} of {plural(parts.length, "part")} started
             </span>
           </span>
           <ChevronDown size={18} aria-hidden="true" className="call-sheet-chevron" />
