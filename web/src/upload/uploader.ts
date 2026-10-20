@@ -191,6 +191,32 @@ export class Uploader {
   }
 }
 
+/**
+ * The server's id for a take recorded on this screen: straight away once it has landed, else when
+ * its upload does (null after `timeoutMs`, say offline). Lets Delete show the moment a take is kept.
+ */
+export function savedTakeId(
+  uploader: Pick<Uploader, "onSaved">,
+  known: ReadonlyMap<string, string>,
+  clientTakeId: string,
+  timeoutMs = 15_000,
+): Promise<string | null> {
+  const id = known.get(clientTakeId);
+  if (id) return Promise.resolve(id);
+  return new Promise((resolve) => {
+    const off = uploader.onSaved((item, result) => {
+      if (item.takeId !== clientTakeId) return;
+      clearTimeout(timer);
+      off();
+      resolve(result.take.id);
+    });
+    const timer = setTimeout(() => {
+      off();
+      resolve(null);
+    }, timeoutMs);
+  });
+}
+
 let shared: Uploader | null = null;
 
 /** One uploader per tab, shared by every screen. */

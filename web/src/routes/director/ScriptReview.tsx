@@ -11,6 +11,7 @@ import { useToast } from "../../components/Toast";
 import { CharactersPanel } from "./CharactersPanel";
 import { canJoinAtSeam, joinPreview, undoJoin } from "./lineJoin";
 import { caretFromClick, LineEditor, LineText } from "./LineEditor";
+import { repeatsSceneTitle } from "./lineText";
 import { MergeSuggestions } from "./MergeSuggestions";
 import { scrollToLine } from "./reviewScroll";
 import { readSummary } from "./setup";
@@ -346,6 +347,9 @@ function ScriptSection({
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(section.title);
   const hasOpen = lines.some((l) => l.id === editingId || l.id === selectedId);
+  // Heading lines that only repeat the title above ("ACT 1", "SCENE 1") aren't shown twice. They
+  // stay in the script, and show again while one is being edited.
+  const shown = lines.filter((l) => !repeatsSceneTitle(l, section.title) || l.id === editingId || l.id === selectedId);
 
   return (
     <section
@@ -394,13 +398,13 @@ function ScriptSection({
         )}
       </header>
       <ol className="script-lines">
-        {lines.map((line, i) => (
+        {shown.map((line, i) => (
           <li key={line.id} id={`line-${line.id}`} className="script-line-item">
-            {canJoinAtSeam(lines[i - 1], line) && (
+            {canJoinAtSeam(shown[i - 1], line) && (
               <JoinSeam
-                upper={lines[i - 1]!}
+                upper={shown[i - 1]!}
                 lower={line}
-                near={[lines[i - 1]!.id, line.id].some((id) => id === selectedId || id === editingId)}
+                near={[shown[i - 1]!.id, line.id].some((id) => id === selectedId || id === editingId)}
                 characterName={characterName}
                 busy={busy}
                 onJoin={onJoin}

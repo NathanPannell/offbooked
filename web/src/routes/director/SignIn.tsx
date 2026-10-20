@@ -53,9 +53,7 @@ export default function SignIn() {
         <form className="raised message-card stack" onSubmit={submit}>
           <div className="stack" style={{ gap: 6 }}>
             <h1 className="display">Welcome in</h1>
-            <p className="muted">
-              Anyone with the script can set up a production: directors, stage managers, actors. Sign in with your email. No password: we'll send you a link.
-            </p>
+            <p className="muted">No password. We'll email you a link.</p>
           </div>
           <label className="field">
             <span>Email</span>

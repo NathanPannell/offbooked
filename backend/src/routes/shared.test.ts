@@ -171,8 +171,10 @@ describe("shared lines", { skip: dbSkip }, () => {
     assert.equal((await upload(escalus, shared.id)).statusCode, 200);
     production = (await get(`/api/productions/${pid}`)).json().production;
     assert.equal(production.progress.linesRecorded, 1);
-    sheet = (await get(`/api/productions/${pid}/call-sheet`)).json().characters;
+    const full = (await get(`/api/productions/${pid}/call-sheet`)).json();
+    sheet = full.characters;
     assert.equal(sheet.find((c) => c.name === "ESCALUS")!.linesRecorded, 1);
+    assert.deepEqual(full.lines, { total: production.progress.linesTotal, recorded: 1 }, "the call sheet's totals count each line once, like the production");
 
     // Both takes play together as one mixed clip.
     const audio = (await get(`/api/productions/${pid}/lines/${shared.id}/audio`)).json();

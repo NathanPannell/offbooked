@@ -230,8 +230,8 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     assert.equal(forced.json().render.status, "queued");
     await processDueRenders(t.ctx);
     const subjects = t.mailer.sent.map((m) => `${m.to}: ${m.subject}`);
-    assert.ok(subjects.includes("director@example.test: Cast complete — run-through ready"), subjects.join("\n"));
-    assert.ok(subjects.includes("jo@example.test: The run-through for Hamlet is ready"));
+    assert.ok(subjects.includes("director@example.test: Cast complete — ready to listen through"), subjects.join("\n"));
+    assert.ok(subjects.includes("jo@example.test: Hamlet is ready to listen through"));
     const actorEmail = t.mailer.sent.find((m) => m.to === "jo@example.test")!;
     assert.ok(actorEmail.text.includes(`${horatio.inviteUrl}/play`));
     assert.ok(actorEmail.headers?.["List-Unsubscribe"]);

@@ -14,6 +14,7 @@ import { useToast } from "../../components/Toast";
 import { plural, titleCase } from "../../lib/format";
 import { castFacingName } from "../../lib/names";
 import { recorderDescription, recorderLabel } from "../../lib/recorders";
+import { markLinkShared } from "../../lib/linkShared";
 import { copyText, shareOrCopy } from "../../lib/share";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useInterval, useResource, type Resource } from "../../lib/useResource";
@@ -26,7 +27,7 @@ import { suggestMerges } from "./duplicateCharacters";
  * anyone can record any line, so the call sheet only says who has recorded most of each part.
  */
 export function CastTab({ production, onOpenScript, onOpenPlay }: { production: Production; onOpenScript: () => void; onOpenPlay: () => void }) {
-  const sheet = useResource(() => castApi.callSheet(production.id).then((r) => r.characters), `sheet:${production.id}`);
+  const sheet = useResource(() => castApi.callSheet(production.id), `sheet:${production.id}`);
   const link = useResource(() => joinLink.get(production.id).then((r) => r.joinUrl), `join:${production.id}`);
 
   useInterval(() => void sheet.reload(), 15_000, !!sheet.data);
@@ -43,7 +44,7 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
     );
   }
 
-  const parts = sheet.data;
+  const parts = sheet.data.characters;
   if (parts.length === 0) {
     return (
       <div className="empty-state">
@@ -57,12 +58,14 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
     );
   }
 
-  const linesTotal = parts.reduce((n, c) => n + c.lineCount, 0);
-  const linesRecorded = parts.reduce((n, c) => n + c.linesRecorded, 0);
-  const started = parts.filter((c) => c.topRecorder).length;
+  // The script's own count, so it matches the script page and the production card (a shared line is
+  // under every part that says it, so the parts add up to more).
+  const { total: linesTotal, recorded: linesRecorded } = sheet.data.lines;
+  const started = parts.filter((c) => c.linesRecorded > 0).length;
   const wrapped = parts.every((c) => c.linesRecorded >= c.lineCount);
   const mine = parts.filter((c) => c.mine);
-  const others = parts.filter((c) => !c.mine);
+  // Parts under way first, then the rest; each group biggest first, as the server sends them.
+  const others = [...parts.filter((c) => !c.mine && c.linesRecorded > 0), ...parts.filter((c) => !c.mine && c.linesRecorded === 0)];
   // Likely duplicates ("ISABEL" and "ISABELLA (ASIDE)"), offered first when merging.
   const suggested = new Map(
     suggestMerges(parts.map((c) => ({ id: c.id, name: c.name, aliases: [], lineCount: c.lineCount }))).map((m) => [m.from.id, m.into.id]),
@@ -84,7 +87,6 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
 
   return (
     <div className="cast">
-      <NamePrompt />
       <section className="cast-actions" aria-label="Get the lines recorded">
         <CastLink production={production} link={link} />
         <RecordYourself productionId={production.id} parts={parts} />
@@ -97,7 +99,7 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
           <span className="call-sheet-summary">
             <span className="call-sheet-title">Cast and recordings</span>
             <span className="small muted">
-              {linesRecorded.toLocaleString()} of {plural(linesTotal, "line")} recorded · {started} of {plural(parts.length, "part")} started
+              {linesRecorded.toLocaleString("en-US")} of {plural(linesTotal, "line")} recorded · {started} of {plural(parts.length, "part")} started
             </span>
           </span>
           <ChevronDown size={18} aria-hidden="true" className="call-sheet-chevron" />
@@ -120,7 +122,7 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
             )}
           </>
         ) : (
-          rows(parts, "Parts")
+          rows(others, "Parts")
         )}
       </details>
     </div>
@@ -327,8 +329,14 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
       text: `Hi all! Record your lines for ${production.title} here. Pick your character and go: it takes a few minutes on your phone, with no app or account.`,
       url: link.data,
     });
+    if (outcome === "shared" || outcome === "copied") markLinkShared(production.id);
     if (outcome === "copied") toast("Message and link copied. Paste it in the cast chat.");
     if (outcome === "failed") toast("Couldn't copy. Select the link and copy it by hand.");
+  };
+  const copy = async () => {
+    const ok = await copyText(link.data!);
+    if (ok) markLinkShared(production.id);
+    toast(ok ? "Link copied" : "Couldn't copy");
   };
 
   return (
@@ -350,19 +358,14 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
         <>
           <div className="link-ticket">
             <span className="link-ticket-url mono">{link.data ? link.data.replace(/^https?:\/\//, "") : "Making your link…"}</span>
-            <button
-              type="button"
-              className="icon-btn link-ticket-copy"
-              disabled={!link.data}
-              aria-label="Copy the cast link"
-              onClick={async () => toast((await copyText(link.data!)) ? "Link copied" : "Couldn't copy")}
-            >
+            <button type="button" className="icon-btn link-ticket-copy" disabled={!link.data} aria-label="Copy the cast link" onClick={() => void copy()}>
               <Copy size={18} />
             </button>
           </div>
           <button type="button" className="btn btn-primary btn-lg cast-link-share" onClick={share} disabled={!link.data}>
             <Share2 size={18} aria-hidden="true" /> Share link with your cast
           </button>
+          <NamePrompt />
           {link.data && <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />}
         </>
       )}
@@ -371,8 +374,8 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
 }
 
 /**
- * Until a director sets their name, the cast sees the start of their email. The first visits to
- * the cast page say so and offer to change it, until it's set or dismissed.
+ * Until a director sets their name, the cast sees the start of their email. The cast page says so in
+ * one line under the share button, with a way to change it, until it's set or dismissed.
  */
 function NamePrompt() {
   const { user, setUser } = useDirector();
@@ -380,6 +383,7 @@ function NamePrompt() {
   const key = `offbooked.namePrompt.${user.id}`;
   const [dismissed, setDismissed] = useState(() => readStorage(key) === "dismissed");
   const [name, setName] = useState("");
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fallback = castFacingName(null, user.email);
@@ -404,36 +408,49 @@ function NamePrompt() {
     }
   };
 
-  return (
-    <section className="name-prompt notice" aria-labelledby="name-prompt-text">
-      <form className="name-prompt-form" onSubmit={save}>
-        <label id="name-prompt-text" htmlFor="name-prompt-input" className="name-prompt-text">
-          Your cast will see “{fallback}”. Change it?
-        </label>
-        <div className="name-prompt-row">
-          <input
-            id="name-prompt-input"
-            className="input"
-            value={name}
-            maxLength={100}
-            autoComplete="name"
-            placeholder="Your name"
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button className="btn btn-secondary" disabled={busy || !name.trim()}>
-            {busy ? "Saving…" : "Save"}
+  // One quiet line under the share button, so inviting stays the first thing on the page.
+  if (!editing) {
+    return (
+      <p className="name-line small">
+        <span className="grow">
+          Your cast will see “{fallback}”.{" "}
+          <button type="button" className="link-btn" onClick={() => setEditing(true)}>
+            Change it
           </button>
-        </div>
-        {error && (
-          <p className="field-error" role="alert">
-            {error}
-          </p>
-        )}
-      </form>
-      <button type="button" className="icon-btn name-prompt-close" onClick={dismiss} aria-label={`Keep “${fallback}”`} title="Dismiss">
-        <X size={18} />
+        </span>
+        <button type="button" className="icon-btn name-line-close" onClick={dismiss} aria-label={`Keep “${fallback}”`} title="Keep it">
+          <X size={16} />
+        </button>
+      </p>
+    );
+  }
+  return (
+    <form className="name-line name-line-form" onSubmit={save}>
+      <label htmlFor="name-prompt-input" className="sr-only">
+        Your name, as your cast will see it
+      </label>
+      <input
+        id="name-prompt-input"
+        className="input"
+        value={name}
+        maxLength={100}
+        autoComplete="name"
+        placeholder="Your name"
+        autoFocus
+        onChange={(e) => setName(e.target.value)}
+      />
+      <button className="btn btn-secondary" disabled={busy || !name.trim()}>
+        {busy ? "Saving…" : "Save"}
       </button>
-    </section>
+      <button type="button" className="btn btn-ghost" onClick={() => setEditing(false)} disabled={busy}>
+        Cancel
+      </button>
+      {error && (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      )}
+    </form>
   );
 }
 

@@ -104,7 +104,8 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 
 - Storage: everything under `productions/<id>/`: takes as uploaded, normalized FLACs and stream `.m4a`s, shared-line mixes, the uploaded script file and renders.
 - Rows: scripts (with their raw text), sections, characters, lines, takes, renders, take mixes, practice runs and part assignments.
-- Kept: the production row as an archived tombstone (title kept, `content_deleted_at` set), the actors (so their links answer 410 "This production has wrapped" instead of looking forged), notification records, and TTS clips, which are shared across productions by hash.
+- Cast details: a cast member's name, first name and phone are cleared unless they left an email (`POST /api/invite/contact`); details tied to an email are kept, and so is a director's own cast row.
+- Kept: the production row as an archived tombstone (title kept, `content_deleted_at` set), the actor rows (so their links answer 410 "This production has wrapped" instead of looking forged), notification records, and TTS clips, which are shared across productions by hash.
 
 Cast and join links return 410 `invite_expired` afterwards, and the production drops out of `GET /api/productions`. The job is idempotent: a failure leaves `content_deleted_at` unset and the next pass finishes it. A take upload, normalization, mix, render or script upload that finishes after the deletion sweeps the folder again and fails (a take or script upload with 410 `content_deleted`).
 
@@ -129,7 +130,7 @@ Invite tokens are derived, not stored: `token = base64url(actorId bytes) + "." +
 | GET | `/api/invite/lines` | | `{ sections: Section[], lines: ActorLine[] }` |
 | PUT | `/api/invite/lines/:lineId/take` | raw audio body (`audio/webm`, `audio/mp4`, `audio/ogg`, `audio/wav`; ≤ 8 MB), headers `X-Take-Id` (client UUID, idempotency key) and `X-Duration-Ms` | `{ take: Take, linesRecorded, linesTotal }`. A repeated `X-Take-Id` returns the same take. The new take becomes current; old takes are kept until the production's content is deleted. |
 | POST | `/api/invite/takes/:takeId/stt` | `{ transcript, accuracy, ops }` | `204` |
-| POST | `/api/invite/contact` | `{ email }` | `204`. Email used only for the run-through-ready email. |
+| POST | `/api/invite/contact` | `{ email }` | `204`. Email used only for the ready-to-listen-through email. |
 | GET | `/api/invite/runthrough` | | `RunThrough` with `myCharacterIds` set |
 | POST | `/api/invite/practice` | `{ mode: "my_part", results: { lineId, transcript, accuracy, ops }[] }` | `{ practice: { id, avgAccuracy, createdAt } }` |
 
@@ -325,7 +326,7 @@ The director's cast page shows the cast link, a read-only call sheet and a way t
 
 | Method | Path | Auth | Response |
 | --- | --- | --- | --- |
-| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, topRecorder: { name, others } \| null, mine: boolean }[] }`: every character with dialogue, biggest parts first. Changed 2026-10-20, see "Open parts". |
+| GET | `/api/productions/:id/call-sheet` | director (own production) | `{ characters: { id, name, lineCount, linesRecorded, topRecorder: { name, others } \| null, mine: boolean }[], lines: { total, recorded } }`: every character with dialogue, biggest parts first. `lines` counts the script's dialogue lines once each (the production's `progress`); a shared line is under each part that says it, so the parts add up to more. Changed 2026-10-20, see "Open parts". |
 
 - `POST /api/productions/:id/record-as` (the director's own cast member) was removed on 2026-10-20: the director records any part in its studio (`PUT /api/lines/:id/take`). Its old takes became director takes (migration `014_open_parts.sql`).
 

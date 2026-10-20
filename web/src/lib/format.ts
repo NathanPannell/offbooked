@@ -1,5 +1,5 @@
 export function plural(n: number, one: string, many = one + "s"): string {
-  return `${n} ${n === 1 ? one : many}`;
+  return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }
 
 /** "FIRST WITCH" → "First Witch". Names already in mixed case are left as written. */

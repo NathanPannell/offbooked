@@ -12,6 +12,7 @@ import { InAppBanner } from "../../components/InAppBanner";
 import { PartProgress } from "../../components/PartProgress";
 import { Loading } from "../../components/Loading";
 import { RecordDock } from "../../components/RecordDock";
+import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions, useStoredFlag } from "../../components/RecordOptions";
 import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
 import { claimFirstTakeHint } from "../../audio/micPrefs";
@@ -21,6 +22,7 @@ import { keepInView, recorderBand } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
 import { latestForLine } from "../../upload/queue";
+import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
 import { NameEditor } from "./NameEditor";
@@ -29,25 +31,7 @@ import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake } from ".
 import { Wrapped } from "./Wrapped";
 
 const ADVANCE_DELAY_MS = 700;
-const AUTO_ADVANCE_KEY = "offbooked.autoAdvance";
-const KEEP_RECORDING_KEY = "offbooked.keepRecording";
 const HEAR_PARTNERS_KEY = "offbooked.hearPartners";
-const FIRST_TAKE_HINT = "Moves to the next line when you finish. Change this in mic settings.";
-
-function useStoredFlag(key: string, fallback: boolean) {
-  const [value, setValue] = useState(() => {
-    const stored = readStorage(key);
-    return stored === null ? fallback : stored === "1";
-  });
-  const set = useCallback(
-    (next: boolean) => {
-      setValue(next);
-      writeStorage(key, next ? "1" : "0");
-    },
-    [key],
-  );
-  return [value, set] as const;
-}
 
 export interface Score {
   takeKey: string;
@@ -93,8 +77,16 @@ export function RecordSession({
   const stopRef = useRef<() => void>(() => {});
   /** The latest startRecording, for timers set up by an earlier render. */
   const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
-  const [autoAdvance, setAutoAdvance] = useStoredFlag(AUTO_ADVANCE_KEY, true);
-  const [keepRecording, setKeepRecording] = useStoredFlag(KEEP_RECORDING_KEY, false);
+  /** The move to the next line after a take; cleared on leaving, so it can't open the mic on a screen that's gone. */
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    },
+    [],
+  );
+  const options = useRecordOptions();
+  const { autoAdvance, keepRecording } = options;
   /** Hear scene partners: the cue plays before each take, and on a shared line the others play along. */
   const [hearPartners, setHearPartners] = useStoredFlag(HEAR_PARTNERS_KEY, false);
   /** A line whose cue is playing before its take starts. */
@@ -292,9 +284,16 @@ export function RecordSession({
   };
 
   /** Deletes the line's take, with Undo. The line goes back to the previous take, if any. */
-  const deleteTake = async (lineId: string, serverId: string) => {
+  const deleteTake = async (lineId: string) => {
     playback.pause();
     const local = localTakes.get(lineId);
+    // A take kept a moment ago may still be on its way up: delete it once it lands.
+    const l = actorLines.find((x) => x.line.id === lineId);
+    const serverId = local ? await savedTakeId(uploader, serverTakeIds.current, local.clientTakeId) : (l && ownTake(l)?.id) || null;
+    if (!serverId) {
+      toast("That take is still saving. Try again once it's saved.");
+      return;
+    }
     try {
       await api.deleteTake(serverId);
     } catch (err) {
@@ -389,7 +388,8 @@ export function RecordSession({
 
   const goToNext = (lineId: string, recordNext = false) => {
     const next = nextLine(lineId);
-    setTimeout(() => {
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null;
       if (next) {
         setCurrentId(next);
         scrollToLine(next);
@@ -437,12 +437,9 @@ export function RecordSession({
     l.line.voiceIds
       ? l.line.voiceIds.flatMap((id) => characterNames.get(id) ?? []).join(" & ") || (characterNames.get(l.line.characterId ?? "") ?? "")
       : (characterNames.get(l.line.characterId ?? "") ?? "");
-  // The take that Delete removes: the one just saved here, else the actor's own latest. Never someone else's.
-  const deletableTake = (l: ActorLine): string | null => {
-    const local = localTakes.get(l.line.id);
-    if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
-    return ownTake(l)?.id ?? null;
-  };
+  // Delete removes the take just recorded here (straight away, even while it uploads), else the
+  // actor's own latest. Never someone else's.
+  const canDelete = (l: ActorLine) => localTakes.has(l.line.id) || !!ownTake(l);
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
   const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
   const failed = unsaved.filter((i) => i.status === "failed");
@@ -587,7 +584,7 @@ export function RecordSession({
                       progress={playback.progress}
                       onPlay={playback.play}
                       onPlayTogether={playback.playTogether}
-                      onDelete={deletableTake(l) ? () => void deleteTake(l.line.id, deletableTake(l)!) : undefined}
+                      onDelete={canDelete(l) ? () => void deleteTake(l.line.id) : undefined}
                       onSelect={() => !recorder.recording && setCurrentId(l.line.id)}
                       onRerecord={() => void startRecording(l.line.id)}
                       onRetry={(id) => uploader.retry(id)}
@@ -618,16 +615,7 @@ export function RecordSession({
         onRetry={() => currentId && void startRecording(currentId)}
         onDeviceChange={recorder.setDevice}
         settings={
-          <>
-            <h3 className="eyebrow">While you record</h3>
-            <label className="checkbox">
-              <input type="checkbox" checked={autoAdvance} onChange={(e) => setAutoAdvance(e.target.checked)} />
-              Go to the next line when I finish
-            </label>
-            <label className={`checkbox${autoAdvance ? "" : " is-off"}`}>
-              <input type="checkbox" checked={keepRecording} disabled={!autoAdvance} onChange={(e) => setKeepRecording(e.target.checked)} />
-              Keep recording the next line
-            </label>
+          <RecordOptions options={options}>
             <label className="checkbox">
               <input type="checkbox" checked={hearPartners} onChange={(e) => setHearPartners(e.target.checked)} />
               <span>
@@ -635,7 +623,7 @@ export function RecordSession({
                 <span className="field-hint checkbox-hint">Plays the cue before each line, and the others on shared lines. Wear headphones.</span>
               </span>
             </label>
-          </>
+          </RecordOptions>
         }
       />
       <Dialog open={pickingUp} onClose={() => setPickingUp(false)} title="Pick up more lines">

@@ -89,10 +89,13 @@ function useMicTest() {
  */
 export function MicTest({
   startLabel = "Test my mic",
+  primary = false,
   onHeard,
   doneAction,
 }: {
   startLabel?: string;
+  /** The start button is the screen's one filled action (the first-run check, with the record button hidden). */
+  primary?: boolean;
   onHeard?: (heard: boolean) => void;
   doneAction?: ReactNode;
 }) {
@@ -108,7 +111,7 @@ export function MicTest({
   return (
     <div className="mic-test" aria-live="polite">
       {state.status === "idle" && (
-        <button type="button" className="btn btn-secondary" onClick={() => void run()}>
+        <button type="button" className={`btn ${primary ? "btn-primary" : "btn-secondary"}`} onClick={() => void run()}>
           <Mic size={18} aria-hidden="true" /> {startLabel}
         </button>
       )}
@@ -230,6 +233,7 @@ export function FirstMicCheck({ onDone }: { onDone: () => void }) {
       <div className="first-mic-check-row">
         <MicTest
           startLabel="Check my mic"
+          primary
           onHeard={setHeard}
           doneAction={
             <button type="button" className="btn btn-primary btn-sm" onClick={finish}>

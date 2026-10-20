@@ -4,6 +4,7 @@ import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, PracticeResult, RunThrough } from "../api/types";
 import { useWakeLock } from "../audio/wakeLock";
 import { CharacterName } from "../components/CharacterName";
+import { repeatsSceneTitle } from "../routes/director/lineText";
 import { Dialog } from "../components/Dialog";
 import { Loading } from "../components/Loading";
 import { MicHelp } from "../components/MicHelp";
@@ -327,7 +328,7 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
         <SectionNav
           sections={sceneChoices}
           always={hasRole}
-          placeholder={hasRole ? "Jump to your scenes…" : "Jump to scene…"}
+          placeholder={hasRole ? "Your scenes" : "Scenes"}
           label={(s) => sceneLabel(s.title, speakersBySection.get(s.id) ?? [], characterName)}
           onJump={(sectionId) => {
             const first = lines.find((l) => l.sectionId === sectionId && segmentByLine.has(l.id));
@@ -368,7 +369,8 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
             <h3 className="lyric-section-title">{section.title}</h3>
             <ol>
               {lines
-                .filter((l) => l.sectionId === section.id)
+                // A heading that only repeats the scene title above it isn't shown twice (unless it plays).
+                .filter((l) => l.sectionId === section.id && !(repeatsSceneTitle(l, section.title) && !segmentByLine.has(l.id)))
                 .map((line) => {
                   const segment = segmentByLine.get(line.id);
                   const isCurrent = segment !== undefined && segment === state.index;
@@ -485,11 +487,11 @@ export function RunThroughPlayer({ load, audio, onPracticeDone, initialMode = "f
             type="button"
             className="icon-btn score-btn"
             aria-pressed={practice.enabled}
-            aria-label="Score me: check my lines as I say them"
-            title={practice.enabled ? "Scoring your lines" : "Score me"}
+            title="Check my lines as I say them"
             onClick={() => (practice.enabled ? practice.disable() : void practice.enable())}
           >
-            <Mic size={20} />
+            <Mic size={20} aria-hidden="true" />
+            <span className="score-btn-label">Score me</span>
           </button>
         ) : (
           <span className="controls-spacer" aria-hidden="true" />
