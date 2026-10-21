@@ -1,11 +1,12 @@
-import { LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Navigate, Outlet, useLocation, useNavigate, useOutletContext } from "react-router";
+import { Link, Navigate, Outlet, useLocation, useOutletContext } from "react-router";
 import { errorMessage, session, UNAUTHORIZED_EVENT } from "../../api/client";
 import { auth } from "../../api/director";
 import type { User } from "../../api/types";
+import { Avatar } from "../../components/Avatar";
 import { Brand } from "../../components/Brand";
 import { Loading } from "../../components/Loading";
+import { castFacingName } from "../../lib/names";
 
 export interface DirectorContext {
   user: User;
@@ -18,7 +19,6 @@ export function useDirector() {
 
 export default function DirectorLayout() {
   const location = useLocation();
-  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -39,7 +39,7 @@ export default function DirectorLayout() {
     );
   }, [signedOut, attempt]);
 
-  if (signedOut) return <Navigate to={`/signin?next=${encodeURIComponent(location.pathname)}`} replace />;
+  if (signedOut) return <Navigate to={`/signin?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
   if (loadError && !user) {
     return (
       <main className="page page-narrow center-page">
@@ -53,23 +53,17 @@ export default function DirectorLayout() {
   }
   if (!user) return <Loading />;
 
-  const signOut = async () => {
-    await auth.logout().catch(() => {});
-    session.clear();
-    navigate("/", { replace: true });
-  };
-
+  const named = !!user.name?.trim();
   return (
     <div className="director">
       <header className="app-header">
         <div className="app-header-inner">
           <Brand to="/app" />
-          <div className="row" style={{ gap: 4 }}>
-            <span className="small muted header-user">{user.name || user.email}</span>
-            <button type="button" className="icon-btn" onClick={signOut} aria-label="Sign out" title="Sign out">
-              <LogOut size={20} />
-            </button>
-          </div>
+          {/* The dot asks for a name until there is one: it's what the cast calls you. */}
+          <Link className="account-btn" to="/app/account" aria-label={named ? "Your account" : "Your account: add your name"} title="Your account">
+            <Avatar name={castFacingName(user.name, user.email)} size={36} />
+            {!named && <span className="account-dot" aria-hidden="true" />}
+          </Link>
         </div>
       </header>
       <Outlet context={{ user, setUser } satisfies DirectorContext} />

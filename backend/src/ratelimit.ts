@@ -16,6 +16,11 @@ export const LIMITS = {
   takeUpload: { limit: 120, windowSeconds: 600 },
   scriptParse: { limit: 10, windowSeconds: 3600 },
   completionEmail: { limit: 60, windowSeconds: 86_400 },
+  verifySend: { limit: 5, windowSeconds: 3600 }, // verification emails per cast member
+  verifyTo: { limit: 5, windowSeconds: 86_400 }, // verification emails per address
+  verifyProduction: { limit: 20, windowSeconds: 3600 }, // verification emails per production
+  verifySendIp: { limit: 10, windowSeconds: 3600 }, // verification emails asked for per IP
+  verifyOpen: { limit: 30, windowSeconds: 900 }, // verification pages opened or confirmed per IP
 } satisfies Record<string, Limit>;
 
 // Fixed window counter. Returns false once the window's count passes the limit.

@@ -11,14 +11,14 @@ export const RENDER_SETTINGS = {
   loudnessI: -16,
 } as const;
 
-export type AudioSource = "actor" | "standin" | "tts" | "none";
+export type AudioSource = "actor" | "director" | "tts" | "none";
 
 export interface PlanLine {
   lineId: string;
   sectionId: string;
   text: string;
-  takeId: string | null; // the current take: the newest one, by the actor or a stand-in
-  takeSource?: "actor" | "standin" | null;
+  takeId: string | null; // the current take: the newest one, by a cast member or the director
+  takeSource?: "actor" | "director" | null;
   ttsHash?: string | null; // synthesized clip used when there is no take
 }
 
@@ -28,7 +28,7 @@ export interface TimingEntry {
   lineId: string;
   startMs: number;
   endMs: number;
-  recorded: boolean; // true for an actor or stand-in take
+  recorded: boolean; // true for a take (a cast member's or the director's)
   source: AudioSource;
 }
 
@@ -45,7 +45,7 @@ export function placeholderMs(text: string): number {
 }
 
 // Identifies a render's inputs: line order, section breaks, takes, TTS clips, placeholder lengths
-// and settings. A new take or stand-in, or any change to a synthesized line, changes it.
+// and settings. A new take, or any change to a synthesized line, changes it.
 export function contentHash(lines: PlanLine[]): string {
   const h = createHash("sha256").update(JSON.stringify(S));
   for (const l of lines) h.update(`\n${l.lineId}|${l.sectionId}|${l.takeId ?? (l.ttsHash ? `tts:${l.ttsHash}` : `-${placeholderMs(l.text)}`)}`);
@@ -89,7 +89,13 @@ export function planRender(
       silence(msToSamples(placeholderMs(line.text)));
       source = "none";
     }
-    timing.push({ lineId: line.lineId, startMs: samplesToMs(start), endMs: samplesToMs(cursor), recorded: source === "actor" || source === "standin", source });
+    timing.push({
+      lineId: line.lineId,
+      startMs: samplesToMs(start),
+      endMs: samplesToMs(cursor),
+      recorded: source === "actor" || source === "director",
+      source,
+    });
   });
   return { segments, timing, totalSamples: cursor };
 }

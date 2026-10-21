@@ -33,17 +33,9 @@ export interface LinePosition {
   timeMs: number;
   durationMs: number;
   segments?: SpokenSegment[];
-}
-
-export interface GapLine {
-  index: number;
-  lineId: string;
-}
-
-export interface GapListener {
-  start(line: GapLine, durationMs: number): void;
-  /** `completed` is false when the gap was cut short by a seek or a mode change. */
-  end(line: GapLine, completed: boolean): void;
+  /** A recorded take's word starts and speech stretches, when the server knows them. */
+  wordStartsMs?: number[];
+  speech?: { startMs: number; endMs: number }[];
 }
 
 /** Clips downloaded ahead of the current line, and lines the server is asked to make ahead. */
@@ -58,7 +50,7 @@ type Phase =
   | { kind: "pause"; index: number; next: number }; // the pause between two lines
 
 /** Recorded takes time the listener's pause; TTS and silent lines are timed from their words. */
-const recorded = (source: string | undefined) => source === "actor" || source === "standin";
+const recorded = (source: string | undefined) => source === "actor" || source === "director";
 
 /**
  * Plays the run-through line by line through one <audio> element: each line's clip, then a short
@@ -76,7 +68,6 @@ export class PlayerEngine {
   private switchedAt = 0;
   private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false };
   private listeners = new Set<() => void>();
-  gapListener: GapListener | null = null;
 
   constructor(
     private audio: HTMLAudioElement,
@@ -142,8 +133,12 @@ export class PlayerEngine {
     if (!phase) return null;
     const timeMs = this.audio.currentTime * 1000;
     switch (phase.kind) {
-      case "line":
-        return { index: phase.index, kind: "clip", timeMs, durationMs: phase.clip.durationMs, segments: phase.clip.url ? phase.clip.segments : undefined };
+      case "line": {
+        const { clip } = phase;
+        // A silent stand-in (no url) has none of its clip's timings.
+        const timings = clip.url ? { segments: clip.segments, wordStartsMs: clip.wordStartsMs, speech: clip.speech } : {};
+        return { index: phase.index, kind: "clip", timeMs, durationMs: clip.durationMs, ...timings };
+      }
       case "speak":
         return { index: phase.index, kind: "gap", timeMs, durationMs: phase.durationMs };
       case "wait":
@@ -227,14 +222,7 @@ export class PlayerEngine {
 
   private cancelGap() {
     const phase = this.phase;
-    if (phase?.kind === "speak") {
-      this.set({ gap: null });
-      this.gapListener?.end(this.gapLine(phase.index), false);
-    }
-  }
-
-  private gapLine(index: number) {
-    return { index, lineId: this.lines[index]?.lineId ?? "" };
+    if (phase?.kind === "speak") this.set({ gap: null });
   }
 
   /**
@@ -265,7 +253,6 @@ export class PlayerEngine {
     if (step.kind === "speak") {
       this.phase = step;
       this.set({ gap: { index, durationMs: step.durationMs, endsAt: performance.now() + step.durationMs, remainingMs: step.durationMs } });
-      this.gapListener?.start(this.gapLine(index), step.durationMs);
       this.playUrl(silenceUrl(step.durationMs));
       return;
     }
@@ -309,7 +296,6 @@ export class PlayerEngine {
     if (phase.kind === "wait") return;
     if (phase.kind === "speak") {
       this.set({ gap: null });
-      this.gapListener?.end(this.gapLine(phase.index), true);
       // The listener has had their turn; now their line plays ("pause"), or the play moves on ("skip").
       if (phase.then === "read") {
         this.playClip(phase.index, this.token, true);

@@ -42,9 +42,16 @@ export function requiredEmail(b: Body, key: string): string {
   return v;
 }
 
+// A real calendar date as YYYY-MM-DD: 2026-02-30 is refused, not rolled over into March.
+export function isIsoDate(v: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
 export function optionalDate(b: Body, key: string): string | null | undefined {
   const v = optionalString(b, key, 10);
-  if (v && (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`)))) throw badRequest(`${key} must be a date like 2026-11-20.`);
+  if (v && !isIsoDate(v)) throw badRequest(`${key} must be a date like 2026-11-20.`);
   return v;
 }
 

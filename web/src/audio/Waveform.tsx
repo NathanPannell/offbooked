@@ -1,22 +1,32 @@
 import { useEffect, useRef } from "react";
+import { drawLevel, traceBars } from "./micTest";
 
-const BAR = 3;
-const GAP = 2;
+/** A recorded clip's levels to draw whole, lit up to how far it has played (0 to 1). */
+export interface WaveTrace {
+  levels: number[];
+  progress: () => number;
+}
 
-/** Live scrolling level meter from the mic analyser, so the actor can see the mic is working. */
-export function Waveform({ analyser, active }: { analyser: AnalyserNode | null; active: boolean }) {
+/** Bar width and gap: wider bars on a tall meter (the mic check's). */
+const barSize = (height: number) => (height >= 56 ? { bar: 4, gap: 3 } : { bar: 3, gap: 2 });
+
+/**
+ * Live scrolling level meter from the mic analyser, so the actor can see the mic is working. With
+ * `trace` it draws a recorded clip instead, the part already played in full colour.
+ */
+export function Waveform({ analyser, active, trace, className }: { analyser: AnalyserNode | null; active: boolean; trace?: WaveTrace; className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !analyser || !active) return;
+    if (!canvas || (!trace && (!analyser || !active))) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const samples = new Uint8Array(analyser.fftSize);
+    const samples = analyser ? new Float32Array(analyser.fftSize) : null;
     const levels: number[] = [];
     let frame = 0;
 
-    const draw = () => {
+    const size = () => {
       const dpr = window.devicePixelRatio || 1;
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
@@ -25,28 +35,41 @@ export function Waveform({ analyser, active }: { analyser: AnalyserNode | null; 
         canvas.height = Math.round(height * dpr);
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      analyser.getByteTimeDomainData(samples);
-      let sum = 0;
-      for (const s of samples) sum += ((s - 128) / 128) ** 2;
-      // Perceptual-ish scaling so normal speech fills most of the height.
-      const level = Math.min(1, Math.sqrt(Math.sqrt(sum / samples.length)) * 1.6);
-      levels.push(level);
-      const maxBars = Math.ceil(width / (BAR + GAP));
-      while (levels.length > maxBars) levels.shift();
-
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = getComputedStyle(canvas).color;
-      const offset = width - levels.length * (BAR + GAP);
-      levels.forEach((l, i) => {
-        const h = Math.max(2, l * height);
-        ctx.fillRect(offset + i * (BAR + GAP), (height - h) / 2, BAR, h);
-      });
-      frame = requestAnimationFrame(draw);
+      return { width, height, ...barSize(height) };
     };
-    frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
-  }, [analyser, active]);
+    const bar = (x: number, level: number, width: number, height: number) => {
+      const h = Math.max(2, level * height);
+      ctx.fillRect(x, (height - h) / 2, width, h);
+    };
 
-  return <canvas ref={canvasRef} className="waveform" aria-hidden="true" />;
+    const drawLive = () => {
+      const { width, height, bar: w, gap } = size();
+      analyser!.getFloatTimeDomainData(samples!);
+      levels.push(drawLevel(samples!));
+      const maxBars = Math.ceil(width / (w + gap));
+      while (levels.length > maxBars) levels.shift();
+      const offset = width - levels.length * (w + gap);
+      levels.forEach((l, i) => bar(offset + i * (w + gap), l, w, height));
+      frame = requestAnimationFrame(drawLive);
+    };
+
+    const drawTrace = () => {
+      const { width, height, bar: w, gap } = size();
+      const bars = traceBars(trace!.levels, Math.max(1, Math.floor((width + gap) / (w + gap))));
+      const played = Math.max(0, Math.min(1, trace!.progress()));
+      bars.forEach((l, i) => {
+        ctx.globalAlpha = (i + 0.5) / bars.length <= played ? 1 : 0.28;
+        bar(i * (w + gap), l, w, height);
+      });
+      ctx.globalAlpha = 1;
+      if (played < 1) frame = requestAnimationFrame(drawTrace);
+    };
+
+    frame = requestAnimationFrame(trace ? drawTrace : drawLive);
+    return () => cancelAnimationFrame(frame);
+  }, [analyser, active, trace]);
+
+  return <canvas ref={canvasRef} className={`waveform${className ? ` ${className}` : ""}`} aria-hidden="true" />;
 }

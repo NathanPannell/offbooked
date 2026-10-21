@@ -7,17 +7,19 @@ export interface UploadItem {
   /** Client UUID, sent as X-Take-Id so a repeated upload returns the same take. */
   takeId: string;
   /**
-   * Who uploads it. "invite" (the default, and every take stored before stand-ins existed) uses the
-   * actor's invite token; "director" is a stand-in take sent with the director's session.
+   * Who uploads it. "invite" (the default, and every take stored before director takes existed) uses the
+   * actor's invite token; "director" is a director's take sent with their session.
    */
   kind?: TakeKind;
-  /** The invite token, or the production ID for a director stand-in take. Scopes the queue per screen. */
+  /** The invite token, or the production ID for a director's take. Scopes the queue per screen. */
   token: string;
   lineId: string;
-  /** A director's stand-in on a shared line: the character it voices. */
+  /** A director's take on a shared line: the character it voices. */
   characterId?: string | null;
   mime: string;
   durationMs: number;
+  /** When each spoken word starts, in ms of the recording, from the live take (sent as X-Word-Starts). */
+  wordStartsMs?: number[] | null;
   createdAt: number;
   status: UploadStatus;
   attempts: number;

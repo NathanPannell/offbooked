@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
+import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { mixClips } from "./ffmpeg.ts";
 import { NORMALIZE_VERSION, normalizedTake, type TakeAudioRow } from "./takeaudio.ts";
 
@@ -29,15 +30,20 @@ export const mixHash = (takeIds: string[]) =>
 export interface VoiceTake extends TakeAudioRow {
   lineId: string;
   characterId: string;
-  recordedBy: "actor" | "standin";
+  recordedBy: "actor" | "director";
+  // Word timing (taketiming.ts), served when this take plays alone.
+  speechMs: number[] | null;
+  trimStartMs: number | null;
+  wordStartsMs: number[] | null;
 }
 
 // Each shared line's current take per voice (newest take for that character: see voice_take in
 // migrations/011_shared_lines.sql), in voice order. Lines without voice takes are left out.
 export async function voiceTakes(sql: Sql, productionId: string, lineIds?: string[]): Promise<Map<string, VoiceTake[]>> {
   const rows = await sql<VoiceTake[]>`
-    select lv.line_id, lv.character_id, t.id, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.recorded_by
-    from line_voices lv join takes t on t.id = voice_take(lv.line_id, true, lv.character_id, false)
+    select lv.line_id, lv.character_id, t.id, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.recorded_by,
+      t.speech_ms, t.trim_start_ms, t.word_starts_ms
+    from line_voices lv join takes t on t.id = voice_take(lv.line_id, true, lv.character_id)
     where lv.production_id = ${productionId} and lv.shared ${lineIds ? sql`and lv.line_id = any(${lineIds}::uuid[])` : sql``}
     order by lv.seq, lv.ord`;
   const out = new Map<string, VoiceTake[]>();
@@ -85,6 +91,7 @@ async function make(ctx: Ctx, productionId: string, hash: string, takes: TakeAud
     const normalizedKey = `productions/${productionId}/mixes/${hash}.flac`;
     const streamKey = `productions/${productionId}/mixes/${hash}.m4a`;
     await Promise.all([ctx.storage.put(normalizedKey, await readFile(flac), "audio/flac"), ctx.storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
+    if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();
     await ctx.sql`
       insert into take_mixes (hash, production_id, normalized_key, stream_key, samples)
       values (${hash}, ${productionId}, ${normalizedKey}, ${streamKey}, ${samples})

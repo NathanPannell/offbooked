@@ -14,7 +14,7 @@ import { fileRoutes } from "./routes/files.ts";
 import { MAX_PDF_BYTES, productionRoutes } from "./routes/productions.ts";
 import { runthroughRoutes } from "./routes/runthrough.ts";
 import { scriptRoutes } from "./routes/script.ts";
-import { standinRoutes } from "./routes/standin.ts";
+import { studioRoutes } from "./routes/studio.ts";
 import { MAX_TAKE_BYTES } from "./takes.ts";
 
 const run = promisify(execFile);
@@ -74,7 +74,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
   app.register(cors, {
     origin: (origin, cb) => cb(null, !origin || allowed(origin)),
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type", "X-Take-Id", "X-Duration-Ms", "Range"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Take-Id", "X-Duration-Ms", "X-Take-Parts", "X-Take-Part", "X-Word-Starts", "Range"],
     exposedHeaders: ["Content-Range", "Accept-Ranges", "Content-Length"],
     maxAge: 600,
   });
@@ -86,6 +86,10 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     if (!String(raw).trim()) return done(null, {});
     jsonParser(req, raw as string, done);
   });
+  // HTML forms in the email pages (verify's Confirm button, one-click List-Unsubscribe).
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, raw, done) =>
+    done(null, Object.fromEntries(new URLSearchParams(raw as string))),
+  );
   app.addContentTypeParser(/^audio\//, { parseAs: "buffer", bodyLimit: MAX_TAKE_BYTES }, (_req, raw, done) => done(null, raw));
 
   // API responses depend on the Authorization header, not the URL, so browsers must never reuse them.
@@ -97,6 +101,11 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     }
   });
 
+  // Retention catch-up rides on real requests, never on a timer or a health check (retention.ts).
+  app.addHook("onRequest", async (req) => {
+    if (req.url.startsWith("/api/")) ctx.retention.touch();
+  });
+
   app.register(async (api) => {
     authRoutes(api, ctx);
     productionRoutes(api, ctx);
@@ -104,7 +113,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     castRoutes(api, ctx);
     joinRoutes(api, ctx);
     actorRoutes(api, ctx);
-    standinRoutes(api, ctx);
+    studioRoutes(api, ctx);
     runthroughRoutes(api, ctx);
     fileRoutes(api, ctx);
     emailRoutes(api, ctx);

@@ -166,7 +166,7 @@ describe("accuracy", () => {
     expect(verdict(scoreLine("Get thee to a nunnery, go, farewell.", "get the to a bakery go farewell"))).toBe("complete");
   });
 
-  it("calls a line partial when a real chunk is missing", () => {
+  it("calls a line incomplete (partial) when a real chunk is missing", () => {
     expect(verdict(take(ops(6, 0, 4)))).toBe("partial");
     expect(verdict(take(ops(1, 0, 9)))).toBe("partial");
     expect(verdict(scoreLine("To be, or not to be, that is the question.", "to be or not to be"))).toBe("partial");
@@ -187,7 +187,7 @@ describe("accuracy", () => {
     expect(verdict(scoreLine("Aye.", "I"))).toBe("complete");
     expect(verdict(scoreLine("Yes, my lord.", ""))).toBe("unattempted");
     expect(scoreLabel(scoreLine("Yes, my lord.", "yes my lord"))).toBe("Complete");
-    expect(scoreLabel(scoreLine("Yes, my lord.", "yes"))).toBe("Partial");
+    expect(scoreLabel(scoreLine("Yes, my lord.", "yes"))).toBe("Incomplete");
   });
 
   it("labels silent takes", () => {
@@ -205,7 +205,7 @@ describe("accuracy", () => {
     ];
     const counts = verdictCounts(results);
     expect(counts).toEqual({ complete: 2, partial: 1, unattempted: 0 });
-    expect(formatVerdictCounts(counts)).toBe("2 complete · 1 partial");
+    expect(formatVerdictCounts(counts)).toBe("2 complete · 1 incomplete");
     expect(formatVerdictCounts({ complete: 0, partial: 0, unattempted: 2 })).toBe("2 not attempted");
   });
 

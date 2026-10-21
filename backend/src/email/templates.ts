@@ -47,6 +47,16 @@ export function signInEmail(to: string, link: string): Email {
   });
 }
 
+export function verifyEmailEmail(to: string, p: { title: string; url: string }): Email {
+  return render(to, {
+    subject: "Confirm your email for Offbooked",
+    heading: "Confirm your email",
+    paragraphs: [`Tap the button and we'll email you when ${p.title} is ready to listen through.`],
+    button: { label: "Confirm my email", url: p.url },
+    footer: "If you didn't ask for this, you can ignore this email.",
+  });
+}
+
 export function actorDoneEmail(to: string, p: { actorName: string; lines: number; title: string; url: string }): Email {
   return render(to, {
     subject: `${p.actorName} finished all ${p.lines} lines`,
@@ -58,10 +68,10 @@ export function actorDoneEmail(to: string, p: { actorName: string; lines: number
 
 export function castCompleteEmail(to: string, p: { title: string; url: string }): Email {
   return render(to, {
-    subject: "Cast complete — run-through ready",
-    heading: "Cast complete — run-through ready",
-    paragraphs: [`Every cast line in ${p.title} is recorded, and the full run-through is ready to play.`],
-    button: { label: "Play the run-through", url: p.url },
+    subject: "Cast complete — ready to listen through",
+    heading: "Cast complete — ready to listen through",
+    paragraphs: [`Every cast line in ${p.title} is recorded, and the whole play is ready to listen through.`],
+    button: { label: "Listen through the play", url: p.url },
   });
 }
 
@@ -69,10 +79,10 @@ export function runthroughReadyEmail(to: string, p: { title: string; directorNam
   return render(
     to,
     {
-      subject: `The run-through for ${p.title} is ready`,
-      heading: `The run-through for ${p.title} is ready`,
+      subject: `${p.title} is ready to listen through`,
+      heading: `${p.title} is ready to listen through`,
       paragraphs: [`Everyone has recorded their lines. Listen to the whole show and follow along with your part.`],
-      button: { label: "Play the run-through", url: p.url },
+      button: { label: "Listen through the play", url: p.url },
       footer: `You're getting this one email because ${p.directorName} cast you in ${p.title} on Offbooked.`,
       footerLink: { label: "Unsubscribe", url: p.unsubscribeUrl },
     },

@@ -1,5 +1,5 @@
 import { API_URL, request, type Auth } from "./client";
-import { partHeaders, type TakePart, type TakePartResult, type TakeUploadResult } from "./actor";
+import { partHeaders, wordStartHeaders, type TakePart, type TakePartResult, type TakeUploadResult } from "./actor";
 import type { SplitSecond } from "../routes/director/lineJoin";
 import type {
   CallSheetCharacter,
@@ -47,18 +47,25 @@ const none: Auth = { kind: "none" };
 
 export const auth = {
   /** Returns a dev sign-in link when the backend logs emails instead of sending them. */
-  request: (email: string) => request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: { email } }),
+  request: (email: string, next?: string | null) =>
+    request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: next ? { email, next } : { email } }),
   verify: (token: string) => request<{ sessionToken: string; user: User }>("/auth/verify", { auth: none, json: { token } }),
   me: () => request<{ user: User }>("/me", { auth: director }),
   updateMe: (name: string) => request<{ user: User }>("/me", { method: "PATCH", auth: director, json: { name } }),
   logout: () => request<void>("/auth/logout", { method: "POST", auth: director }),
 };
 
+/** YYYY-MM-DD. A new production without a final date gets one a year out; an update can't clear it. */
+export interface PerformanceDates {
+  performanceStartsOn?: string | null;
+  performanceEndsOn?: string;
+}
+
 export const productions = {
   list: () => request<{ productions: Production[] }>("/productions", { auth: director }),
-  create: (input: { title: string; performanceDate?: string | null }) => request<{ production: Production }>("/productions", { auth: director, json: input }),
+  create: (input: { title: string } & PerformanceDates) => request<{ production: Production }>("/productions", { auth: director, json: input }),
   get: (id: string) => request<{ production: Production }>(`/productions/${id}`, { auth: director }),
-  update: (id: string, input: { title?: string; performanceDate?: string | null }) =>
+  update: (id: string, input: { title?: string } & PerformanceDates) =>
     request<{ production: Production }>(`/productions/${id}`, { method: "PATCH", auth: director, json: input }),
   archive: (id: string) => request<void>(`/productions/${id}/archive`, { method: "POST", auth: director }),
   runthrough: (id: string) => request<RunThrough>(`/productions/${id}/runthrough`, { auth: director }),
@@ -89,11 +96,6 @@ export const script = {
       body: form,
     });
   },
-  uploadText: (productionId: string, text: string) =>
-    request<{ scriptStatus: ScriptStatus }>(`/productions/${productionId}/script`, {
-      auth: director,
-      json: { text },
-    }),
   /** An edit clears the line's flag; undo sends `flagged` (with its code and reason) to put it back. */
   updateLine: (
     lineId: string,
@@ -137,18 +139,10 @@ export const script = {
     request<{ characters: Character[] }>(`/characters/${characterId}/merge`, { auth: director, json: { intoId } }),
 };
 
-/** The director's cast page: a read-only call sheet, and recording a part themselves. */
+/** The director's cast page: a read-only call sheet. The director records a part in its studio. */
 export const cast = {
-  callSheet: (productionId: string) => request<{ characters: CallSheetCharacter[] }>(`/productions/${productionId}/call-sheet`, { auth: director }),
-  /** Takes a part away from whoever has it; their takes stay and keep playing. */
-  unassign: (productionId: string, characterId: string) =>
-    request<void>(`/productions/${productionId}/characters/${characterId}/unassign`, { method: "POST", auth: director }),
-  /** Takes a free part (or one already theirs) for the director's own cast member; open `/i/<inviteToken>` to record. */
-  recordAs: (productionId: string, characterId: string) =>
-    request<{ inviteToken: string; inviteUrl: string }>(`/productions/${productionId}/record-as`, {
-      auth: director,
-      json: { characterId },
-    }),
+  callSheet: (productionId: string) =>
+    request<{ characters: CallSheetCharacter[]; lines: { total: number; recorded: number } }>(`/productions/${productionId}/call-sheet`, { auth: director }),
 };
 
 /** The one link the whole cast can use to pick their characters. */
@@ -157,7 +151,7 @@ export const joinLink = {
   reset: (productionId: string) => request<{ joinUrl: string }>(`/productions/${productionId}/join-link/reset`, { method: "POST", auth: director }),
 };
 
-/** Director stand-in recordings, scene by scene. */
+/** The director's own recordings, scene by scene or part by part (the studio). */
 export const standins = {
   /** Every line a character says (shared ones too), for their studio: the same items as a scene. */
   characterLines: (productionId: string, characterId: string) =>
@@ -172,7 +166,16 @@ export const standins = {
   /** Deletes any take in the director's production; `restoreTake` is its Undo. */
   deleteTake: (takeId: string) => request<void>(`/takes/${takeId}`, { method: "DELETE", auth: director }),
   restoreTake: (takeId: string) => request<void>(`/takes/${takeId}/restore`, { method: "POST", auth: director }),
-  putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal, characterId?: string | null, part?: TakePart) =>
+  putTake: (
+    lineId: string,
+    audio: Blob,
+    takeId: string,
+    durationMs: number,
+    signal?: AbortSignal,
+    characterId?: string | null,
+    part?: TakePart,
+    wordStartsMs?: readonly number[] | null,
+  ) =>
     request<TakeUploadResult | TakePartResult>(`/lines/${lineId}/take${characterId ? `?characterId=${characterId}` : ""}`, {
       method: "PUT",
       auth: director,
@@ -183,6 +186,7 @@ export const standins = {
         "X-Take-Id": takeId,
         "X-Duration-Ms": String(Math.round(durationMs)),
         ...partHeaders(part),
+        ...wordStartHeaders(wordStartsMs),
       },
     }),
 };

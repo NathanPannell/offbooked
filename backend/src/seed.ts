@@ -55,7 +55,8 @@ try {
 
 async function createDemo(ownerId: string): Promise<{ id: string }> {
   const [p] = await sql<{ id: string }[]>`
-    insert into productions (owner_id, title, performance_date) values (${ownerId}, ${SEED_TITLE}, current_date + 60) returning id`;
+    insert into productions (owner_id, title, performance_starts_on, performance_ends_on)
+    values (${ownerId}, ${SEED_TITLE}, current_date + 53, current_date + 60) returning id`;
   await startScriptParse(ctx, p!.id, { kind: "text", text: SEED_SCENE });
   await ctx.jobs.idle();
   const characters = new Map(
@@ -66,8 +67,9 @@ async function createDemo(ownerId: string): Promise<{ id: string }> {
     let lineIndex = 0;
     for (const member of CAST) {
       const [actor] = await sql<{ id: string }[]>`
-        insert into actors (production_id, name, email, first_name, opened_at, last_active_at)
-        values (${p!.id}, ${member.name}, ${member.email}, ${member.firstName}, ${member.firstName ? new Date() : null}, ${member.firstName ? new Date() : null})
+        insert into actors (production_id, name, email, email_verified_at, first_name, opened_at, last_active_at)
+        values (${p!.id}, ${member.name}, ${member.email}, ${member.email ? new Date() : null}, ${member.firstName},
+          ${member.firstName ? new Date() : null}, ${member.firstName ? new Date() : null})
         returning id`;
       const ids = member.characters.map((name) => characters.get(name)).filter((id): id is string => Boolean(id));
       for (const characterId of ids) await sql`insert into actor_characters (actor_id, character_id) values (${actor!.id}, ${characterId})`;

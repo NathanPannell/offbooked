@@ -230,8 +230,8 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     assert.equal(forced.json().render.status, "queued");
     await processDueRenders(t.ctx);
     const subjects = t.mailer.sent.map((m) => `${m.to}: ${m.subject}`);
-    assert.ok(subjects.includes("director@example.test: Cast complete — run-through ready"), subjects.join("\n"));
-    assert.ok(subjects.includes("jo@example.test: The run-through for Hamlet is ready"));
+    assert.ok(subjects.includes("director@example.test: Cast complete — ready to listen through"), subjects.join("\n"));
+    assert.ok(subjects.includes("jo@example.test: Hamlet is ready to listen through"));
     const actorEmail = t.mailer.sent.find((m) => m.to === "jo@example.test")!;
     assert.ok(actorEmail.text.includes(`${horatio.inviteUrl}/play`));
     assert.ok(actorEmail.headers?.["List-Unsubscribe"]);
@@ -245,6 +245,13 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
 
     const unsubscribe = new URL(/Unsubscribe: (\S+)/.exec(actorEmail.text)![1]!);
     assert.equal((await t.app.inject({ method: "GET", url: unsubscribe.pathname + unsubscribe.search })).statusCode, 200);
+    const oneClick = await t.app.inject({
+      method: "POST",
+      url: unsubscribe.pathname + unsubscribe.search,
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "List-Unsubscribe=One-Click",
+    });
+    assert.equal(oneClick.statusCode, 200, "the one-click List-Unsubscribe form post");
   });
 
   test("practice runs and contact email", async () => {
@@ -257,10 +264,14 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().practice.avgAccuracy, 0.75);
-    assert.equal(
-      (await t.app.inject({ method: "POST", url: "/api/invite/contact", headers: as(hamlet), payload: { email: "riz@example.test" } })).statusCode,
-      204,
-    );
+    const contact = await t.app.inject({ method: "POST", url: "/api/invite/contact", headers: as(hamlet), payload: { email: "riz@example.test" } });
+    assert.equal(contact.statusCode, 200);
+    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: as(hamlet) })).json().hasEmail, false, "not until it is confirmed");
+    const link = new URL(contact.json().devLink);
+    assert.equal((await t.app.inject({ method: "GET", url: link.pathname + link.search })).statusCode, 200);
+    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: as(hamlet) })).json().hasEmail, false, "opening the link isn't enough");
+    const confirm = await t.app.inject({ method: "POST", url: link.pathname, payload: Object.fromEntries(link.searchParams) });
+    assert.equal(confirm.statusCode, 200, "the Confirm button's fields work as JSON too");
     assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: as(hamlet) })).json().hasEmail, true);
   });
 
@@ -274,13 +285,15 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     );
     assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) })).statusCode, 200);
 
-    await t.app.inject({ method: "PATCH", url: `/api/productions/${pid}`, headers: bearer(director), payload: { performanceDate: "2020-01-01" } });
+    // The API refuses a final date this far back; an old production (or time passing) has one.
+    const [{ endsOn }] = await t.ctx.sql<{ endsOn: string }[]>`select performance_ends_on::text as ends_on from productions where id = ${pid}`;
+    await t.ctx.sql`update productions set performance_ends_on = '2020-01-01' where id = ${pid}`;
     assert.equal(
       (await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) })).statusCode,
       410,
-      "expired 14 days after the performance",
+      "expired when the content is due for deletion, 7 days after the final performance",
     );
-    await t.app.inject({ method: "PATCH", url: `/api/productions/${pid}`, headers: bearer(director), payload: { performanceDate: null } });
+    await t.ctx.sql`update productions set performance_ends_on = ${endsOn} where id = ${pid}`;
     await t.app.inject({ method: "POST", url: `/api/productions/${pid}/archive`, headers: bearer(director) });
     const archived = await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(reset.inviteUrl) });
     assert.equal(archived.statusCode, 410);

@@ -3,7 +3,7 @@ import { open, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { RENDER_SETTINGS } from "./plan.ts";
-import { detectSpeech } from "./trim.ts";
+import { analyzeSpeech, shiftStretches, type Stretch } from "./trim.ts";
 
 const exec = promisify(execFile);
 const RATE = RENDER_SETTINGS.sampleRate;
@@ -71,15 +71,16 @@ export async function flacSamples(file: string): Promise<number | null> {
 const measure = async (flac: string) => (await flacSamples(flac)) ?? (await probeSamples(flac));
 
 // The filters that cut a clip to its speech (see trim.ts), with a few ms of fade at each cut so it
-// never clicks. Empty when there is nothing to cut.
-async function trimFilters(input: string): Promise<{ filters: string; startMs: number }> {
-  const b = await detectSpeech(input);
-  if (!b || b.endMs - b.startMs < 50) return { filters: "", startMs: 0 };
+// never clicks. Empty when there is nothing to cut. `stretches` is where the voice is in the input.
+async function trimFilters(input: string): Promise<{ filters: string; startMs: number; stretches: Stretch[] }> {
+  const { bounds: b, stretches } = await analyzeSpeech(input);
+  if (!b || b.endMs - b.startMs < 50) return { filters: "", startMs: 0, stretches };
   const s = (ms: number) => (ms / 1000).toFixed(3);
   const length = b.endMs - b.startMs;
   return {
     filters: `asetpts=PTS-STARTPTS,atrim=start=${s(b.startMs)}:end=${s(b.endMs)},asetpts=PTS-STARTPTS,afade=t=in:d=0.005,afade=t=out:st=${s(Math.max(0, length - 10))}:d=0.01,`,
     startMs: b.startMs,
+    stretches,
   };
 }
 
@@ -130,13 +131,14 @@ export async function normalizeClip(input: string, output: string, m4a?: string,
 }
 
 // normalizeClip, also saying where the cut started in the input (ms), so timings measured on the
-// input (TTS word timings) can be moved onto the output.
+// input (TTS word timings, a take's word starts) can be moved onto the output, and where the voice
+// is in the output (`speech`, in ms of it: trim.ts's stretches, split on pauses).
 export async function normalizeClipCut(
   input: string,
   output: string,
   m4a?: string,
   opts: { clean?: boolean } = {},
-): Promise<{ samples: number; cutStartMs: number }> {
+): Promise<{ samples: number; cutStartMs: number; speech: Stretch[] }> {
   const run = async (pre: string) => {
     const filters = `${pre}${levelTo(await measureLoudness(input, pre))}`;
     return ffmpeg(
@@ -175,12 +177,14 @@ export async function normalizeClipCut(
   const cut = await trimFilters(input);
   await run(`${cut.filters}${clean}`);
   const samples = await measure(output);
+  const lengthMs = (n: number) => (n * 1000) / RATE;
   if (samples < RATE / 20) {
     // Nearly everything was below the silence threshold; keep the take untrimmed instead.
     await run(clean);
-    return { samples: await measure(output), cutStartMs: 0 };
+    const whole = await measure(output);
+    return { samples: whole, cutStartMs: 0, speech: shiftStretches(cut.stretches, 0, lengthMs(whole)) };
   }
-  return { samples, cutStartMs: cut.startMs };
+  return { samples, cutStartMs: cut.startMs, speech: shiftStretches(cut.stretches, cut.startMs, lengthMs(samples)) };
 }
 
 export function normalizeTake(input: string, output: string): Promise<number> {

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api/client";
-import { MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
+import { silenceUrl } from "../player/silence";
+import { playToEnd, type CueEnd, type CuePlay } from "./cue";
+import { rememberedMic, rememberMic } from "./micPrefs";
+import { micConstraints, MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
 import { useWakeLock } from "./wakeLock";
 
 /** Only a safety net for a take left running by mistake: real takes never get near it. */
@@ -12,7 +15,7 @@ export type MicStatus = "idle" | "requesting" | "ready";
 /**
  * One take at a time from a shared mic: asks for the mic on the first tap, keeps the screen awake
  * while recording, stops itself at the time limit. Used by the actor's recorder and the director's
- * stand-in recorder.
+ * recorder.
  */
 export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => void } = {}) {
   const micRef = useRef<MicSession | null>(null);
@@ -43,7 +46,7 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
   const start = useCallback(async (lineId: string): Promise<boolean> => {
     if (takeRef.current) return false;
     setMicError(null);
-    const mic = (micRef.current ??= new MicSession());
+    const mic = (micRef.current ??= new MicSession(micConstraints(rememberedMic())));
     if (!mic.isOpen) {
       setMicStatus("requesting");
       try {
@@ -76,6 +79,15 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     return { ...recorded, tooShort: recorded.durationMs < MIN_TAKE_MS || recorded.blob.size === 0 };
   }, []);
 
+  /** Remembers the mic picked in mic settings; the next take opens it. */
+  const setDevice = useCallback((deviceId: string | null) => {
+    rememberMic(deviceId);
+    if (takeRef.current) return;
+    micRef.current?.close();
+    micRef.current = null;
+    setMicStatus("idle");
+  }, []);
+
   return {
     recording,
     elapsed,
@@ -86,6 +98,7 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     capture: micRef.current?.capture ?? null,
     start,
     stop,
+    setDevice,
   };
 }
 
@@ -169,7 +182,10 @@ export function usePlayback(onError?: () => void) {
  */
 export function useAccompaniment() {
   const players = useRef<HTMLAudioElement[]>([]);
+  const cue = useRef<CuePlay | null>(null);
   const stop = useCallback(() => {
+    cue.current?.stop();
+    cue.current = null;
     for (const a of players.current) a.pause();
   }, []);
   useEffect(() => () => stop(), [stop]);
@@ -179,6 +195,7 @@ export function useAccompaniment() {
       while (players.current.length < urls.length) players.current.push(new Audio());
       urls.forEach((url, i) => {
         const a = players.current[i]!;
+        a.onended = a.onerror = a.onpause = a.ontimeupdate = null;
         a.src = url;
         a.currentTime = 0;
         void a.play().catch(() => {});
@@ -186,20 +203,32 @@ export function useAccompaniment() {
     },
     [stop],
   );
-  /** Plays one clip and resolves when it ends (or fails), e.g. a cue before recording. */
+  /**
+   * Call from the record tap, before anything is awaited: iOS only lets an element play later (a
+   * cue before the next take, when "Keep recording" moves on by itself) once it has played from a
+   * tap, so a moment of silence plays on it now.
+   */
+  const unlock = useCallback(() => {
+    const a = (players.current[0] ??= new Audio());
+    if (cue.current || !a.paused) return;
+    a.onended = a.onerror = a.onpause = a.ontimeupdate = null;
+    a.src = silenceUrl(50);
+    void a.play().catch(() => {});
+  }, []);
+  /**
+   * Plays one clip to its very end (a cue before recording), then resolves; see `playToEnd`. Only
+   * `stop()` cuts it short.
+   */
   const playThrough = useCallback(
-    (url: string) =>
-      new Promise<void>((resolve) => {
-        stop();
-        const a = (players.current[0] ??= new Audio());
-        a.src = url;
-        a.currentTime = 0;
-        a.onended = () => resolve();
-        a.onerror = () => resolve();
-        a.onpause = () => resolve();
-        void a.play().catch(() => resolve());
-      }),
+    async (url: string): Promise<CueEnd> => {
+      stop();
+      const play = playToEnd((players.current[0] ??= new Audio()), url);
+      cue.current = play;
+      const end = await play.done;
+      if (cue.current === play) cue.current = null;
+      return end;
+    },
     [stop],
   );
-  return { start, stop, playThrough };
+  return { start, stop, playThrough, unlock };
 }

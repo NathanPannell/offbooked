@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Headphones, Mic, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Mic, Users } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Brand } from "../../components/Brand";
 import { InAppBanner } from "../../components/InAppBanner";
@@ -17,7 +17,7 @@ interface Slide {
 }
 
 /**
- * A short, optional intro for someone opening an invite: three screens on how Offbooked works, with
+ * A short, optional intro for someone opening an invite: two screens on how Offbooked works, with
  * Skip always one tap away. Seen once per device; anyone who knows it skips straight to their part.
  */
 export function Onboarding({
@@ -41,34 +41,16 @@ export function Onboarding({
       icon: <Users size={30} strokeWidth={1.6} />,
       title: "Your cast, recorded from anywhere",
       body: (
-        <>
-          <p>
-            {directorName} is putting together a read-through of <em>{productionTitle}</em>. Everyone records their own lines on their phone, whenever suits
-            them.
-          </p>
-          <p>No app to install and no account. This link is all you need, so keep it handy.</p>
-        </>
+        <p>
+          {directorName} is putting together a read-through of <em>{productionTitle}</em>. Everyone records their lines, so you can practise with your actual
+          cast giving you your cues.
+        </p>
       ),
     },
     {
       icon: <Mic size={30} strokeWidth={1.6} />,
       title: "Read your lines, hands-free",
-      body: (
-        <>
-          <p>Pick your part, tap record and say your line. Offbooked hears when you've finished and moves on to the next one.</p>
-          <p>Listen back, redo or delete any take. Want to hear your cue first? Turn on Hear partners, with headphones in.</p>
-        </>
-      ),
-    },
-    {
-      icon: <Headphones size={30} strokeWidth={1.6} />,
-      title: "Hear the whole play come together",
-      body: (
-        <>
-          <p>Your takes join everyone else's in one run-through. Lines nobody has recorded yet play in a computer voice until someone does.</p>
-          <p>Practise your part against it any time, and pick up a free part if you have time for more.</p>
-        </>
-      ),
+      body: <p>Pick your part and read your lines. No pressing start and stop: Offbooked hears when you've finished each one and moves on.</p>,
     },
   ];
   const last = index === slides.length - 1;
@@ -150,13 +132,9 @@ export function Onboarding({
           <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => (last ? finish() : go(index + 1))}>
             {last ? finishLabel : "Next"} <ArrowRight size={18} aria-hidden="true" />
           </button>
-          {index > 0 ? (
+          {index > 0 && (
             <button type="button" className="btn btn-ghost" onClick={() => go(index - 1)}>
               <ArrowLeft size={18} aria-hidden="true" /> Back
-            </button>
-          ) : (
-            <button type="button" className="btn btn-ghost" onClick={finish}>
-              I've used Offbooked before
             </button>
           )}
         </div>

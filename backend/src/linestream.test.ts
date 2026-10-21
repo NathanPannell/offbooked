@@ -325,7 +325,7 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     assert.ok(Math.abs(all.json().lines[0].durationMs - (first.endMs - first.startMs)) <= 1);
   });
 
-  test("a take wins over TTS: actor and stand-in sources, normalized on demand", async () => {
+  test("a take wins over TTS: actor and director sources, normalized on demand", async () => {
     const own = dialogue().find((l) => l.characterId === hamletId)!;
     const partner = dialogue().find((l) => l.characterId !== hamletId)!;
     const put = (url: string, headers: Record<string, string>) =>
@@ -343,13 +343,13 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     assert.equal(mine.ready, true);
     assert.ok(Math.abs(mine.durationMs - 700) < 100, String(mine.durationMs));
     assert.match(mine.audioUrl, /normalized\/.*\.m4a/);
-    assert.equal(partnerRes.json().source, "standin");
+    assert.equal(partnerRes.json().source, "director");
     const [row] = await t.ctx.sql<{ normalizedKey: string; streamKey: string }[]>`
       select normalized_key, stream_key from takes where line_id = ${own.id} order by created_at desc limit 1`;
     assert.ok(row!.normalizedKey && row!.streamKey, "the render's normalized FLAC is cached with the .m4a");
     const sources = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json().sources;
     assert.equal(sources[own.id], "actor");
-    assert.equal(sources[partner.id], "standin");
+    assert.equal(sources[partner.id], "director");
   });
 });
 

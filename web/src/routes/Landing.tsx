@@ -10,11 +10,15 @@ const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce
 const FAQ: { q: string; a: string }[] = [
   {
     q: "Does the cast need an account?",
-    a: "No. Your cast opens one link, picks their character, types a first name and starts recording. Only the director signs in, with a link we email you. No passwords.",
+    a: "No. Your cast opens one link, picks their character, types a first name and starts recording. Only whoever sets up the production signs in, with a link we email you. No passwords.",
+  },
+  {
+    q: "Do I have to be the director?",
+    a: "No. Anyone with the script can set up a production: a director, a stage manager, or an actor who wants the whole cast running lines.",
   },
   {
     q: "What scripts work?",
-    a: "PDFs with real text in them, Word .docx files and plain text, up to 20 MB. You can also paste the script straight in. Scanned pages without a text layer don't work yet. We keep your line breaks and indentation, so verse and lyrics stay as written.",
+    a: "PDFs with real text in them and Word .docx files, up to 20 MB. Scanned pages without a text layer don't work yet. We keep your line breaks and indentation, so verse and lyrics stay as written.",
   },
   {
     q: "Is it free?",
@@ -22,7 +26,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Are the recordings private to my cast?",
-    a: "Yes. Nothing is public. Recordings only play through your production's own links, for your cast and you. Archive the production and every link stops working.",
+    a: "Yes. Nothing is public. Recordings only play through your production's own links, for your cast and you. Seven days after your final performance date, the script and every recording are deleted.",
   },
   {
     q: "Does it work on iPhone?",
@@ -32,8 +36,19 @@ const FAQ: { q: string; a: string }[] = [
 
 export function Landing() {
   const signedIn = !!session.get();
-  const startTo = signedIn ? "/app/new" : "/signin?next=%2Fapp%2Fnew";
+  // One call to action everywhere on the page, so the corner, the hero and the closing band agree.
+  const cta = signedIn ? { to: "/app", label: "Your productions" } : { to: "/signin", label: "Get off book together" };
   const demo = useRef<DemoHandle>(null);
+  // While the hero's button is on screen, the corner one waits (on a phone; see .is-waiting).
+  const heroCta = useRef<HTMLAnchorElement>(null);
+  const [heroCtaVisible, setHeroCtaVisible] = useState(true);
+  useEffect(() => {
+    const el = heroCta.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setHeroCtaVisible(!!entry?.isIntersecting));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const hearDemo = () => {
     document.getElementById("demo")?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center" });
@@ -44,8 +59,8 @@ export function Landing() {
     <div className="landing">
       <nav className="landing-nav" aria-label="Main">
         <Brand to="/" />
-        <Link className="btn btn-ghost btn-sm" to={signedIn ? "/app" : "/signin"}>
-          {signedIn ? "Your productions" : "Sign in"}
+        <Link className={`btn btn-primary${heroCtaVisible ? " is-waiting" : ""}`} to={cta.to}>
+          {cta.label} <ArrowRight size={16} aria-hidden="true" />
         </Link>
       </nav>
 
@@ -56,16 +71,13 @@ export function Landing() {
             Run lines with your <span className="marker">whole cast.</span> No rehearsal room required.
           </h1>
           <p className="hero-lede">
-            Upload the script, send one link, and everyone records their lines from their phone in a few minutes. Then the whole play comes back as one
-            run-through, with gaps where you speak.
+            Upload the script, send one link, and everyone records their lines from their phone in a few minutes. Then listen through the whole play, with gaps
+            where you speak.
           </p>
           <div className="hero-ctas">
-            <Link className="btn btn-primary btn-lg" to={startTo}>
-              Start a production <ArrowRight size={18} aria-hidden="true" />
+            <Link className="btn btn-primary btn-lg" to={cta.to} ref={heroCta}>
+              {cta.label} <ArrowRight size={18} aria-hidden="true" />
             </Link>
-            <button type="button" className="btn btn-secondary btn-lg" onClick={hearDemo}>
-              <Play size={17} fill="currentColor" aria-hidden="true" /> Hear a demo
-            </button>
           </div>
         </div>
         <HeroScene />
@@ -73,11 +85,16 @@ export function Landing() {
 
       <section className="landing-section demo-section" id="demo" aria-labelledby="demo-title">
         <div className="section-intro">
-          <p className="eyebrow">The run-through</p>
+          <p className="eyebrow">Listen through</p>
           <h2 id="demo-title" className="section-title">
             Press play. You're Hamlet.
           </h2>
           <p className="muted">This is what your cast hears: the scene, line by line, like lyrics. Switch to “My part” and it stops for your lines.</p>
+          <div>
+            <button type="button" className="btn btn-secondary" onClick={hearDemo}>
+              <Play size={17} fill="currentColor" aria-hidden="true" /> Hear a demo
+            </button>
+          </div>
         </div>
         <Demo ref={demo} />
       </section>
@@ -93,7 +110,7 @@ export function Landing() {
           <li className="act">
             <p className="act-label mono">Act I</p>
             <h3>Upload your script.</h3>
-            <p className="muted">PDF, Word or plain text. Offbooked finds every scene, character and line, and shows you the few it wasn't sure about.</p>
+            <p className="muted">A PDF or a Word file. Offbooked finds every scene, character and line.</p>
             <ActParse />
           </li>
           <li className="act">
@@ -105,7 +122,7 @@ export function Landing() {
           <li className="act">
             <p className="act-label mono">Act III</p>
             <h3>Hear the whole play.</h3>
-            <p className="muted">Every take is stitched into one run-through. Practise your part with gaps where you speak.</p>
+            <p className="muted">Every take joins one play to listen through. Practise your part with gaps where you speak.</p>
             <ActGap />
           </li>
         </ol>
@@ -126,14 +143,14 @@ export function Landing() {
             <p className="muted small">Upload the script and you can already hear the whole scene.</p>
           </li>
           <li className="loop-step">
-            <span className="tag tag-standin">stand-in</span>
+            <span className="tag tag-director">you</span>
             <h3>You read in for scene partners.</h3>
             <p className="muted small">Record any line yourself, scene by scene, and it replaces the robot.</p>
           </li>
           <li className="loop-step">
             <span className="tag tag-actor">Sam</span>
             <h3>Actors replace them as they record.</h3>
-            <p className="muted small">Each take drops into the run-through within seconds.</p>
+            <p className="muted small">Each take is ready to listen to within seconds.</p>
           </li>
           <li className="loop-step">
             <span className="tag tag-score">94% word-perfect</span>
@@ -187,9 +204,9 @@ export function Landing() {
         <h2 id="cta-title" className="display">
           Places, everyone.
         </h2>
-        <p>Add your script tonight, drop one link in the cast chat, and wake up to a run-through.</p>
-        <Link className="btn btn-primary btn-lg" to={startTo}>
-          Start a production <ArrowRight size={18} aria-hidden="true" />
+        <p>Add your script tonight, drop one link in the cast chat, and wake up to the whole play, ready to listen through.</p>
+        <Link className="btn btn-primary btn-lg" to={cta.to}>
+          {cta.label} <ArrowRight size={18} aria-hidden="true" />
         </Link>
       </section>
 
@@ -244,7 +261,7 @@ function HeroScene() {
         </div>
       </div>
       <div className="hero-lyrics raised">
-        <p className="mono hero-lyrics-label">Run-through</p>
+        <p className="mono hero-lyrics-label">Listen</p>
         {lyrics.map((l, i) => (
           <p key={i} className={`hero-lyric ${i === beat ? "is-current" : i < beat ? "is-past" : ""} ${l.you ? "is-you" : ""}`}>
             <span className="hero-lyric-who">
@@ -275,7 +292,7 @@ function ActParse() {
   );
 }
 
-/** Act II: the cast link, with parts claimed. */
+/** Act II: the cast link, with parts picked and recorded. */
 function ActCastLink() {
   return (
     <div className="act-ui" aria-hidden="true">
@@ -286,8 +303,8 @@ function ActCastLink() {
         </span>
       </div>
       <ul className="act-roles">
-        <li className="is-taken">
-          <strong>HAMLET</strong> <span>Taken by Sam</span>
+        <li>
+          <strong>HAMLET</strong> <span>Sam + 1</span>
         </li>
         <li className="is-picked">
           <strong>OPHELIA</strong> <span>58 lines</span>

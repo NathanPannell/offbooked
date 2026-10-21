@@ -1,5 +1,5 @@
 export function plural(n: number, one: string, many = one + "s"): string {
-  return `${n} ${n === 1 ? one : many}`;
+  return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }
 
 /** "FIRST WITCH" → "First Witch". Names already in mixed case are left as written. */
@@ -46,4 +46,9 @@ export function characterHue(key: string): number {
   let hash = 0;
   for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
   return hash % 360;
+}
+
+/** "12 June 2027" from a YYYY-MM-DD calendar date, with no time zone shift. */
+export function longDate(day: string, locale?: string): string {
+  return new Date(`${day}T12:00:00`).toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
 }

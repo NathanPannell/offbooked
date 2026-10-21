@@ -3,6 +3,7 @@ import type { Ctx } from "./context.ts";
 import { sha256 } from "./crypto.ts";
 import { HttpError, notFound, unauthorized } from "./errors.ts";
 import { inviteExpiresAt, parseInviteToken } from "./invite.ts";
+import { castFacingName } from "./names.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
 import { productionRows, type ProductionRow } from "./views.ts";
 
@@ -39,8 +40,9 @@ export async function ownedProduction(ctx: Ctx, user: Director, productionId: st
 }
 
 export interface ActorSession {
-  actor: { id: string; name: string; firstName: string | null; email: string | null; tokenVersion: number; createdAt: Date };
-  production: { id: string; title: string; performanceDate: string | null; directorName: string };
+  // `email` is the verified address only; `pendingEmail` is waiting for its verification link.
+  actor: { id: string; name: string; firstName: string | null; email: string | null; pendingEmail: string | null; tokenVersion: number; createdAt: Date };
+  production: { id: string; title: string; performanceEndsOn: string | null; directorName: string };
   characterIds: string[];
 }
 
@@ -50,38 +52,50 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
   const token = credential(req, "Invite");
   const parsed = token ? parseInviteToken(ctx.config.inviteSecret, token) : null;
   await enforce(ctx.sql, ctx.log, `invite-ip:${req.ip}`, LIMITS.inviteIp);
-  if (!parsed) throw unauthorized("This link isn't valid. Ask your director for a new one.");
+  if (!parsed) throw unauthorized("This link doesn't work. Ask your director for the cast link.");
   const [row] = await ctx.sql<
     {
       id: string;
       name: string;
       firstName: string | null;
       email: string | null;
+      pendingEmail: string | null;
       tokenVersion: number;
       createdAt: Date;
       productionId: string;
       title: string;
-      performanceDate: string | null;
+      performanceEndsOn: string | null;
       archivedAt: Date | null;
       directorName: string | null;
+      directorEmail: string;
     }[]
   >`
-    select a.id, a.name, a.first_name, a.email, a.token_version, a.created_at, p.id as production_id, p.title,
-      p.performance_date::text as performance_date, p.archived_at, u.name as director_name
+    select a.id, a.name, a.first_name, case when a.email_verified_at is not null then nullif(btrim(a.email), '') end as email,
+      a.pending_email, a.token_version, a.created_at, p.id as production_id, p.title,
+      p.performance_ends_on::text as performance_ends_on, p.archived_at, u.name as director_name,
+      u.email as director_email
     from actors a join productions p on p.id = a.production_id join users u on u.id = p.owner_id
     where a.id = ${parsed.actorId}`;
-  if (!row) throw unauthorized("This link isn't valid. Ask your director for a new one.");
-  const directorName = row.directorName || "Your director";
+  if (!row) throw unauthorized("This link doesn't work. Ask your director for the cast link.");
+  const directorName = castFacingName(row.directorName, row.directorEmail);
   const gone = (message: string) => new HttpError(410, "invite_expired", message, { directorName, productionTitle: row.title });
   if (row.archivedAt) throw gone("This production has wrapped, so this link no longer works.");
   if (parsed.tokenVersion !== row.tokenVersion) throw gone("This link was replaced with a new one. Ask your director for the latest link.");
-  if (inviteExpiresAt(row.performanceDate, row.createdAt) < new Date()) throw gone("This link has expired. Ask your director for a new one.");
+  if (inviteExpiresAt(row.performanceEndsOn, row.createdAt) < new Date()) throw gone("This link has expired. Ask your director for a new one.");
   await enforce(ctx.sql, ctx.log, `invite:${row.id}`, LIMITS.inviteActor);
   const chars = await ctx.sql<{ characterId: string }[]>`select character_id from actor_characters where actor_id = ${row.id}`;
   await ctx.sql`update actors set last_active_at = now() where id = ${row.id}`;
   return {
-    actor: { id: row.id, name: row.name, firstName: row.firstName, email: row.email, tokenVersion: row.tokenVersion, createdAt: row.createdAt },
-    production: { id: row.productionId, title: row.title, performanceDate: row.performanceDate, directorName },
+    actor: {
+      id: row.id,
+      name: row.name,
+      firstName: row.firstName,
+      email: row.email,
+      pendingEmail: row.pendingEmail,
+      tokenVersion: row.tokenVersion,
+      createdAt: row.createdAt,
+    },
+    production: { id: row.productionId, title: row.title, performanceEndsOn: row.performanceEndsOn, directorName },
     characterIds: chars.map((c) => c.characterId),
   };
 }

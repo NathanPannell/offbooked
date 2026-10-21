@@ -373,9 +373,11 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
         where production_id = ${from.productionId} and ${from.id}::uuid = any(voice_ids)`;
       await tx`update takes set character_id = ${into.id} where character_id = ${from.id}`;
       await tx`update characters set aliases = ${aliases} where id = ${into.id}`;
-      const [intoCast] = await tx`select 1 from actor_characters where character_id = ${into.id}`;
-      if (intoCast) await tx`delete from actor_characters where character_id = ${from.id}`;
-      else await tx`update actor_characters set character_id = ${into.id} where character_id = ${from.id}`;
+      // Whoever picked the merged part now has the one kept.
+      await tx`
+        insert into actor_characters (actor_id, character_id) select actor_id, ${into.id} from actor_characters where character_id = ${from.id}
+        on conflict do nothing`;
+      await tx`delete from actor_characters where character_id = ${from.id}`;
       await tx`delete from characters where id = ${from.id}`;
     });
     await afterCastChange(ctx, from.productionId);

@@ -64,19 +64,36 @@ export interface Take {
   durationMs: number;
   createdAt: string;
   stt: SttResult | null;
-  /** Who recorded it. Missing on older servers, where every take is the actor's. */
-  recordedBy?: "actor" | "standin";
+  /** Who recorded it: a cast member or the director, by first name. */
+  recordedBy: RecordedBy;
+  /** You recorded it (the invite's cast member, or the signed-in director). */
+  mine: boolean;
 }
 
-/** Where a line's audio comes from in the run-through: a cast take, a stand-in take, a synthetic voice, or nothing yet. */
-export type AudioSource = "actor" | "standin" | "tts" | "none";
+export interface RecordedBy {
+  kind: "actor" | "director";
+  name: string;
+}
+
+/** A part's label: whoever recorded most of its lines, and how many others recorded the rest. */
+export interface TopRecorder {
+  name: string;
+  others: number;
+}
+
+/** Where a line's audio comes from when listening: a cast member's take, the director's, a synthetic voice, or nothing yet. */
+export type AudioSource = "actor" | "director" | "tts" | "none";
 
 export type ScriptStatus = "none" | "parsing" | "ready" | "failed";
 
 export interface Production {
   id: string;
   title: string;
-  performanceDate: string | null;
+  /** First and final performance, YYYY-MM-DD. Every production has a final date. */
+  performanceStartsOn: string | null;
+  performanceEndsOn: string | null;
+  /** The day the script and recordings are deleted for good: the final performance + 7 days. */
+  contentDeletesOn: string | null;
   createdAt: string;
   archived: boolean;
   scriptStatus: ScriptStatus;
@@ -85,20 +102,16 @@ export interface Production {
 
 export type CastStatus = "not_opened" | "opened" | "in_progress" | "done";
 
-/** One speaking character on the director's call sheet. Progress counts the cast's own takes only. */
+/** One speaking character on the director's call sheet. Lines count as recorded whoever recorded them. */
 export interface CallSheetCharacter {
   id: string;
   name: string;
   lineCount: number;
   linesRecorded: number;
-  /** First name of whoever took the part, or null while it's free. */
-  takenBy: string | null;
-  /** The director took it to record themselves. */
+  /** Who recorded most of its lines ("Robin + 2"), or null before anyone has. */
+  topRecorder: TopRecorder | null;
+  /** The director has recorded some of its lines: one of "My roles". */
   mine: boolean;
-  /** How many of its lines it says with others. */
-  sharedLines?: number;
-  /** The cast member who took it. */
-  actorId?: string | null;
 }
 
 export interface CastMember {
@@ -158,6 +171,10 @@ export interface LineAudio {
   ready: boolean;
   /** A synthesized clip: when each printed line (and narrated [direction]) is said. Absent for takes. */
   segments?: SpokenSegment[];
+  /** A take: when each spoken word starts, in ms of the clip as served, one per spoken piece of `lineTokens(text)` in order. Absent when unknown. */
+  wordStartsMs?: number[];
+  /** A take: the stretches of the clip with speech in them, in ms of the clip as served. Absent for synthesized clips. */
+  speech?: { startMs: number; endMs: number }[];
 }
 
 /** One spoken stretch of a clip, in ms of the clip as served. `text` is what was said. */
@@ -211,7 +228,7 @@ export interface ScriptSource {
 
 export interface JoinInfo {
   production: { id: string; title: string; directorName: string };
-  characters: { id: string; name: string; lineCount: number; takenBy: string | null }[];
+  characters: PartCard[];
 }
 
 export interface SectionLine {
@@ -222,7 +239,7 @@ export interface SectionLine {
   cue: Cue | null;
   /** A shared line: who says it with the character in view, and their takes. */
   together?: Together[];
-  /** The voice a stand-in take is for, on a shared line in a character's studio. */
+  /** The voice a take is for, on a shared line in a character's studio. */
   voiceId?: string | null;
 }
 
@@ -232,7 +249,20 @@ export interface Invite {
   characters: { id: string; name: string }[];
   linesTotal: number;
   linesRecorded: number;
+  /** A verified email: the only kind that gets the ready-to-listen-through email. */
   hasEmail: boolean;
+  /** An address waiting for its verification link. */
+  pendingEmail: boolean;
+}
+
+/** Where a cast member's email stands, after asking for a verification link. */
+export interface EmailState {
+  hasEmail: boolean;
+  pendingEmail: boolean;
+  /** This request sent a verification email (false: nothing waiting, or that address is already verified). */
+  sent: boolean;
+  /** The verification link, when the server logs emails instead of sending them (local runs). */
+  devLink?: string;
 }
 
 export interface Cue {
@@ -248,7 +278,7 @@ export interface Together {
   characterId: string;
   characterName: string;
   audioUrl: string | null;
-  audioSource: "actor" | "standin" | "none";
+  audioSource: "actor" | "director" | "none";
 }
 
 export interface ActorLine {
@@ -260,21 +290,22 @@ export interface ActorLine {
   /** A shared line: the others who say it. Empty (or missing) for a line of one's own. */
   together?: Together[];
   /**
-   * What plays now when it isn't the actor's own take: a director's stand-in, or a take by whoever
-   * had the part before. Null when the actor has a take, or the line is still the computer voice.
+   * What plays now when it isn't the actor's own take: another cast member's or the director's. The
+   * line counts as recorded; the actor can record over it. Null when the actor has a take, or the
+   * line is still the computer voice.
    */
-  current?: { source: "actor" | "standin"; by: string | null; audioUrl: string } | null;
+  current?: { source: "actor" | "director"; by: string; recordedBy: RecordedBy; mine: false; audioUrl: string } | null;
 }
 
-/** A part nobody has, that an actor can pick up. */
-export interface FreePart {
+/** A part on the cast link, or one an actor can pick up. Parts aren't owned: anyone can pick any. */
+export interface PartCard {
   id: string;
   name: string;
   lineCount: number;
-  /** Lines no one from the cast has recorded yet. */
+  /** Lines with a take by anyone. */
+  linesRecorded: number;
+  /** Lines nobody has recorded yet (still the computer voice). */
   linesNeeded: number;
-}
-
-export interface PracticeResult extends SttResult {
-  lineId: string;
+  /** Who recorded most of its lines, or null before anyone has. */
+  topRecorder: TopRecorder | null;
 }

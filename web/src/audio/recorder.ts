@@ -47,6 +47,11 @@ export interface ActiveTake {
 
 type AudioContextCtor = typeof AudioContext;
 
+/** What every take asks the mic for, on the chosen device (null for the browser's default). */
+export function micConstraints(deviceId: string | null): MediaTrackConstraints {
+  return { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(deviceId ? { deviceId: { ideal: deviceId } } : {}) };
+}
+
 export class MicSession {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
@@ -55,7 +60,7 @@ export class MicSession {
   /** Live 16 kHz samples for word highlighting, where AudioWorklet is available. */
   capture: LiveCapture | null = null;
 
-  constructor(private readonly constraints: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }) {}
+  constructor(private readonly constraints: MediaTrackConstraints = micConstraints(null)) {}
 
   get isOpen(): boolean {
     return !!this.stream && this.stream.getAudioTracks().some((t) => t.readyState === "live");

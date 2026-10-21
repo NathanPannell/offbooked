@@ -3,48 +3,38 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
 import { errorMessage } from "../../api/client";
-import type { ActorLine, Invite, SttResult } from "../../api/types";
+import type { ActorLine, EmailState, Invite, SttResult } from "../../api/types";
+import { fetchOrGiveUp } from "../../audio/cue";
 import { useAccompaniment, usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
 import { Brand } from "../../components/Brand";
 import { CharacterName } from "../../components/CharacterName";
 import { Dialog } from "../../components/Dialog";
 import { InAppBanner } from "../../components/InAppBanner";
+import { PartProgress } from "../../components/PartProgress";
 import { Loading } from "../../components/Loading";
-import { ProgressBar } from "../../components/ProgressBar";
 import { RecordDock } from "../../components/RecordDock";
+import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions, useStoredFlag } from "../../components/RecordOptions";
 import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
+import { claimFirstTakeHint } from "../../audio/micPrefs";
 import { readStorage, writeStorage } from "../../lib/storage";
 import { useResource } from "../../lib/useResource";
-import { keepInView, recorderBand } from "../../player/follow";
+import { recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
+import { takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine } from "../../upload/queue";
+import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
-import { NameEditor } from "./NameEditor";
+import { CastProfile } from "./CastProfile";
 import { PickUpParts } from "./PickUpParts";
+import { useFollowWhileRecording } from "./recorderFollow";
+import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake } from "./recordedBy";
 import { Wrapped } from "./Wrapped";
 
 const ADVANCE_DELAY_MS = 700;
-const AUTO_ADVANCE_KEY = "offbooked.autoAdvance";
-const KEEP_RECORDING_KEY = "offbooked.keepRecording";
 const HEAR_PARTNERS_KEY = "offbooked.hearPartners";
-
-function useStoredFlag(key: string, fallback: boolean) {
-  const [value, setValue] = useState(() => {
-    const stored = readStorage(key);
-    return stored === null ? fallback : stored === "1";
-  });
-  const set = useCallback(
-    (next: boolean) => {
-      setValue(next);
-      writeStorage(key, next ? "1" : "0");
-    },
-    [key],
-  );
-  return [value, set] as const;
-}
 
 export interface Score {
   takeKey: string;
@@ -58,12 +48,15 @@ export function RecordSession({
   api,
   invite,
   onRenamed,
+  onEmailChanged,
   onPartsChanged,
 }: {
   token: string;
   api: ActorApi;
   invite: Invite;
   onRenamed: (actor: { name: string; firstName: string }) => void;
+  /** The actor asked for a verification link in their profile: where their email stands now. */
+  onEmailChanged: (state: { hasEmail: boolean; pendingEmail: boolean }) => void;
   /** The actor picked up more parts: their parts now. */
   onPartsChanged: (characters: { id: string; name: string }[]) => void;
 }) {
@@ -90,15 +83,36 @@ export function RecordSession({
   const stopRef = useRef<() => void>(() => {});
   /** The latest startRecording, for timers set up by an earlier render. */
   const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
-  const [autoAdvance, setAutoAdvance] = useStoredFlag(AUTO_ADVANCE_KEY, true);
-  const [keepRecording, setKeepRecording] = useStoredFlag(KEEP_RECORDING_KEY, false);
+  /** The move to the next line after a take; cleared on leaving, so it can't open the mic on a screen that's gone. */
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** False once the screen is gone, so a cue that finishes afterwards doesn't open the mic. */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    };
+  }, []);
+  const options = useRecordOptions();
+  const { autoAdvance, keepRecording } = options;
   /** Hear scene partners: the cue plays before each take, and on a shared line the others play along. */
   const [hearPartners, setHearPartners] = useStoredFlag(HEAR_PARTNERS_KEY, false);
   /** A line whose cue is playing before its take starts. */
   const [cueing, setCueing] = useState<string | null>(null);
+  /** Aborted by a tap on record while the cue is fetched or plays: start the take now. */
+  const skipCue = useRef<AbortController | null>(null);
+  /** Lines whose cue had no voice even when asked again: not asked again this visit. */
+  const cueMissing = useRef(new Set<string>());
+  /** What timing the take's words needs, filled by the live take. */
+  const timingRef = useRef<TakeTiming | null>(null);
   /** Client take ids deleted on this screen, so their upload no longer counts as the line's take. */
   const [deleted, setDeleted] = useState(new Set<string>());
   const [pickingUp, setPickingUp] = useState(false);
+  /** The profile dialog, opened by the initials or by the wrapped screen's email prompt. */
+  const [profileOpen, setProfileOpen] = useState(false);
+  /** The one hint on the device's first take, shown while it records. */
+  const [firstTakeHint, setFirstTakeHint] = useState(false);
 
   const recorder = useTakeRecorder({
     onLimit: () => {
@@ -116,11 +130,13 @@ export function RecordSession({
   const activePart = useMemo(() => {
     if (parts.length <= 1) return null;
     if (chosenPart && parts.some((p) => p.id === chosenPart)) return chosenPart;
-    return (parts.find((p) => allLines.some((l) => saysPart(l, p.id) && !lineDone(l))) ?? parts[0]!).id;
+    return (parts.find((p) => allLines.some((l) => saysPart(l, p.id) && !lineRecorded(l))) ?? parts[0]!).id;
   }, [parts, chosenPart, allLines]);
   const actorLines: ActorLine[] = useMemo(() => (activePart ? allLines.filter((l) => saysPart(l, activePart)) : allLines), [allLines, activePart]);
   /** Parts other than the one in view that still have lines needing a voice. */
-  const otherParts = parts.filter((p) => p.id !== activePart).map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineDone(l)).length }));
+  const otherParts = parts
+    .filter((p) => p.id !== activePart)
+    .map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineRecorded(l)).length }));
 
   const live = useLiveTake({
     recording: recorder.recording,
@@ -130,28 +146,34 @@ export function RecordSession({
     text: actorLines.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
     autoAdvance,
     onAdvance: (_lineId, mode) => void stopRecording({ recordNext: keepRecording && mode === "live" }),
+    timingRef,
   });
   const myItems = useMemo(() => items.filter((i) => i.token === token && (i.kind ?? "invite") === "invite"), [items, token]);
 
   const uploadFor = useCallback(
     (lineId: string) => {
+      // Once saved, the server's lines say whether the take is still there (it may have been deleted
+      // on an earlier visit), so only takes still on their way count from the queue.
       const item = latestForLine(myItems, token, lineId);
-      return item && !deleted.has(item.takeId) ? item : null;
+      return item && item.status !== "saved" && !deleted.has(item.takeId) ? item : null;
     },
     [myItems, token, deleted],
   );
-  // A line is done once it has the actor's own take, or a take by whoever had the part before
-  // (it keeps playing; the actor can record over it). A stand-in or the computer voice still needs them.
+  // A line is recorded once anyone has a take on it: this actor, someone else in the cast or a
+  // director. Someone else's keeps playing until the actor records their own.
   const isRecorded = useCallback(
     (lineId: string) => {
       const l = allLines.find((x) => x.line.id === lineId);
-      return !!l?.take || l?.current?.source === "actor" || !!uploadFor(lineId);
+      return (!!l && lineRecorded(l)) || !!uploadFor(lineId);
     },
     [allLines, uploadFor],
   );
+  /** The actor's own take is on the line: saved, or recorded on this screen. */
+  const hasOwn = useCallback((l: ActorLine) => !!ownTake(l) || localTakes.has(l.line.id) || !!uploadFor(l.line.id), [localTakes, uploadFor]);
   const recordedCount = actorLines.filter((l) => isRecorded(l.line.id)).length;
   const total = actorLines.length;
   const allRecorded = total > 0 && recordedCount === total;
+  const recordedSome = actorLines.some(hasOwn);
   const unsaved = myItems.filter((i) => i.status !== "saved");
 
   const scrollToLine = (lineId: string) => {
@@ -172,38 +194,24 @@ export function RecordSession({
   // Resume at the first unrecorded line.
   useEffect(() => {
     if (currentId || actorLines.length === 0) return;
-    const first = actorLines.find((l) => !lineDone(l)) ?? actorLines[0]!;
+    const first = actorLines.find((l) => !lineRecorded(l)) ?? actorLines.find((l) => !ownTake(l)) ?? actorLines[0]!;
     setCurrentId(first.line.id);
     if (first !== actorLines[0]) setTimeout(() => scrollToLine(first.line.id), 100);
-    if (actorLines.every(lineDone)) setView("wrapped");
+    // Someone who picked up lines others recorded lands here, to listen and record their own.
+    if (opensOnWrapped(actorLines)) setView("wrapped");
     setScores((s) => {
       const next = new Map(s);
-      for (const l of actorLines) if (l.take?.stt && !next.has(l.line.id)) next.set(l.line.id, { takeKey: l.take.id, result: l.take.stt });
+      for (const l of actorLines) {
+        const own = ownTake(l);
+        if (own?.stt && !next.has(l.line.id)) next.set(l.line.id, { takeKey: own.id, result: own.stt });
+      }
       return next;
     });
   }, [actorLines, currentId]);
 
   // Karaoke-style follow while a take records: the next word to say stays near the middle of the
-  // screen, with a few rows of what's coming below it. A scroll by hand pauses it for a moment.
-  const scrolledAt = useRef(0);
-  useEffect(() => {
-    const mark = () => (scrolledAt.current = performance.now());
-    window.addEventListener("touchmove", mark, { passive: true });
-    window.addEventListener("wheel", mark, { passive: true });
-    return () => {
-      window.removeEventListener("touchmove", mark);
-      window.removeEventListener("wheel", mark);
-    };
-  }, []);
-  const liveLine = live?.lineId;
-  const liveCursor = live?.mode === "live" ? live.cursor : null;
-  useEffect(() => {
-    if (!recorder.recording || !liveLine || liveCursor === null) return;
-    if (performance.now() - scrolledAt.current < 2500) return;
-    const card = cardRefs.current.get(liveLine);
-    const el = card?.querySelector(".lw-next") ?? [...(card?.querySelectorAll(".lw-lit") ?? [])].pop();
-    if (el) keepInView(el, null, recorderBand);
-  }, [recorder.recording, liveLine, liveCursor]);
+  // screen, between the pinned header and the dock, with a few rows of what's coming below it.
+  useFollowWhileRecording({ recordingLineId: recorder.recording?.lineId ?? null, live, cardRefs, band: () => recorderBand(null) });
 
   const postStt = useCallback(
     (clientTakeId: string, result: SttResult) => {
@@ -226,7 +234,7 @@ export function RecordSession({
         serverTakeIds.current.set(item.takeId, result.take.id);
         setLinesData((current) => ({
           sections: current?.sections ?? [],
-          lines: (current?.lines ?? []).map((l) => (l.line.id === item.lineId ? { ...l, take: result.take } : l)),
+          lines: (current?.lines ?? []).map((l) => (l.line.id === item.lineId ? { ...l, take: { ...result.take, mine: true }, current: null } : l)),
         }));
         void stt.start();
         const score = scoresRef.current.get(item.lineId);
@@ -248,34 +256,59 @@ export function RecordSession({
 
   useEffect(() => () => localTakesRef.current.forEach((t) => URL.revokeObjectURL(t.url)), []);
 
-  const nextUnrecorded = (afterId: string, justRecorded: string): string | null => {
-    const index = actorLines.findIndex((l) => l.line.id === afterId);
-    const ordered = [...actorLines.slice(index + 1), ...actorLines.slice(0, index + 1)];
-    return ordered.find((l) => l.line.id !== justRecorded && !isRecorded(l.line.id))?.line.id ?? null;
-  };
+  /** The next line to record: one nobody has recorded, else one someone else has. */
+  const nextLine = (justRecorded: string): string | null =>
+    nextToRecord(
+      actorLines.map((l) => ({ id: l.line.id, recorded: isRecorded(l.line.id), mine: hasOwn(l) })),
+      justRecorded,
+      new Set([justRecorded]),
+    );
 
   const startRecording = async (lineId: string) => {
     if (recorder.recording || cueing) return;
+    // Still inside the tap: lets the cue before a later take play when "Keep recording" moves on by itself.
+    accompaniment.unlock();
     playback.pause();
     setCurrentId(lineId);
     const item = actorLines.find((l) => l.line.id === lineId);
-    if (hearPartners && item?.cue?.audioUrl) {
-      // Hear the cue first, like on stage; a tap on record skips the rest of it.
+    if (hearPartners && item?.cue) {
+      // Hear the whole cue first, like on stage, and only then record; a tap on record skips the rest of it.
       setCueing(lineId);
+      const skip = new AbortController();
+      skipCue.current = skip;
       setAnnouncement(`Listening to ${item.cue.characterName}'s cue.`);
-      await accompaniment.playThrough(item.cue.audioUrl);
+      let url = item.cue.audioUrl;
+      if (!url && !cueMissing.current.has(lineId)) {
+        // Its voice was still being made when the lines loaded: ask again, for a few seconds at most
+        // (a tap records at once). Still nothing, and this line records without its cue from now on.
+        const fresh = await fetchOrGiveUp((signal) => api.lines(signal), { signal: skip.signal });
+        if (fresh) setLinesData(fresh);
+        url = fresh?.lines.find((l) => l.line.id === lineId)?.cue?.audioUrl ?? null;
+        if (!url && !skip.signal.aborted) cueMissing.current.add(lineId);
+      }
+      if (url && !skip.signal.aborted) await accompaniment.playThrough(url);
+      if (!alive.current) return;
+      if (skipCue.current === skip) skipCue.current = null;
       setCueing(null);
     }
     if (!(await recorder.start(lineId))) return;
+    if (autoAdvance && claimFirstTakeHint()) setFirstTakeHint(true);
     setAnnouncement("Recording. Say your line, then tap stop.");
     const others = (item?.together ?? []).flatMap((t) => (t.audioUrl ? [t.audioUrl] : []));
     if (hearPartners && others.length) accompaniment.start(others);
   };
 
   /** Deletes the line's take, with Undo. The line goes back to the previous take, if any. */
-  const deleteTake = async (lineId: string, serverId: string) => {
+  const deleteTake = async (lineId: string) => {
     playback.pause();
     const local = localTakes.get(lineId);
+    // A take kept a moment ago may still be on its way up: delete it once it lands.
+    const l = actorLines.find((x) => x.line.id === lineId);
+    const serverId = local ? await savedTakeId(uploader, serverTakeIds.current, local.clientTakeId) : (l && ownTake(l)?.id) || null;
+    if (!serverId) {
+      toast("That take is still saving. Try again once it's saved.");
+      return;
+    }
     try {
       await api.deleteTake(serverId);
     } catch (err) {
@@ -325,6 +358,7 @@ export function RecordSession({
   const stopRecording = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
     const lineId = recorder.recording?.lineId;
     accompaniment.stop();
+    setFirstTakeHint(false);
     const recorded = await recorder.stop();
     if (!recorded || !lineId) return;
     if (recorded.tooShort) {
@@ -334,8 +368,10 @@ export function RecordSession({
     }
     const url = URL.createObjectURL(recorded.blob);
     let clientTakeId: string;
+    // When each word started, from following the take as it recorded (null when nothing was heard).
+    const wordStartsMs = takeWordStarts(timingRef.current, lineId, recorded.durationMs);
     try {
-      clientTakeId = await uploader.add({ token, lineId, audio: recorded.blob, durationMs: recorded.durationMs });
+      clientTakeId = await uploader.add({ token, lineId, audio: recorded.blob, durationMs: recorded.durationMs, wordStartsMs });
     } catch {
       URL.revokeObjectURL(url);
       toast("Couldn't save that take on this device. Try again.");
@@ -368,11 +404,14 @@ export function RecordSession({
   stopRef.current = () => void stopRecording();
 
   const goToNext = (lineId: string, recordNext = false) => {
-    const next = nextUnrecorded(lineId, lineId);
-    setTimeout(() => {
+    const next = nextLine(lineId);
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null;
       if (next) {
         setCurrentId(next);
-        scrollToLine(next);
+        // The next line in the middle, with the take just kept (and its buttons) still in view.
+        const card = cardRefs.current.get(next);
+        if (card) revealAfterTake(cardRefs.current.get(lineId) ?? null, card);
         if (recordNext) void startRef.current(next);
       } else {
         setView("wrapped");
@@ -395,7 +434,7 @@ export function RecordSession({
     setLinesData(fresh);
     setView("lines");
     setCurrentId(null);
-    toast("Picked up. Your new lines are in the list.");
+    toast("Added. Your new lines are in the list.");
   };
 
   if (lines.loading) return <Loading />;
@@ -417,21 +456,34 @@ export function RecordSession({
     l.line.voiceIds
       ? l.line.voiceIds.flatMap((id) => characterNames.get(id) ?? []).join(" & ") || (characterNames.get(l.line.characterId ?? "") ?? "")
       : (characterNames.get(l.line.characterId ?? "") ?? "");
-  // The take that Delete removes: the one just saved here, else the actor's own latest.
-  const deletableTake = (l: ActorLine): string | null => {
-    const local = localTakes.get(l.line.id);
-    if (local) return serverTakeIds.current.get(local.clientTakeId) ?? null;
-    return l.take?.id ?? null;
-  };
+  // Delete removes the take just recorded here (straight away, even while it uploads), else the
+  // actor's own latest. Never someone else's.
+  const canDelete = (l: ActorLine) => localTakes.has(l.line.id) || !!ownTake(l);
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
-  const progressLabel = `${Math.min(recordedCount + (allRecorded ? 0 : 1), total)} of ${total}`;
+  const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
   const failed = unsaved.filter((i) => i.status === "failed");
+  const profile = (
+    <CastProfile
+      name={invite.actor.name}
+      hasEmail={invite.hasEmail}
+      pendingEmail={invite.pendingEmail}
+      open={profileOpen}
+      onOpenChange={setProfileOpen}
+      onRename={async (name) => onRenamed((await api.rename(name)).actor)}
+      onEmail={async (email?: string): Promise<EmailState> => {
+        const state = await api.contact(email);
+        onEmailChanged({ hasEmail: state.hasEmail, pendingEmail: state.pendingEmail });
+        return state;
+      }}
+    />
+  );
 
   if (view === "wrapped") {
     return (
       <div className="actor-shell">
         <header className="actor-header">
           <Brand to={`/i/${token}`} />
+          {profile}
         </header>
         <Wrapped
           token={token}
@@ -447,6 +499,7 @@ export function RecordSession({
           partId={activePart}
           otherParts={otherParts}
           onSwitchPart={switchPart}
+          onOpenProfile={() => setProfileOpen(true)}
           onReview={(lineId) => {
             setView("lines");
             setCurrentId(lineId);
@@ -462,31 +515,35 @@ export function RecordSession({
       <header className="record-header">
         <div className="record-header-row">
           <div className="grow">
-            <p className="record-title">
-              {invite.production.title}
-              <NameEditor name={invite.actor.name} onSave={async (name) => onRenamed((await api.rename(name)).actor)} />
-            </p>
-            <p className="record-progress" aria-live="polite">
-              {allRecorded ? (
-                `All ${total} recorded`
-              ) : (
+            <p className="record-title">{invite.production.title}</p>
+            <h1 className="record-part part-title">
+              {partName ? (
                 <>
-                  Line <span className="nums">{progressLabel}</span>
+                  Recording for <CharacterName name={partName} />
                 </>
+              ) : (
+                "Your lines"
               )}
-            </p>
+            </h1>
           </div>
           <SttChip state={sttState} onEnable={() => stt.enable()} />
-          <button type="button" className="icon-btn" onClick={() => setPickingUp(true)} aria-label="Pick up more lines" title="Pick up more lines">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => setPickingUp(true)}
+            aria-label="Record lines for another character"
+            title="Record lines for another character"
+          >
             <Plus size={22} />
           </button>
           {recordedCount > 0 && (
-            <Link className="icon-btn" to={`/i/${token}/play${activePart ? `?part=${activePart}` : ""}`} aria-label="Listen to the run-through">
+            <Link className="icon-btn" to={`/i/${token}/play${activePart ? `?part=${activePart}` : ""}`} aria-label="Listen through the play">
               <Headphones size={22} />
             </Link>
           )}
+          {profile}
         </div>
-        <ProgressBar value={recordedCount} max={total} label="Lines recorded" />
+        {total > 0 && <PartProgress total={total} recorded={recordedCount} label={partName ? `${partName}'s lines recorded` : "Lines recorded"} />}
         {activePart && (
           <div className="part-switch" role="group" aria-label="Part to record">
             {parts.map((p) => {
@@ -530,7 +587,10 @@ export function RecordSession({
         {total === 0 && (
           <section className="card stack empty-parts">
             <h2 className="display">No lines right now</h2>
-            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} intro="Your director has moved your part on. Pick up a free part to keep recording." />
+            <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} />
+            <Link className="btn btn-ghost" to={`/i/${token}/play`}>
+              <Headphones size={18} aria-hidden="true" /> Just listen through the play
+            </Link>
           </section>
         )}
         <SectionNav sections={sections} idPrefix="rec-section-" />
@@ -559,14 +619,15 @@ export function RecordSession({
                       recording={recorder.recording?.lineId === l.line.id}
                       localTake={localTakes.get(l.line.id) ?? null}
                       upload={uploadFor(l.line.id)}
+                      author={lineTake(l)?.author ?? null}
                       score={scores.get(l.line.id) ?? null}
                       playing={playback.playing}
                       liveCursor={live?.lineId === l.line.id && live.mode === "live" ? live.cursor : null}
-                      liveHint={live?.lineId === l.line.id ? liveHint(live.mode, autoAdvance, keepRecording) : undefined}
+                      liveHint={live?.lineId === l.line.id && !autoAdvance && live.mode === "live" ? "Tap stop when you're done." : undefined}
                       progress={playback.progress}
                       onPlay={playback.play}
                       onPlayTogether={playback.playTogether}
-                      onDelete={deletableTake(l) ? () => void deleteTake(l.line.id, deletableTake(l)!) : undefined}
+                      onDelete={canDelete(l) ? () => void deleteTake(l.line.id) : undefined}
                       onSelect={() => !recorder.recording && setCurrentId(l.line.id)}
                       onRerecord={() => void startRecording(l.line.id)}
                       onRetry={(id) => uploader.retry(id)}
@@ -577,7 +638,7 @@ export function RecordSession({
             </section>
           );
         })}
-        {allRecorded && (
+        {allRecorded && recordedSome && (
           <button type="button" className="btn btn-secondary btn-block" onClick={() => setView("wrapped")}>
             Done for now
           </button>
@@ -590,36 +651,32 @@ export function RecordSession({
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
-        hint={
-          cueing
-            ? "Listening to the cue… tap to start now."
-            : current && isRecorded(current.line.id)
-              ? "Recorded. Tap to record it again."
-              : autoAdvance
-                ? "Tap, then say your line."
-                : "Tap, say your line, tap to stop."
-        }
+        note={cueing ? "Listening to the cue… tap to start now." : recorder.recording && firstTakeHint ? FIRST_TAKE_HINT : undefined}
         disabled={!current}
         label={current ? `Record line ${actorLines.indexOf(current) + 1}` : "Record"}
-        onToggle={() => (cueing ? accompaniment.stop() : recorder.recording ? void stopRecording() : current && void startRecording(current.line.id))}
+        onToggle={() => {
+          if (cueing) {
+            skipCue.current?.abort();
+            accompaniment.stop();
+          } else if (recorder.recording) void stopRecording();
+          else if (current) void startRecording(current.line.id);
+        }}
         onRetry={() => currentId && void startRecording(currentId)}
-      >
-        <div className="dock-options">
-          <label className="checkbox dock-option">
-            <input type="checkbox" checked={autoAdvance} onChange={(e) => setAutoAdvance(e.target.checked)} />
-            Auto-advance
-          </label>
-          <label className={`checkbox dock-option${autoAdvance ? "" : " is-off"}`}>
-            <input type="checkbox" checked={keepRecording} disabled={!autoAdvance} onChange={(e) => setKeepRecording(e.target.checked)} />
-            Keep recording
-          </label>
-          <label className="checkbox dock-option" title="Plays the cue before each line, and the others' takes during shared lines. Wear headphones.">
-            <input type="checkbox" checked={hearPartners} onChange={(e) => setHearPartners(e.target.checked)} />
-            Hear partners
-          </label>
-        </div>
-      </RecordDock>
-      <Dialog open={pickingUp} onClose={() => setPickingUp(false)} title="Pick up more lines">
+        onDeviceChange={recorder.setDevice}
+        recordedBefore={allLines.some((l) => !!ownTake(l))}
+        settings={
+          <RecordOptions options={options}>
+            <label className="checkbox">
+              <input type="checkbox" checked={hearPartners} onChange={(e) => setHearPartners(e.target.checked)} />
+              <span>
+                Hear my scene partners
+                <span className="field-hint checkbox-hint">Plays the cue before each line, and the others on shared lines. Wear headphones.</span>
+              </span>
+            </label>
+          </RecordOptions>
+        }
+      />
+      <Dialog open={pickingUp} onClose={() => setPickingUp(false)} title="Record lines for another character">
         {pickingUp && <PickUpParts api={api} onPicked={(c) => void afterPickUp(c)} />}
       </Dialog>
       <p className="sr-only" aria-live="assertive">
@@ -627,12 +684,6 @@ export function RecordSession({
       </p>
     </div>
   );
-}
-
-function liveHint(mode: "live" | "energy", autoAdvance: boolean, keepRecording: boolean): string | undefined {
-  if (!autoAdvance) return mode === "live" ? "Tap stop when you're done." : undefined;
-  if (mode === "energy") return "Moves on after a pause.";
-  return keepRecording ? "Moves on and keeps recording when you finish." : "Moves on when you finish the line.";
 }
 
 function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>["state"]; onEnable: () => void }) {
@@ -659,9 +710,4 @@ function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>[
 /** Whether a line belongs to a part: its speaker, or one of a shared line's voices. */
 function saysPart(l: ActorLine, characterId: string): boolean {
   return l.line.characterId === characterId || (l.line.voiceIds ?? []).includes(characterId);
-}
-
-/** A line with the actor's own take, or an earlier cast member's that keeps playing. */
-function lineDone(l: ActorLine): boolean {
-  return !!l.take || l.current?.source === "actor";
 }

@@ -25,7 +25,7 @@ interface Timing {
   source: string;
 }
 
-describe("stand-ins and TTS", { skip: dbSkip }, () => {
+describe("the director's takes and TTS", { skip: dbSkip }, () => {
   let t: TestApp;
   let fake: FakeSynthesizer;
   let alice: string;
@@ -41,7 +41,7 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
   const dialogue = () => lines.filter((l) => l.kind === "dialogue");
   const put = (url: string, headers: Record<string, string>, takeId: string = randomUUID()) =>
     t.app.inject({ method: "PUT", url, headers: { ...headers, "content-type": "audio/wav", "x-take-id": takeId, "x-duration-ms": "700" }, payload: wav });
-  const standin = (lineId: string, token = alice, takeId?: string) => put(`/api/lines/${lineId}/take`, bearer(token), takeId);
+  const record = (lineId: string, token = alice, takeId?: string) => put(`/api/lines/${lineId}/take`, bearer(token), takeId);
   const actorTake = (who: { inviteUrl: string }, lineId: string) => put(`/api/invite/lines/${lineId}/take`, invite(who.inviteUrl));
   const get = (url: string, token = alice) => t.app.inject({ method: "GET", url, headers: bearer(token) });
   const runthrough = async (id = pid) => (await get(`/api/productions/${id}/runthrough`)).json();
@@ -118,31 +118,32 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     assert.equal(fake.calls.at(-1)!.text, "Something else entirely now.");
   });
 
-  test("a director can record stand-ins only for lines in their own productions", async () => {
+  test("a director can record any line in their own productions, and it counts", async () => {
     const line = linesOf("HAMLET")[0]!;
     const takeId = randomUUID();
-    const res = await standin(line.id, alice, takeId);
+    const res = await record(line.id, alice, takeId);
     assert.equal(res.statusCode, 200, res.body);
     const body = res.json();
     assert.equal(body.take.id, takeId);
-    assert.equal(body.take.recordedBy, "standin");
-    assert.deepEqual([body.linesRecorded, body.linesTotal], [0, dialogue().length], "stand-ins don't count as recorded");
-    assert.equal((await standin(line.id, alice, takeId)).json().take.id, takeId, "a repeated X-Take-Id returns the same take");
+    assert.deepEqual(body.take.recordedBy, { kind: "director", name: "Alice" });
+    assert.equal(body.take.mine, true);
+    assert.deepEqual([body.linesRecorded, body.linesTotal], [1, dialogue().length], "the director's take counts as recorded");
+    assert.equal((await record(line.id, alice, takeId)).json().take.id, takeId, "a repeated X-Take-Id returns the same take");
     const [{ n }] = await t.ctx.sql<{ n: number }[]>`select count(*)::int as n from takes where id = ${takeId}`;
     assert.equal(n, 1);
     const [queued] = await t.ctx.sql`select 1 from renders where production_id = ${pid} and status = 'queued'`;
-    assert.ok(queued, "a stand-in schedules the debounced render");
+    assert.ok(queued, "a take schedules the debounced render");
 
-    assert.equal((await standin(line.id, bob)).statusCode, 404, "another director's line");
-    assert.equal((await standin(line.id, bob, takeId)).statusCode, 404, "another director can't replay a take id either");
+    assert.equal((await record(line.id, bob)).statusCode, 404, "another director's line");
+    assert.equal((await record(line.id, bob, takeId)).statusCode, 404, "another director can't replay a take id either");
     const other = await productionWithScript(t, bob, "ANNA: Hello there.\nBEN: Hi.", "Bob's show");
     const bobLine = other.script.lines.find((l: Line) => l.kind === "dialogue")!;
-    assert.equal((await standin(bobLine.id, bob, takeId)).statusCode, 409, "a take id belongs to one recording");
-    assert.equal((await standin(bobLine.id, alice)).statusCode, 404);
-    assert.equal((await put(`/api/lines/${line.id}/take`, invite(hamlet.inviteUrl))).statusCode, 401, "actor tokens can't record stand-ins");
+    assert.equal((await record(bobLine.id, bob, takeId)).statusCode, 409, "a take id belongs to one recording");
+    assert.equal((await record(bobLine.id, alice)).statusCode, 404);
+    assert.equal((await put(`/api/lines/${line.id}/take`, invite(hamlet.inviteUrl))).statusCode, 401, "actor tokens can't use the director's endpoint");
     assert.equal((await put(`/api/lines/${line.id}/take`, {})).statusCode, 401);
     const direction = lines.find((l) => l.kind === "stage_direction")!;
-    assert.equal((await standin(direction.id)).statusCode, 404, "only dialogue has takes");
+    assert.equal((await record(direction.id)).statusCode, 404, "only dialogue has takes");
     const bad = await t.app.inject({
       method: "PUT",
       url: `/api/lines/${line.id}/take`,
@@ -152,9 +153,9 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     assert.equal(bad.statusCode, 415);
   });
 
-  test("progress, actor-done emails and cast completion count only the cast actor's takes", async () => {
+  test("progress, actor-done emails and cast completion count the director's takes", async () => {
     const mine = [...linesOf("HORATIO"), ...linesOf("MARCELLUS")];
-    for (const l of mine) assert.equal((await standin(l.id)).statusCode, 200);
+    for (const l of mine) assert.equal((await record(l.id)).statusCode, 200);
     await t.ctx.jobs.idle();
     const member = async () =>
       (await get(`/api/productions/${pid}/cast`)).json().cast.find((m: { id: string }) => m.id === horatio.id) as {
@@ -162,39 +163,31 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
         linesRecorded: number;
         linesTotal: number;
       };
-    assert.equal((await member()).linesRecorded, 0);
-    assert.equal((await member()).status, "not_opened");
-    assert.equal((await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded, 0);
-    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(horatio.inviteUrl) })).json().linesRecorded, 0);
-    assert.ok(!t.mailer.sent.some((m) => m.subject.includes("finished all")), "no actor-done email for stand-ins");
+    assert.deepEqual([(await member()).linesRecorded, (await member()).status], [mine.length, "done"]);
+    assert.equal((await get(`/api/productions/${pid}`)).json().production.progress.linesRecorded, mine.length + 1);
+    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: invite(horatio.inviteUrl) })).json().linesRecorded, mine.length);
+    assert.ok(!t.mailer.sent.some((m) => m.subject.startsWith("Jo finished")), "Jo hasn't recorded any of them yet");
 
-    // The actor records their own lines: their takes become current and count.
+    // The director's take isn't the actor's own: it plays now, and the actor can record over it.
     const own = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(horatio.inviteUrl) })).json().lines;
-    assert.ok(
-      own.every((l: { take: unknown }) => l.take === null),
-      "a stand-in isn't the actor's own take",
-    );
+    assert.ok(own.every((l: { take: unknown; current: unknown }) => l.take === null && l.current));
+    assert.deepEqual(own[0].current.recordedBy, { kind: "director", name: "Alice" });
     for (const l of mine) assert.equal((await actorTake(horatio, l.id)).statusCode, 200);
     await t.ctx.jobs.idle();
-    assert.deepEqual([(await member()).linesRecorded, (await member()).status], [mine.length, "done"]);
-    assert.ok(t.mailer.sent.some((m) => m.subject === `Jo finished all ${mine.length} lines`));
+    assert.equal(t.mailer.sent.filter((m) => m.subject === `Jo finished all ${mine.length} lines`).length, 1, "once Jo records, the email goes, once");
 
-    // Every cast line now has a take, but Hamlet's are stand-ins: no cast-complete email.
-    for (const l of linesOf("HAMLET")) await standin(l.id);
+    // Hamlet is still the computer voice for most lines: the cast isn't complete.
+    await render();
+    assert.ok(!t.mailer.sent.some((m) => m.subject.startsWith("Cast complete")));
+    // The director records the rest of Hamlet: every picked part is recorded, so the cast is complete.
+    for (const l of linesOf("HAMLET").slice(1)) await record(l.id);
     const rt = await render();
     const byLine = new Map(rt.timing.map((e) => [e.lineId, e]));
     assert.ok(mine.every((l) => byLine.get(l.id)!.source === "actor"));
-    assert.ok(
-      linesOf("HAMLET").every((l) => byLine.get(l.id)!.source === "standin" && byLine.get(l.id)!.recorded),
-      "stand-ins fill the run-through",
-    );
-    assert.ok(!t.mailer.sent.some((m) => m.subject.startsWith("Cast complete")), "Hamlet's lines are only stand-ins");
-
-    // A later stand-in is newest and plays, but the actor's progress stays.
-    await standin(mine[0]!.id);
-    assert.equal((await member()).linesRecorded, mine.length);
+    assert.ok(linesOf("HAMLET").every((l) => byLine.get(l.id)!.source === "director" && byLine.get(l.id)!.recorded));
+    assert.ok(t.mailer.sent.some((m) => m.subject.startsWith("Cast complete")));
     const progress = (await get(`/api/productions/${pid}`)).json().production.progress;
-    assert.deepEqual([progress.linesRecorded, progress.actorsDone], [mine.length, 1]);
+    assert.deepEqual([progress.linesRecorded, progress.actorsDone], [mine.length + linesOf("HAMLET").length, 2]);
   });
 
   test("section lines and actor cues carry their audio source", async () => {
@@ -208,15 +201,16 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
       b.lines.find((l) => l.line.id === lineId) as unknown as {
         characterName: string;
         audioSource: string;
-        take: { recordedBy: string } | null;
+        take: { recordedBy: { kind: string; name: string }; mine: boolean } | null;
         cue: { characterName: string; text: string; audioUrl: string | null; audioSource: string };
       };
     const first = row(body, linesOf("HAMLET")[0]!.id);
     assert.equal(first.characterName, "HAMLET");
-    assert.equal(first.audioSource, "standin");
-    assert.equal(first.take!.recordedBy, "standin");
+    assert.equal(first.audioSource, "director");
+    assert.deepEqual([first.take!.recordedBy, first.take!.mine], [{ kind: "director", name: "Alice" }, true]);
     assert.equal(first.cue.characterName, "KING");
-    assert.equal(row(body, linesOf("HORATIO")[1]!.id).audioSource, "actor");
+    const jo = row(body, linesOf("HORATIO")[1]!.id);
+    assert.deepEqual([jo.audioSource, jo.take!.recordedBy, jo.take!.mine], ["actor", { kind: "actor", name: "Jo" }, false]);
     assert.equal((await get(`/api/productions/${pid}/sections/${section}/lines`, bob)).statusCode, 404);
     assert.equal((await get(`/api/productions/${pid}/sections/${randomUUID()}/lines`)).statusCode, 404);
 
@@ -234,16 +228,16 @@ describe("stand-ins and TTS", { skip: dbSkip }, () => {
     assert.equal(audio.statusCode, 206);
     assert.equal(audio.headers["content-type"], "audio/mp4");
 
-    // Once the director stands in for the cue line, the cue plays that take.
+    // Once the director records the cue line, the cue plays that take.
     const cueLine = lines.find((l) => l.text === first.cue.text)!;
-    await standin(cueLine.id);
-    const withStandin = (await get(`/api/productions/${pid}/sections/${section}/lines`)).json();
-    assert.equal(row(withStandin, linesOf("HAMLET")[0]!.id).cue.audioSource, "standin");
+    await record(cueLine.id);
+    const withTake = (await get(`/api/productions/${pid}/sections/${section}/lines`)).json();
+    assert.equal(row(withTake, linesOf("HAMLET")[0]!.id).cue.audioSource, "director");
 
     const hamletLines = (await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(hamlet.inviteUrl) })).json().lines;
     const sources = new Set(hamletLines.map((l: { cue: { audioSource: string } | null }) => l.cue?.audioSource));
     assert.ok(
-      [...sources].every((s) => s === "actor" || s === "standin" || s === "tts"),
+      [...sources].every((s) => s === "actor" || s === "director" || s === "tts"),
       [...sources].join(),
     );
   });

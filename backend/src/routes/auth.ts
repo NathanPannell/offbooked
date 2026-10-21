@@ -5,19 +5,23 @@ import { randomToken, sha256 } from "../crypto.ts";
 import { HttpError, unauthorized } from "../errors.ts";
 import { signInEmail } from "../email/templates.ts";
 import { body, optionalString, requiredEmail, requiredString } from "../input.ts";
+import { safeNext } from "../names.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
 
 const LOGIN_TOKEN_MINUTES = 15;
 
 export function authRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post("/api/auth/request", async (req, reply) => {
-    const email = requiredEmail(body(req.body), "email");
+    const input = body(req.body);
+    const email = requiredEmail(input, "email");
+    // Where the link lands after signing in. Anything outside /app is dropped, never an error.
+    const next = safeNext(input.next);
     await enforce(ctx.sql, ctx.log, `signin-ip:${req.ip}`, LIMITS.signInIp);
     await enforce(ctx.sql, ctx.log, `signin-email:${email}`, LIMITS.signInEmail, "Too many sign-in links for this email. Wait a few minutes and try again.");
     const token = randomToken();
     await ctx.sql`insert into login_tokens (token_hash, email, expires_at)
                   values (${sha256(token)}, ${email}, now() + ${LOGIN_TOKEN_MINUTES} * interval '1 minute')`;
-    const link = `${ctx.config.appUrl}/auth/verify?token=${token}`;
+    const link = `${ctx.config.appUrl}/auth/verify?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ""}`;
     if (ctx.mailer.driver === "log") return reply.code(200).send({ devLink: link });
     try {
       await ctx.mailer.send(signInEmail(email, link));

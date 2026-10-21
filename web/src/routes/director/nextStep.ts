@@ -26,13 +26,13 @@ export function nextStep(p: Production): NextStep {
     case "failed":
       return { status: "The script didn't read", action: "Try the script again", tab: "script", step: 0, done: false };
   }
-  if (actorsTotal === 0) return { status: "Script ready", action: "Share the cast link", tab: "cast", step: 1, done: false };
   if (linesTotal > 0 && linesRecorded >= linesTotal) {
-    return { status: "Every line recorded", action: "Listen to the run-through", tab: "play", step: 2, done: true };
+    return { status: "Every line recorded", action: "Listen through the play", tab: "play", step: 2, done: true };
   }
+  if (actorsTotal === 0 && linesRecorded === 0) return { status: "Script ready", action: "Share the cast link", tab: "cast", step: 1, done: false };
   return {
     status: `${lines(Math.max(0, linesTotal - linesRecorded))} to go`,
-    action: linesRecorded > 0 ? "See who's recorded" : "Check who's joined",
+    action: "Open the cast",
     tab: "cast",
     step: 1,
     done: false,

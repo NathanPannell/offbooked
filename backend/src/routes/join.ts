@@ -1,10 +1,37 @@
 import type { FastifyInstance } from "fastify";
 import { ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
-import { HttpError, badRequest, conflict } from "../errors.ts";
-import { body, requiredString, uuidList } from "../input.ts";
+import type { Sql } from "../db.ts";
+import { HttpError, badRequest } from "../errors.ts";
+import { body, optionalString, requiredString, uuidList } from "../input.ts";
 import { inviteToken, inviteUrl, joinUrl, parseJoinToken } from "../invite.ts";
+import { castFacingName } from "../names.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
+import { topRecorders, type TopRecorder } from "../recorders.ts";
+
+export interface PartCard {
+  id: string;
+  name: string;
+  lineCount: number;
+  linesRecorded: number; // by anyone
+  linesNeeded: number; // lineCount - linesRecorded: still played by the computer voice
+  topRecorder: TopRecorder | null;
+}
+
+// Every part with lines (no groups), biggest first: the join page's cards and "pick up more lines".
+export async function partCards(sql: Sql, productionId: string): Promise<PartCard[]> {
+  const [rows, top] = await Promise.all([
+    sql<Omit<PartCard, "linesNeeded" | "topRecorder">[]>`
+      select c.id, c.name,
+        (select count(*)::int from line_voices lv where lv.character_id = c.id) as line_count,
+        (select count(*)::int from line_voices lv where lv.character_id = c.id
+          and voice_take(lv.line_id, lv.shared, lv.character_id) is not null) as lines_recorded
+      from characters c where c.production_id = ${productionId} and not c.is_group
+      order by line_count desc, lower(c.name)`,
+    topRecorders(sql, productionId),
+  ]);
+  return rows.filter((c) => c.lineCount > 0).map((c) => ({ ...c, linesNeeded: c.lineCount - c.linesRecorded, topRecorder: top.get(c.id) ?? null }));
+}
 
 interface JoinProduction {
   id: string;
@@ -12,11 +39,11 @@ interface JoinProduction {
   joinVersion: number;
   archivedAt: Date | null;
   scriptStatus: string;
-  directorName: string | null;
+  directorName: string;
 }
 
 // One link for the whole cast: open it, pick your characters, give a first name, start recording.
-// A character someone has claimed (or the director has cast) can't be claimed again.
+// Parts aren't owned: anyone can pick any part, even one others have picked or recorded.
 export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
   const { sql, config } = ctx;
 
@@ -25,11 +52,13 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     const parsed = parseJoinToken(config.inviteSecret, token);
     const invalid = () => new HttpError(404, "not_found", "This link isn't valid. Ask your director for the cast link.");
     if (!parsed) throw invalid();
-    const [p] = await sql<JoinProduction[]>`
-      select p.id, p.title, p.join_version, p.archived_at, p.script_status, u.name as director_name
+    const [row] = await sql<(Omit<JoinProduction, "directorName"> & { directorName: string | null; directorEmail: string })[]>`
+      select p.id, p.title, p.join_version, p.archived_at, p.script_status, u.name as director_name, u.email as director_email
       from productions p join users u on u.id = p.owner_id where p.id = ${parsed.productionId}`;
-    if (!p || p.joinVersion !== parsed.version) throw invalid();
-    const directorName = p.directorName || "Your director";
+    if (!row || row.joinVersion !== parsed.version) throw invalid();
+    const { directorEmail, ...rest } = row;
+    const directorName = castFacingName(row.directorName, directorEmail);
+    const p = { ...rest, directorName };
     if (p.archivedAt)
       throw new HttpError(410, "invite_expired", "This production has wrapped, so this link no longer works.", { directorName, productionTitle: p.title });
     if (p.scriptStatus !== "ready")
@@ -40,38 +69,27 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     return p;
   };
 
-  const characters = (productionId: string) =>
-    sql<{ id: string; name: string; lineCount: number; takenBy: string | null }[]>`
-      select c.id, c.name,
-        (select count(*)::int from line_voices lv where lv.character_id = c.id) as line_count,
-        (select coalesce(a.first_name, split_part(a.name, ' ', 1)) from actor_characters ac join actors a on a.id = ac.actor_id where ac.character_id = c.id limit 1) as taken_by
-      from characters c where c.production_id = ${productionId} and not c.is_group
-      order by line_count desc, lower(c.name)`;
-
   app.get("/api/join/:token", async (req) => {
     const p = await production((req.params as { token: string }).token, req.ip);
-    return {
-      production: { id: p.id, title: p.title, directorName: p.directorName || "Your director" },
-      characters: (await characters(p.id)).filter((c) => c.lineCount > 0),
-    };
+    return { production: { id: p.id, title: p.title, directorName: p.directorName }, characters: await partCards(sql, p.id) };
   });
 
   app.post("/api/join/:token/claim", async (req) => {
     const p = await production((req.params as { token: string }).token, req.ip);
     await enforce(sql, ctx.log, `join-claim-ip:${req.ip}`, { limit: 30, windowSeconds: 3600 });
     const b = body(req.body);
-    const firstName = requiredString(b, "firstName", 60);
-    const characterIds = uuidList(b, "characterIds", true)!;
-    if (!characterIds.length) throw badRequest("Pick at least one character.");
+    // `listen`: someone who only wants to listen through joins with no part and, if they like, no name.
+    const listen = b.listen === true;
+    const firstName = listen ? (optionalString(b, "firstName", 60) ?? "") : requiredString(b, "firstName", 60);
+    const characterIds = listen ? [] : uuidList(b, "characterIds", true)!;
+    if (!listen && !characterIds.length) throw badRequest("Pick at least one character.");
     const actorId = await sql.begin(async (tx) => {
-      const rows = await tx<{ id: string; taken: boolean }[]>`
-        select c.id, exists(select 1 from actor_characters ac where ac.character_id = c.id) as taken
-        from characters c where c.production_id = ${p.id} and not c.is_group and c.id = any(${characterIds}::uuid[]) for update`;
+      const rows = await tx`
+        select c.id from characters c where c.production_id = ${p.id} and not c.is_group and c.id = any(${characterIds}::uuid[])`;
       if (rows.length !== characterIds.length) throw badRequest("Some of those characters aren't in this production.");
-      if (rows.some((r) => r.taken)) throw conflict("character_taken", "Someone has just picked one of those characters. Choose again.");
       const [actor] = await tx<{ id: string }[]>`
         insert into actors (production_id, name, first_name, opened_at) values (${p.id}, ${firstName}, ${firstName}, now()) returning id`;
-      await tx`insert into actor_characters ${tx(characterIds.map((characterId) => ({ actorId: actor!.id, characterId })))}`;
+      if (characterIds.length) await tx`insert into actor_characters ${tx(characterIds.map((characterId) => ({ actorId: actor!.id, characterId })))}`;
       return actor!.id;
     });
     return { inviteToken: inviteToken(config.inviteSecret, actorId, 1), inviteUrl: inviteUrl(config.appUrl, config.inviteSecret, actorId, 1) };

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "react-router";
 import { actorApi } from "../../api/actor";
 import { ApiError, errorMessage } from "../../api/client";
@@ -23,10 +23,33 @@ export default function InvitePage() {
   // Load the speech model while they read the welcome and type a name.
   usePrewarmStt(!!invite.data);
 
+  // Coming back to the page (from the email's confirm page in another tab, say): one GET, so the
+  // profile and Wrapped's prompt show where the email stands. Not a poll.
+  const loaded = !!invite.data;
+  const setInvite = invite.setData;
+  useEffect(() => {
+    if (!loaded) return;
+    let last = 0;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < 2000) return;
+      last = Date.now();
+      api
+        .invite()
+        .then((fresh) => setInvite((cur) => (cur ? { ...cur, hasEmail: fresh.hasEmail, pendingEmail: fresh.pendingEmail } : fresh)))
+        .catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [loaded, api, setInvite]);
+
   if (invite.loading) return <Loading />;
-  if (invite.error instanceof ApiError && (invite.error.status === 410 || invite.error.status === 401 || invite.error.status === 404)) {
-    return <LinkGone body={invite.error.body} token={token} />;
-  }
+  if (invite.error instanceof ApiError && invite.error.status === 410) return <LinkGone body={invite.error.body} token={token} />;
+  // A token that doesn't check out: usually a link copied short or mistyped, never one that expired.
+  if (invite.error instanceof ApiError && (invite.error.status === 401 || invite.error.status === 404)) return <LinkBroken token={token} />;
   if (invite.error || !invite.data) {
     return (
       <main className="page page-narrow center-page">
@@ -67,6 +90,7 @@ export default function InvitePage() {
       api={api}
       invite={data}
       onRenamed={(actor) => invite.setData({ ...data, actor: { ...data.actor, name: actor.name, firstName: actor.firstName } })}
+      onEmailChanged={(email) => invite.setData((cur) => ({ ...(cur ?? data), ...email }))}
       onPartsChanged={(characters) => invite.setData({ ...data, characters })}
     />
   );
@@ -125,6 +149,24 @@ function Welcome({ invite, onStart }: { invite: Invite; onStart: (firstName: str
         <p className="small muted consent">Your recordings are shared with the cast and director of {invite.production.title}. No account needed.</p>
       </form>
       <span className="sr-only">You're playing {joinNames(roles)}.</span>
+    </main>
+  );
+}
+
+function LinkBroken({ token }: { token: string }) {
+  const joinToken = joinTokenForInvite(token);
+  return (
+    <main className="page page-narrow center-page">
+      <Brand to={null} />
+      <div className="raised message-card stack">
+        <h1 className="display">This link doesn't work</h1>
+        <p>It may be missing a few characters. Ask your director for the cast link, then pick your part.</p>
+        {joinToken && (
+          <a className="btn btn-primary" href={`/join/${joinToken}`} onClick={() => forgetJoin(joinToken)}>
+            Pick your part again
+          </a>
+        )}
+      </div>
     </main>
   );
 }

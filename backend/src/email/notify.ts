@@ -1,7 +1,9 @@
 import type { Ctx } from "../context.ts";
 import { hmac, safeEqual } from "../crypto.ts";
 import { inviteUrl } from "../invite.ts";
+import { castFacingName } from "../names.ts";
 import { consume, LIMITS } from "../ratelimit.ts";
+import { castRows } from "../views.ts";
 import type { Email } from "./mailer.ts";
 import { actorDoneEmail, castCompleteEmail, runthroughReadyEmail } from "./templates.ts";
 
@@ -53,20 +55,33 @@ async function productionInfo(ctx: Ctx, productionId: string): Promise<Productio
   return p;
 }
 
-export async function notifyActorDone(
-  ctx: Ctx,
-  productionId: string,
-  actor: { id: string; name: string; firstName: string | null; linesTotal: number },
-): Promise<void> {
+// After any take: tells the director about each cast member whose parts are now fully recorded and
+// who hasn't had the email yet. Lines count whoever recorded them, the director included, but only
+// someone who has recorded at least one of those lines themselves gets one: not a pick on a second
+// phone, nor someone whose part others recorded. The director's own cast member (from before parts
+// were open) never gets one.
+export async function notifyActorsDone(ctx: Ctx, productionId: string): Promise<void> {
+  const done = (await castRows(ctx.sql, { productionId })).filter((a) => a.linesTotal > 0 && a.linesRecorded >= a.linesTotal);
+  if (!done.length) return;
+  const skip = new Set(
+    (
+      await ctx.sql<{ id: string }[]>`
+        select a.id from actors a where a.id = any(${done.map((a) => a.id)}::uuid[])
+          and (a.director_user_id is not null
+               or exists (select 1 from notifications n where n.kind = 'actor_done' and n.actor_id = a.id)
+               or not exists (select 1 from takes t join line_voices lv on lv.line_id = t.line_id
+                              join actor_characters ac on ac.character_id = lv.character_id and ac.actor_id = a.id
+                              where t.actor_id = a.id and t.deleted_at is null))`
+    ).map((r) => r.id),
+  );
   const p = await productionInfo(ctx, productionId);
   if (!p) return;
-  // No "you finished your lines" email when the director recorded the part themselves.
-  const [own] = await ctx.sql`select 1 from actors where id = ${actor.id} and director_user_id is not null`;
-  if (own) return;
-  const name = actor.firstName || actor.name;
-  await sendOnce(ctx, { kind: "actor_done", productionId, actorId: actor.id, to: p.ownerEmail }, (to) =>
-    actorDoneEmail(to, { actorName: name, lines: actor.linesTotal, title: p.title, url: `${ctx.config.appUrl}/app/p/${productionId}` }),
-  );
+  for (const a of done) {
+    if (skip.has(a.id)) continue;
+    await sendOnce(ctx, { kind: "actor_done", productionId, actorId: a.id, to: p.ownerEmail }, (to) =>
+      actorDoneEmail(to, { actorName: a.firstName || a.name, lines: a.linesTotal, title: p.title, url: `${ctx.config.appUrl}/app/p/${productionId}` }),
+    );
+  }
 }
 
 export async function notifyCastComplete(ctx: Ctx, productionId: string): Promise<void> {
@@ -76,12 +91,13 @@ export async function notifyCastComplete(ctx: Ctx, productionId: string): Promis
     castCompleteEmail(to, { title: p.title, url: `${ctx.config.appUrl}/app/p/${productionId}` }),
   );
   const actors = await ctx.sql<{ id: string; email: string | null; tokenVersion: number }[]>`
-    select id, email, token_version from actors where production_id = ${productionId} and email is not null`;
+    select id, email, token_version from actors
+    where production_id = ${productionId} and email_verified_at is not null and coalesce(btrim(email), '') <> ''`;
   for (const a of actors) {
     await sendOnce(ctx, { kind: "runthrough_ready", productionId, actorId: a.id, to: a.email }, (to) =>
       runthroughReadyEmail(to, {
         title: p.title,
-        directorName: p.ownerName || "Your director",
+        directorName: castFacingName(p.ownerName, p.ownerEmail),
         url: `${inviteUrl(ctx.config.appUrl, ctx.config.inviteSecret, a.id, a.tokenVersion)}/play`,
         unsubscribeUrl: unsubscribeUrl(ctx, to),
       }),

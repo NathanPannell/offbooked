@@ -1,13 +1,16 @@
 import type { FastifyInstance } from "fastify";
 import { requireActor, type ActorSession } from "../auth.ts";
 import type { Ctx } from "../context.ts";
-import { notifyActorDone } from "../email/notify.ts";
-import { badRequest, conflict, notFound } from "../errors.ts";
-import { body, idOf, idParam, requiredEmail, requiredString, uuidList } from "../input.ts";
+import { notifyActorsDone } from "../email/notify.ts";
+import { badRequest, notFound } from "../errors.ts";
+import { requestVerification } from "../email/verify.ts";
+import { body, idOf, idParam, optionalEmail, requiredString, uuidList } from "../input.ts";
 import { cueViews, previousCue, saysLine, warmCues } from "../lineaudio.ts";
 import { scheduleRender } from "../render/queue.ts";
 import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
+import { takeRecorder, type RecordedBy } from "../recorders.ts";
 import { runThrough } from "../runthrough.ts";
+import { partCards } from "./join.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
 import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
 import { castRows, linesOf, lineView, sectionsOf, sectionView, takeColumns, takeView, voicesOf, type LineRow, type TakeRow } from "../views.ts";
@@ -63,6 +66,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
       linesTotal: c.linesTotal,
       linesRecorded: c.linesRecorded,
       hasEmail: Boolean(s.actor.email),
+      pendingEmail: Boolean(s.actor.pendingEmail),
     };
   });
 
@@ -74,26 +78,24 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     return { actor: { id: s.actor.id, name, firstName: name.split(/\s+/)[0]! } };
   });
 
-  // Parts the actor can pick up: every free part (nobody has it), with how many of its lines still
-  // play in the computer voice (or a stand-in) because no one from the cast has recorded them.
+  // Parts the actor can pick up: every part they haven't picked, whoever else has, with how many of
+  // its lines still play in the computer voice because nobody has recorded them, most needed first.
   app.get("/api/invite/parts", async (req) => {
     const s = await requireActor(ctx, req);
-    return { parts: await freeParts(ctx, s.production.id) };
+    const mine = new Set(s.characterIds);
+    const parts = (await partCards(sql, s.production.id)).filter((c) => !mine.has(c.id));
+    return { parts: parts.sort((a, b) => b.linesNeeded - a.linesNeeded || a.name.localeCompare(b.name)) };
   });
 
-  // Picks up more parts after the first ones. 409 when someone took one meanwhile.
+  // Picks up more parts after the first ones. Parts aren't owned, so this never conflicts.
   app.post("/api/invite/parts", async (req) => {
     const s = await requireActor(ctx, req);
     const characterIds = uuidList(body(req.body), "characterIds", true)!;
     if (!characterIds.length) throw badRequest("Pick at least one part.");
-    await sql.begin(async (tx) => {
-      const rows = await tx<{ id: string; taken: boolean }[]>`
-        select c.id, exists (select 1 from actor_characters ac where ac.character_id = c.id) as taken
-        from characters c where c.production_id = ${s.production.id} and not c.is_group and c.id = any(${characterIds}::uuid[]) for update`;
-      if (rows.length !== characterIds.length) throw badRequest("Some of those parts aren't in this production.");
-      if (rows.some((r) => r.taken)) throw conflict("character_taken", "Someone has just picked one of those parts. Choose again.");
-      await tx`insert into actor_characters ${tx(characterIds.map((characterId) => ({ actorId: s.actor.id, characterId })))}`;
-    });
+    const rows = await sql`
+      select c.id from characters c where c.production_id = ${s.production.id} and not c.is_group and c.id = any(${characterIds}::uuid[])`;
+    if (rows.length !== characterIds.length) throw badRequest("Some of those parts aren't in this production.");
+    await sql`insert into actor_characters ${sql(characterIds.map((characterId) => ({ actorId: s.actor.id, characterId })))} on conflict do nothing`;
     const characters = await sql<{ id: string; name: string }[]>`
       select c.id, c.name from actor_characters ac join characters c on c.id = ac.character_id
       where ac.actor_id = ${s.actor.id} order by lower(c.name)`;
@@ -108,12 +110,13 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   // Own lines only, each with the single previous line by someone else as its cue. `take` is the
-  // actor's own latest take. `current` is what plays now when that's someone else's take: a
-  // director's stand-in, or a take by whoever had the part before (the actor can record over it).
+  // actor's own latest take. `current` is what plays now when that's someone else's take (another
+  // cast member's or the director's): the line counts as recorded, and the actor can record over it.
   // A shared line lists the other people who say it in `together`, with their current takes, so
   // the actor can hear them while recording.
   app.get("/api/invite/lines", async (req) => {
     const s = await requireActor(ctx, req);
+    const viewer = { actorId: s.actor.id };
     const [lines, sections] = await Promise.all([linesOf(sql, s.production.id), sectionsOf(sql, s.production.id)]);
     const items = actorItems(lines, s.characterIds);
     const ids = items.map((it) => it.line.id);
@@ -148,7 +151,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
             sectionTitle: sectionTitles.get(line.sectionId) ?? "",
             cue: cues[i] ?? null,
             directions,
-            take: take ? await takeView(storage, take) : null,
+            take: take ? await takeView(storage, take, viewer) : null,
             current: take ? null : (current.get(line.id) ?? null),
             together: together.get(line.id) ?? [],
           };
@@ -179,10 +182,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     });
     if (!created) return result;
     await sql`update actors set last_active_at = now(), opened_at = coalesce(opened_at, now()) where id = ${s.actor.id}`;
-    if (result.linesTotal > 0 && result.linesRecorded === result.linesTotal) {
-      const actor = { id: s.actor.id, name: s.actor.name, firstName: s.actor.firstName, linesTotal: result.linesTotal };
-      ctx.jobs.run("notify actor done", () => notifyActorDone(ctx, s.production.id, actor));
-    }
+    ctx.jobs.run("notify actors done", () => notifyActorsDone(ctx, s.production.id));
     await scheduleRender(ctx, s.production.id);
     return result;
   });
@@ -217,11 +217,11 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     return reply.code(204).send();
   });
 
-  app.post("/api/invite/contact", async (req, reply) => {
+  // Sends a verification link to the address (or again to the one waiting, without `email`). Only a
+  // verified address gets the completion emails or keeps the cast member's details after the show.
+  app.post("/api/invite/contact", async (req) => {
     const s = await requireActor(ctx, req);
-    const email = requiredEmail(body(req.body), "email");
-    await sql`update actors set email = ${email} where id = ${s.actor.id}`;
-    return reply.code(204).send();
+    return requestVerification(ctx, s, optionalEmail(body(req.body), "email"), req.ip);
   });
 
   app.get("/api/invite/runthrough", async (req) => {
@@ -276,48 +276,48 @@ function actorItems(lines: LineRow[], characterIds: string[]) {
 }
 
 export interface CurrentTakeView {
-  source: "actor" | "standin";
-  by: string | null; // first name of the cast member who recorded it; null for a stand-in
+  source: "actor" | "director";
+  by: string; // the recorder's first name (same as recordedBy.name)
+  recordedBy: RecordedBy;
+  mine: false;
   audioUrl: string;
+}
+
+interface CurrentTakeRow {
+  lineId: string;
+  actorId: string | null;
+  recordedBy: "actor" | "director";
+  storageKey: string;
+  actorName: string | null;
+  userName: string | null;
+  userEmail: string | null;
 }
 
 // What plays now on each of the actor's lines (the voice's current take) when it's someone else's.
 async function currentTakes(ctx: Ctx, lineIds: string[], characterIds: string[], actorId: string): Promise<Map<string, CurrentTakeView>> {
   const out = new Map<string, CurrentTakeView>();
   if (!lineIds.length) return out;
-  const rows = await ctx.sql<{ lineId: string; actorId: string | null; recordedBy: "actor" | "standin"; storageKey: string; by: string | null }[]>`
-    select lv.line_id, t.actor_id, t.recorded_by, t.storage_key, coalesce(a.first_name, split_part(a.name, ' ', 1)) as by
-    from line_voices lv join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id, false)
+  const rows = await ctx.sql<CurrentTakeRow[]>`
+    select lv.line_id, t.actor_id, t.recorded_by, t.storage_key, coalesce(a.first_name, split_part(a.name, ' ', 1)) as actor_name,
+      u.name as user_name, u.email as user_email
+    from line_voices lv join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id)
       left join actors a on a.id = t.actor_id
+      left join users u on u.id = t.recorded_by_user_id
     where lv.line_id = any(${lineIds}::uuid[]) and lv.character_id = any(${characterIds}::uuid[])
     order by lv.line_id, t.created_at desc`;
   for (const r of rows) {
     if (out.has(r.lineId) || r.actorId === actorId) continue;
-    out.set(r.lineId, { source: r.recordedBy, by: r.recordedBy === "actor" ? r.by : null, audioUrl: await ctx.storage.signedUrl(r.storageKey) });
+    const recordedBy = takeRecorder(r);
+    out.set(r.lineId, { source: r.recordedBy, by: recordedBy.name, recordedBy, mine: false, audioUrl: await ctx.storage.signedUrl(r.storageKey) });
   }
   return out;
-}
-
-// Free parts (no group, nobody has it) with their line counts and how many lines no one from the
-// cast has recorded yet.
-export async function freeParts(ctx: Ctx, productionId: string) {
-  return ctx.sql<{ id: string; name: string; lineCount: number; linesNeeded: number }[]>`
-    select c.id, c.name,
-      (select count(*)::int from line_voices lv where lv.character_id = c.id) as line_count,
-      (select count(*)::int from line_voices lv where lv.character_id = c.id
-        and voice_take(lv.line_id, lv.shared, lv.character_id, true) is null) as lines_needed
-    from characters c
-    where c.production_id = ${productionId} and not c.is_group
-      and not exists (select 1 from actor_characters ac where ac.character_id = c.id)
-      and exists (select 1 from line_voices lv where lv.character_id = c.id)
-    order by lines_needed desc, lower(c.name)`;
 }
 
 export interface TogetherView {
   characterId: string;
   characterName: string;
-  audioUrl: string | null; // their current take (actor or stand-in), null until someone records it
-  audioSource: "actor" | "standin" | "none";
+  audioUrl: string | null; // their current take (a cast member's or the director's), null until someone records it
+  audioSource: "actor" | "director" | "none";
 }
 
 // For each shared line, the other voices (not `mine`) and their current takes.
@@ -325,10 +325,10 @@ export async function togetherViews(ctx: Ctx, productionId: string, lines: LineR
   const out = new Map<string, TogetherView[]>();
   const shared = lines.filter((l) => l.voiceIds);
   if (!shared.length) return out;
-  const rows = await ctx.sql<{ lineId: string; characterId: string; name: string; storageKey: string | null; recordedBy: "actor" | "standin" | null }[]>`
+  const rows = await ctx.sql<{ lineId: string; characterId: string; name: string; storageKey: string | null; recordedBy: "actor" | "director" | null }[]>`
     select lv.line_id, lv.character_id, c.name, t.storage_key, t.recorded_by
     from line_voices lv join characters c on c.id = lv.character_id
-      left join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id, false)
+      left join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id)
     where lv.production_id = ${productionId} and lv.line_id = any(${shared.map((l) => l.id)}::uuid[])
     order by lv.line_id, lv.ord`;
   for (const line of shared) {

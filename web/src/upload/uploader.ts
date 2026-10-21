@@ -8,13 +8,15 @@ import { openTakeStore, type TakeStore } from "./store";
 export interface NewTake {
   /** Defaults to "invite". */
   kind?: TakeKind;
-  /** The invite token, or the production ID for a director stand-in take. */
+  /** The invite token, or the production ID for a director's take. */
   token: string;
   lineId: string;
-  /** A director's stand-in on a shared line: the character it voices. */
+  /** A director's take on a shared line: the character it voices. */
   characterId?: string | null;
   audio: Blob;
   durationMs: number;
+  /** When each spoken word starts, in ms of the recording (from `takeWordStarts`), if the live take heard them. */
+  wordStartsMs?: number[] | null;
 }
 
 /** A take bigger than this goes up in parts (the server takes up to 8 MB a request). */
@@ -105,6 +107,7 @@ export class Uploader {
       characterId: take.characterId ?? null,
       mime: take.audio.type,
       durationMs: take.durationMs,
+      wordStartsMs: take.wordStartsMs ?? null,
       createdAt: Date.now(),
       status: "queued",
       attempts: 0,
@@ -162,8 +165,8 @@ export class Uploader {
       const blob = new Blob([audio], { type: item.mime });
       const send = (body: Blob, part?: TakePart) =>
         item.kind === "director"
-          ? standins.putTake(item.lineId, body, item.takeId, item.durationMs, undefined, item.characterId, part)
-          : actorApi(item.token).putTake(item.lineId, body, item.takeId, item.durationMs, undefined, part);
+          ? standins.putTake(item.lineId, body, item.takeId, item.durationMs, undefined, item.characterId, part, item.wordStartsMs)
+          : actorApi(item.token).putTake(item.lineId, body, item.takeId, item.durationMs, undefined, part, item.wordStartsMs);
       const result = await sendInParts(blob, send);
       const saved = this.apply(item.takeId, { type: "succeeded" });
       if (saved) this.savedListeners.forEach((l) => l(saved, result));
@@ -189,6 +192,32 @@ export class Uploader {
     this.listeners.clear();
     this.savedListeners.clear();
   }
+}
+
+/**
+ * The server's id for a take recorded on this screen: straight away once it has landed, else when
+ * its upload does (null after `timeoutMs`, say offline). Lets Delete show the moment a take is kept.
+ */
+export function savedTakeId(
+  uploader: Pick<Uploader, "onSaved">,
+  known: ReadonlyMap<string, string>,
+  clientTakeId: string,
+  timeoutMs = 15_000,
+): Promise<string | null> {
+  const id = known.get(clientTakeId);
+  if (id) return Promise.resolve(id);
+  return new Promise((resolve) => {
+    const off = uploader.onSaved((item, result) => {
+      if (item.takeId !== clientTakeId) return;
+      clearTimeout(timer);
+      off();
+      resolve(result.take.id);
+    });
+    const timer = setTimeout(() => {
+      off();
+      resolve(null);
+    }, timeoutMs);
+  });
 }
 
 let shared: Uploader | null = null;

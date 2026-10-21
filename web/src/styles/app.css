@@ -90,11 +90,53 @@
   justify-content: space-between;
 }
 
-.header-user {
-  max-width: 40vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* The account button: initials in a circle, with an ochre dot until the director has a name. */
+.account-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.account-btn:hover .avatar {
+  box-shadow: 0 0 0 2px var(--line-strong);
+}
+
+.account-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--sun);
+  box-shadow: 0 0 0 2px #fff;
+}
+
+.account-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+}
+
+.account-page .input[readonly] {
+  background: var(--paper);
+  color: var(--ink-soft);
+}
+
+.account-actions {
+  gap: var(--s-3);
+}
+
+.account-signout {
+  align-self: flex-start;
 }
 
 .accent-icon {
@@ -140,6 +182,14 @@
 
 .character-name.missing {
   color: var(--bad);
+}
+
+/* "Recording for HAMLET": the part's name in its colour, at the heading's size. */
+.part-title .character-name {
+  font-family: inherit;
+  font-size: 0.86em;
+  font-weight: 500;
+  letter-spacing: 0.03em;
 }
 
 .section-nav {
@@ -194,6 +244,7 @@
 
 .landing {
   overflow-x: hidden;
+  overflow-x: clip; /* clip, not hidden, so the phone's sticky corner bar still sticks */
 }
 
 .landing-nav {
@@ -203,6 +254,38 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--s-3);
+}
+
+/* On a phone the corner bar stays at the top, and its call to action only shows once the hero's
+   own button has scrolled away, so there's one red button on screen at a time. */
+@media (max-width: 640px) {
+  .landing-nav {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    padding-bottom: var(--s-3);
+    background: var(--bg);
+  }
+
+  .landing-nav .btn {
+    transition:
+      opacity var(--fast) var(--ease),
+      visibility var(--fast);
+  }
+
+  .landing-nav .btn.is-waiting {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+/* The corner call to action keeps its 44px height and fits beside the brand on the narrowest phones. */
+@media (max-width: 360px) {
+  .landing-nav .btn {
+    padding: 0 var(--s-3);
+    font-size: var(--text-sm);
+  }
 }
 
 .hero {
@@ -771,10 +854,6 @@
   background: var(--accent-soft);
 }
 
-.act-roles .is-taken {
-  opacity: 0.55;
-}
-
 .act-lyric {
   font-family: var(--font-serif);
   font-size: 15px;
@@ -1025,20 +1104,6 @@
    Director: productions
    ====================================================================== */
 
-.welcome-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s-4);
-  padding: var(--s-10) 0;
-}
-
-.welcome-empty h1 {
-  font-size: var(--text-3xl);
-  font-weight: 400;
-  line-height: 1.04;
-}
-
 .name-prompt {
   display: flex;
   flex-wrap: wrap;
@@ -1215,18 +1280,6 @@
   outline: none;
 }
 
-.archive-confirm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--s-2) var(--s-3);
-}
-
-.archive-confirm p {
-  flex-basis: 100%;
-  margin: 0;
-}
-
 /* The production pages pin the Script / Cast / Run-through tabs to the top of the screen (the site
    header scrolls away), and the script and run-through pin their own row just under them. */
 .production-page {
@@ -1314,6 +1367,31 @@
   color: #fff;
 }
 
+/* The step to go to next: a small accent dot that breathes once in a while. */
+.step-next {
+  width: 8px;
+  height: 8px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: step-next-pulse 2.4s var(--ease) infinite;
+}
+
+.step.is-next {
+  color: var(--ink);
+}
+
+@keyframes step-next-pulse {
+  0%,
+  60%,
+  100% {
+    box-shadow: 0 0 0 0 var(--accent-soft);
+  }
+  30% {
+    box-shadow: 0 0 0 5px var(--accent-soft);
+  }
+}
+
 .step-panel {
   display: flex;
   flex-direction: column;
@@ -1335,10 +1413,6 @@
   transition: background var(--fast) var(--ease);
 }
 
-.upload-drop h2 {
-  font-size: var(--text-xl);
-}
-
 .upload-drop .muted {
   max-width: 30em;
 }
@@ -1352,10 +1426,165 @@
   border-color: var(--accent-line);
 }
 
-.script-paste {
-  min-height: 300px;
-  font: 14px/1.55 var(--font-mono);
-  white-space: pre;
+/* Inside the new-production form the zone is one field among three, so it sits lower. */
+.form-card .upload-drop {
+  gap: var(--s-2);
+  padding: var(--s-6) var(--s-4);
+}
+
+.form-card .upload-art {
+  width: 84px;
+  height: 73px;
+}
+
+.upload-drop-hint {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--ink);
+}
+
+.upload-drop.is-invalid {
+  border-color: var(--bad);
+}
+
+.upload-drop.has-file {
+  border-style: solid;
+  border-color: var(--line-strong);
+  background: var(--card);
+}
+
+.upload-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 10px;
+  max-width: 100%;
+  color: var(--ink);
+}
+
+.upload-file-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Touch screens can't drop a file, so they lead with the button. */
+@media (pointer: coarse) {
+  .upload-drop-hint,
+  .upload-drop:not(.has-file) .upload-art {
+    display: none;
+  }
+
+  .upload-drop:not(.has-file) {
+    border-style: solid;
+    border-color: var(--line-strong);
+  }
+}
+
+/* New production: two dates, first and final performance. */
+.date-range {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.date-range-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 2px;
+}
+
+/* In a form the (i)'s text opens in the flow under its label, pushing the fields down rather than
+   covering the date boxes it explains. */
+.date-range-legend .info-tip {
+  display: contents;
+}
+
+.date-range-legend .info-tip-text {
+  position: static;
+  flex-basis: 100%;
+  max-width: none;
+  margin: 6px 0 4px;
+  box-shadow: none;
+  background: var(--paper);
+  font-weight: 400;
+}
+
+.date-range-inputs {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-2);
+}
+
+.date-range-field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.date-range-field .input {
+  min-width: 0;
+  padding-inline: 10px;
+}
+
+.date-range-dash {
+  padding-bottom: 12px;
+  color: var(--muted);
+}
+
+@media (max-width: 360px) {
+  .date-range-inputs {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .date-range-dash {
+    display: none;
+  }
+}
+
+/* An (i) that explains a label: hover with a mouse, tap or Enter elsewhere. The text opens
+   below the nearest positioned ancestor (the field it explains), so it never runs off a phone. */
+.info-tip {
+  display: inline-flex;
+}
+
+.info-tip-btn {
+  margin: -10px 0 -10px -8px;
+}
+
+.info-tip-btn:hover:not(:disabled) {
+  background: transparent;
+}
+
+.info-tip-text {
+  position: absolute;
+  z-index: 30;
+  top: 30px;
+  left: 0;
+  max-width: min(340px, 100%);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.info-tip-text[hidden] {
+  display: none;
 }
 
 /* Parse progress */
@@ -1374,8 +1603,33 @@
   gap: 6px;
 }
 
-.parse-head h2 {
+.parse-head h2,
+.parse-head h1 {
   font-size: var(--text-2xl);
+  overflow-wrap: anywhere;
+}
+
+.parse-head h1:focus,
+.form-card h1:focus {
+  outline: none;
+}
+
+/* A friendly line for the stage the reading is really at, changing every few seconds. */
+.parse-line {
+  margin: 0;
+  min-height: 1.5em;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--text-lg);
+  color: var(--ink-soft);
+  animation: parse-line-in 0.5s var(--ease);
+}
+
+@keyframes parse-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 .parse-stages {
@@ -1449,7 +1703,7 @@
   gap: var(--s-4);
 }
 
-/* The script page pins one row under the tabs: sharing with the cast on the left, scenes on the right. */
+/* The script page pins one row under the tabs: the scene jump. */
 .review-bar {
   position: sticky;
   top: var(--steps-pin, 0px);
@@ -1465,13 +1719,12 @@
   border-bottom: 1px solid var(--line);
 }
 
-.review-next {
-  flex: none;
-  gap: 10px;
-}
-
 .review-bar .section-nav {
   min-width: 0;
+}
+
+.review-summary {
+  margin: 0 0 calc(-1 * var(--s-2));
 }
 
 .review-tools {
@@ -2377,27 +2630,67 @@
   gap: var(--s-2);
 }
 
-.record-yourself .quiet-link {
-  align-self: center;
+.record-yourself-chevron {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.15s ease;
 }
 
-.record-yourself-form {
-  flex-direction: row;
-  flex-wrap: wrap;
+.record-yourself.is-open .record-yourself-chevron {
+  transform: rotate(180deg);
 }
 
-.record-yourself-form .field {
-  flex: 1 1 220px;
-  min-width: 0;
+/* The parts to record, opened in place under the button. */
+.record-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4) var(--s-2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.record-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+}
+
+.record-picker-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.record-picker-part {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  min-height: 44px;
+  padding: 10px 2px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.record-picker-part:hover .record-picker-name,
+.record-picker-part:focus-visible .record-picker-name {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.record-picker-name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {
   .cast-link {
     padding: var(--s-5) var(--s-4);
-  }
-
-  .record-yourself-form .btn {
-    flex: 1 1 100%;
   }
 }
 
@@ -2462,17 +2755,9 @@
   text-align: center;
 }
 
-.cast-link .reset-confirm {
-  margin-top: var(--s-1);
-}
-
-.reset-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--radius);
-  background: var(--bad-soft);
+/* "My roles", then everyone else's. */
+.sheet-group {
+  margin: var(--s-3) 0 calc(-1 * var(--s-1));
 }
 
 .sheet-list {
@@ -2515,14 +2800,6 @@
   text-underline-offset: 4px;
 }
 
-.sheet-shared {
-  white-space: nowrap;
-}
-
-.sheet-shared svg {
-  vertical-align: -1px;
-}
-
 .sheet-more {
   flex: none;
   width: 36px;
@@ -2553,50 +2830,8 @@
 /* A call-sheet row's ⋯ menu. */
 .sheet-menu {
   display: flex;
-  flex-direction: column;
-  margin: var(--s-2) 0 var(--s-1) auto;
-  width: max-content;
-  max-width: 100%;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: #fff;
-  box-shadow: var(--shadow-sm);
-}
-
-.sheet-menu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-  min-height: 44px;
-  padding: 0 var(--s-3);
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  color: var(--ink);
-  font: inherit;
-  font-size: var(--text-sm);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sheet-menu-item:hover,
-.sheet-menu-item:focus-visible {
-  background: var(--paper);
-}
-
-/* What plays now on a line the actor hasn't recorded: a stand-in, or an earlier cast member's take. */
-.placeholder-bar {
-  border-top-style: dashed;
-}
-
-.take-play.is-placeholder {
-  border-style: dashed;
-  color: var(--ink-soft);
-}
-
-.placeholder-note {
-  min-width: 10em;
+  justify-content: flex-end;
+  margin: var(--s-2) 0 var(--s-1);
 }
 
 /* Picking up more parts (recorder dialog, wrapped screen, no lines left). */
@@ -2647,10 +2882,14 @@
 
 .sheet-who {
   color: var(--ink-soft);
+  font-weight: 600;
 }
 
-.sheet-who.muted {
+/* Nobody has recorded the part: quieter than a name. */
+.sheet-who.is-none {
   color: var(--muted);
+  font-weight: 400;
+  font-style: italic;
 }
 
 .sheet-progress {
@@ -2676,10 +2915,6 @@
   gap: 4px;
   color: var(--good);
   font-weight: 600;
-}
-
-.sheet-record {
-  flex: none;
 }
 
 @media (max-width: 640px) {
@@ -2758,8 +2993,30 @@
   gap: var(--s-3);
 }
 
+.scene-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
 .scene-title-row h1 {
+  flex: 1;
+  min-width: 0;
   font-size: clamp(28px, 6vw, 40px);
+}
+
+.scene-listen {
+  flex-shrink: 0;
+}
+
+@media (max-width: 520px) {
+  .scene-listen-label {
+    display: none;
+  }
+}
+
+.scene-head .back-link {
+  min-height: var(--tap);
 }
 
 .scene-picker .input {
@@ -2868,7 +3125,7 @@
     background var(--fast) var(--ease);
 }
 
-.role-card:hover:not(.is-taken) {
+.role-card:hover {
   border-color: var(--edge-strong);
   box-shadow: var(--shadow);
 }
@@ -2883,17 +3140,6 @@
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.role-card.is-taken {
-  border-style: dashed;
-  border-color: var(--line-strong);
-  background: var(--paper);
-  cursor: not-allowed;
-}
-
-.role-card.is-taken .character-name {
-  color: var(--faint);
-}
-
 .role-name {
   padding-right: 26px;
 }
@@ -2904,6 +3150,12 @@
 
 .role-meta {
   color: var(--muted);
+}
+
+/* Who recorded most of the part ("Robin + 1"): anyone can still pick it. */
+.role-by {
+  color: var(--ink-soft, var(--muted));
+  font-weight: 600;
 }
 
 .role-check {
@@ -2925,10 +3177,6 @@
   background: var(--accent);
 }
 
-.role-card.is-taken .role-check {
-  display: none;
-}
-
 .join-dock {
   position: sticky;
   bottom: 0;
@@ -2937,9 +3185,19 @@
   gap: var(--s-3);
   margin: 0 calc(-1 * var(--s-4));
   padding: var(--s-4) var(--s-4) calc(var(--s-4) + var(--safe-bottom));
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg);
   border-top: 1px solid var(--line);
   box-shadow: 0 -8px 24px rgba(29, 28, 26, 0.05);
+}
+
+/* For someone who isn't reading: a quiet way straight to the listen-through, under the parts. */
+.join-listen {
+  align-self: center;
+  margin: var(--s-2) 0 var(--s-4);
+}
+
+.join-dock[hidden] {
+  display: none;
 }
 
 .join-summary {
@@ -3074,7 +3332,7 @@
   margin: 0 auto;
 }
 
-.record-header .progress {
+.record-header .part-progress {
   max-width: 688px;
   width: 100%;
   margin: 0 auto;
@@ -3088,16 +3346,59 @@
   white-space: nowrap;
 }
 
-.record-title:has(.name-edit) {
-  overflow: visible;
-}
-
-.record-progress {
-  white-space: nowrap;
+/* Two lines on a phone rather than "Recording for FRAN…" beside the header's buttons. */
+.record-part {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.15;
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.012em;
+}
+
+/* One part's progress: the share recorded in green over the rest, then the counts. */
+.part-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-part {
+  height: 8px;
+  background: var(--paper-deep);
+}
+
+.progress-part > span {
+  background: var(--good);
+}
+
+.part-progress-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--ink-soft);
+}
+
+.part-progress-counts .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+
+.part-progress-done .dot {
+  background: var(--good);
+}
+
+.part-progress-left .dot {
+  background: var(--paper-deep);
+  box-shadow: inset 0 0 0 1px var(--edge);
 }
 
 /* An actor with several parts records one at a time. */
@@ -3159,7 +3460,8 @@
 .record-main {
   max-width: 720px;
   margin: 0 auto;
-  padding: var(--s-4) var(--s-4) calc(244px + var(--safe-bottom));
+  /* Clear of the dock, whatever its height (RecordDock sets --dock-h). */
+  padding: var(--s-4) var(--s-4) calc(var(--dock-h, 200px) + 40px + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -3203,17 +3505,41 @@
   opacity: 0.8;
 }
 
-.line-card.is-current {
-  border-color: var(--edge-strong);
-  box-shadow: var(--shadow);
+/* The line in hand: a plain white card with an ink edge, and the line itself under a highlighter.
+   No yellow card around the yellow line. */
+.line-card.is-current,
+.line-card.is-recording {
+  border-color: var(--ink);
+  background: #fff;
+  box-shadow:
+    0 0 0 1px var(--ink),
+    var(--shadow);
   opacity: 1;
 }
 
 .line-card.is-recording {
-  border-color: var(--rec);
   box-shadow:
-    0 0 0 1px var(--rec),
+    0 0 0 2px var(--ink),
     var(--shadow);
+}
+
+.line-card.is-current .my-line,
+.line-card.is-recording .my-line {
+  background: var(--marker);
+  box-shadow: 0 0 0 8px var(--marker);
+}
+
+.recorded-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.recorded-by.is-mine {
+  color: var(--good);
 }
 
 .line-card-top {
@@ -3296,10 +3622,10 @@
   font-size: 23px;
 }
 
-/* Live highlighting while a take records: said words in ink with a soft red underline, the next
-   word hinted, the rest quieter but readable. Colour changes only, no movement. */
+/* Live highlighting while a take records: each word heard turns bold and underlined in ink, the
+   next word gets a quiet ochre underline, the rest stay readable on the highlighter. */
 .my-text.is-live .lw {
-  color: var(--muted);
+  color: var(--ink-soft);
   text-decoration-line: underline;
   text-decoration-thickness: 2px;
   text-decoration-color: transparent;
@@ -3312,12 +3638,13 @@
 
 .my-text.is-live .lw-lit {
   color: var(--ink);
-  text-decoration-color: var(--accent-line);
+  font-weight: 700;
+  text-decoration-color: var(--ink);
 }
 
 .my-text.is-live .lw-next {
   color: var(--ink);
-  text-decoration-color: var(--line-strong);
+  text-decoration-color: var(--sun);
 }
 
 .lw-dir {
@@ -3340,15 +3667,59 @@
   gap: var(--s-2);
 }
 
-/* After a take: play it (with a quiet progress line), play it with the others on a shared line,
-   the verdict, then redo and delete tucked to the right. */
+/* After a take: listen (with a quiet progress line), redo or record your own, and delete, on one
+   row; playing it with the others on a shared line and the verdict sit under it. */
 .take-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
+
+.take-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.take-actions .take-play {
+  flex-shrink: 0;
+  padding: 0 12px 0 10px;
+}
+
+.take-actions .btn {
+  min-height: var(--tap);
+  padding: 0 8px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.take-actions .take-play {
+  margin-right: 2px;
+}
+
+.take-actions svg {
+  flex: none;
+}
+
+.take-actions .take-time {
+  margin-left: auto;
+  font-size: var(--text-sm);
+}
+
+.take-extra {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s-2);
-  padding-top: var(--s-3);
-  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 400px) {
+  .take-actions .take-time {
+    display: none;
+  }
 }
 
 .take-play {
@@ -3356,9 +3727,10 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
+  min-height: var(--tap);
   padding: 0 14px 0 12px;
   overflow: hidden;
+  white-space: nowrap;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-pill);
   background: #fff;
@@ -3402,25 +3774,9 @@
   color: var(--accent-text);
 }
 
-.take-tools {
-  display: inline-flex;
-  gap: 2px;
-  margin-left: auto;
-}
-
-.take-tools .btn {
-  color: var(--ink-soft);
-}
-
 .take-delete:hover,
 .take-delete:focus-visible {
   color: var(--bad);
-}
-
-@media (max-width: 380px) {
-  .take-tools {
-    margin-left: 0;
-  }
 }
 
 .my-line-who {
@@ -3436,44 +3792,6 @@
   gap: 4px;
   font-size: 13px;
   color: var(--muted);
-}
-
-/* The actor's name on the recorder, editable for a typo made when joining. */
-.name-edit-toggle {
-  margin-left: 6px;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  cursor: pointer;
-}
-
-.name-edit-toggle:hover,
-.name-edit-toggle:focus-visible {
-  color: var(--ink);
-  background: var(--accent-soft);
-}
-
-.name-edit {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.name-edit .input {
-  width: 9em;
-  min-height: 32px;
-  padding: 4px 8px;
-  font-size: 14px;
-}
-
-.name-edit .icon-btn {
-  width: 32px;
-  height: 32px;
 }
 
 .verdict-hint {
@@ -3570,13 +3888,204 @@
   overflow-y: auto;
 }
 
-.dock-hint {
-  font-size: 15px;
+.dock-note {
+  max-width: 420px;
+  font-size: var(--text-sm);
   color: var(--ink-soft);
   text-align: center;
-  min-height: 40px;
+}
+
+.dock-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: min(420px, 100%);
+}
+
+.dock-row[hidden] {
+  display: none;
+}
+
+.dock-side {
+  display: flex;
+  padding-left: var(--s-5);
+}
+
+.dock-gear {
+  color: var(--ink-soft);
+}
+
+/* Before the first take on a device: the mic check, in place of the record button, with Skip. */
+.first-mic-check {
+  width: min(480px, 100%);
+  padding: var(--s-3) var(--s-4) var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--text-sm);
+}
+
+.first-mic-check-intro {
+  margin-bottom: var(--s-2);
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.first-mic-check-intro strong {
+  color: var(--ink);
+}
+
+/* The mic check, here and in mic settings: tap, say a line, hear it back. */
+.mic-test {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.mic-test .btn {
+  min-height: var(--tap);
+}
+
+.mic-test-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-1) var(--s-2);
+  min-height: var(--tap);
+}
+
+.mic-test.is-idle .mic-test-row {
+  justify-content: flex-start;
+}
+
+.mic-test-skip {
+  margin-left: auto;
+}
+
+/* The stage: a mic in a ring and a big waveform, live while it listens, the clip as it plays back. */
+.mic-test-stage {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-3) var(--s-3) var(--s-2);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.mic-test-ring {
+  position: relative;
+  flex: none;
   display: grid;
   place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* While it listens the ring breathes, so it's clear the mic is open. */
+.mic-test.is-listening .mic-test-ring::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--rec);
+  opacity: 0;
+  animation: mic-listen 1.6s ease-out infinite;
+}
+
+.mic-test.is-playing .mic-test-ring,
+.mic-test.is-heard .mic-test-ring {
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+}
+
+@keyframes mic-listen {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+.waveform.waveform-big {
+  height: 64px;
+}
+
+.mic-test.is-playing .waveform,
+.mic-test.is-heard .waveform {
+  color: var(--accent);
+}
+
+.mic-test-status {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.mic-test-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1) var(--s-2);
+  margin-left: auto;
+}
+
+.mic-test-quiet {
+  color: var(--flag);
+}
+
+.mic-test-ok {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--good);
+}
+
+/* Mic settings, behind the gear. */
+.mic-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.mic-settings-options {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+}
+
+.mic-settings-options .eyebrow {
+  margin-bottom: var(--s-1);
+}
+
+.mic-settings-options .checkbox {
+  align-items: flex-start;
+  padding: 12px 0;
+  min-height: var(--tap);
+  line-height: 1.35;
+}
+
+.mic-settings-options .checkbox input {
+  flex: none;
+  margin: 1px 0 0;
+}
+
+.mic-settings-options .checkbox.is-off {
+  color: var(--faint);
+  cursor: default;
+}
+
+.checkbox-hint {
+  display: block;
+  margin-top: 2px;
 }
 
 .dock-meta {
@@ -3606,31 +4115,6 @@
   font-size: 14px;
   white-space: nowrap;
   color: var(--ink);
-}
-
-.dock-options {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  column-gap: var(--s-5);
-  margin-top: calc(var(--s-1) * -1);
-  margin-bottom: -10px;
-  font-size: var(--text-sm);
-  color: var(--ink-soft);
-}
-
-.dock-option {
-  gap: var(--s-2);
-}
-
-.dock-option input {
-  width: 18px;
-  height: 18px;
-}
-
-.dock-option.is-off {
-  color: var(--faint);
-  cursor: default;
 }
 
 .waveform {
@@ -3779,8 +4263,79 @@
   border-color: var(--edge-strong);
 }
 
-.wrapped-actions {
-  gap: 10px;
+/* Wrapped's lines to review, under their scenes like the recorder. */
+.summary-scene {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.summary-scene .eyebrow {
+  margin: var(--s-2) 0 0;
+}
+
+/* Wrapped's one-line email prompt; its button opens the profile dialog. */
+.wrapped-email {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+  color: var(--muted);
+}
+
+.wrapped-email > svg {
+  flex: none;
+}
+
+/* The profile dialog's email once it's sent or verified: one line with its quiet actions. */
+.profile-email {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--s-4);
+  margin: 0;
+}
+
+.profile-email-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--good);
+  font-weight: 600;
+}
+
+.wrapped-email .link-btn,
+.profile-email .link-btn {
+  min-height: var(--tap);
+  flex: none;
+}
+
+.pick-up-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 600 var(--text-md) / 1.3 var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pick-up-chevron {
+  color: var(--muted);
+  transition: transform var(--fast) var(--ease);
+}
+
+.pick-up-toggle[aria-expanded="true"] .pick-up-chevron {
+  transform: rotate(180deg);
+}
+
+.pick-up-body {
+  margin-top: var(--s-3);
 }
 
 /* ======================================================================
@@ -3883,7 +4438,6 @@
   display: none;
 }
 
-.practice-bar,
 .render-banner {
   align-items: center;
 }
@@ -3996,11 +4550,11 @@
   font-weight: 500;
 }
 
-/* The line being read, word by word: said words in ink, the current word underlined in soft red,
-   the words still to come a little muted. */
+/* The line being read, word by word: words already said in bold ink, the next one to be said
+   underlined in ink (it turns bold once said), the words still to come a little muted. The next
+   word's underline is a touch thicker and lower than a cue's, so it reads as "you are here". */
 .lyric-text.is-live .rw {
   color: var(--muted);
-  border-radius: 3px;
   text-decoration-line: underline;
   text-decoration-thickness: 2px;
   text-decoration-color: transparent;
@@ -4008,31 +4562,58 @@
   text-decoration-skip-ink: none;
   transition:
     color 0.12s var(--ease),
-    background-color 0.12s var(--ease),
     text-decoration-color 0.12s var(--ease);
 }
 
 .lyric-text.is-live .rw.is-said {
   color: var(--ink);
+  font-weight: 700;
 }
 
-.lyric-text.is-live .rw.is-now {
+.lyric-text.is-live .rw.is-next {
   color: var(--ink);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-  text-decoration-color: var(--accent-line);
+  text-decoration-color: var(--ink);
+  text-decoration-thickness: 2.5px;
+  text-underline-offset: 7px;
 }
 
-/* A [direction] inside a line, read by the narrator. */
+/* The listener's cue: the last sentence of the line before theirs, underlined (a little lighter
+   than the next word's underline, which can fall inside it). */
+.lyric-cue {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--ink-soft);
+  text-underline-offset: 5px;
+  text-decoration-skip-ink: none;
+}
+
+/* A [direction] inside a line, read by the narrator: it stays regular and muted as it is read,
+   and its next-word underline is in the same muted ink. */
 .lyric-text.is-live .rw-dir {
   font-size: 0.82em;
   font-style: italic;
   font-weight: 400;
 }
 
+.lyric-text.is-live .rw-dir.is-said,
+.lyric-text.is-live .rw-dir.is-next {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.lyric-text.is-live .rw-dir.is-next {
+  text-decoration-color: var(--muted);
+}
+
+/* A whole stage direction likewise: regular weight, its own soft ink. */
 .kind-stage_direction .lyric-text.is-live .rw.is-said,
-.kind-stage_direction .lyric-text.is-live .rw.is-now {
+.kind-stage_direction .lyric-text.is-live .rw.is-next {
   color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.kind-stage_direction .lyric-text.is-live .rw.is-next {
+  text-decoration-color: var(--ink-soft);
 }
 
 .lyric.kind-heading {
@@ -4072,20 +4653,39 @@
   text-transform: uppercase;
 }
 
-.is-my-part .lyric.is-mine .lyric-button {
-  box-shadow: inset 3px 0 0 var(--accent);
-  border-radius: 4px 14px 14px 4px;
+/* The listener's own lines, every one of them, under the highlighter. The line being read keeps
+   the plain current-line edge; nothing on them is red. Text stays dark enough for AA on --marker. */
+.is-my-part .lyric.is-mine {
+  color: var(--ink-soft);
 }
 
+.is-my-part .lyric.is-mine.is-past {
+  color: var(--muted);
+}
+
+.is-my-part .lyric.is-mine.is-current {
+  color: var(--ink);
+}
+
+.is-my-part .lyric.is-mine .lyric-button,
+.is-my-part .lyric.is-mine .lyric-button:hover:not(:disabled) {
+  background: var(--marker);
+}
+
+.is-my-part .lyric.is-mine .lyric-button:hover:not(:disabled) {
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+/* "Silent": your lines aren't read out, so they sit a little quieter (still AA on the highlighter). */
 .is-my-part .lyric.is-skipped .lyric-text {
-  opacity: 0.55;
+  color: var(--muted);
 }
 
 .is-my-part .lyric.is-mine.is-current .lyric-button {
-  background: var(--accent-soft);
+  background: var(--marker);
   box-shadow:
-    inset 3px 0 0 var(--accent),
-    0 0 0 1px var(--accent-line);
+    0 0 0 1px var(--line-strong),
+    var(--shadow);
 }
 
 .gap-meter {
@@ -4096,11 +4696,12 @@
   overflow: hidden;
 }
 
+/* The countdown for the listener's own line, in the player and the landing page's demo: ink. */
 .gap-meter > span {
   display: block;
   height: 100%;
   width: 100%;
-  background: var(--accent);
+  background: var(--ink);
   transform-origin: left;
   animation: gap-fill var(--gap-ms) linear forwards;
 }
@@ -4149,11 +4750,11 @@
   justify-content: center;
   gap: 18px;
   padding: var(--s-3) var(--s-4) calc(14px + var(--safe-bottom));
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg);
   border-top: 1px solid var(--line);
 }
 
-/* Speed of everyone else: tap to cycle 1× to 3×. Balanced on the right by "Score me" or a spacer. */
+/* Speed of everyone else: tap to cycle 1× to 3×. Balanced on the right by a spacer. */
 .speed-btn {
   display: inline-grid;
   place-items: center;
@@ -4181,11 +4782,6 @@
 .controls-spacer {
   flex: none;
   width: var(--tap);
-}
-
-.score-btn[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-text);
 }
 
 /* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
@@ -4231,10 +4827,6 @@
   cursor: not-allowed;
 }
 
-.practice-summary .summary-line {
-  font-size: 15px;
-}
-
 @media (min-width: 900px) {
   .step-panel .player-controls {
     left: 50%;
@@ -4257,14 +4849,28 @@
    ====================================================================== */
 
 @media (prefers-reduced-motion: reduce) {
+  .step-next,
+  .parse-line {
+    animation: none;
+  }
+
   .my-text.is-live .lw,
   .lyric-text.is-live .rw {
     transition: none;
   }
 
   .rec-dot,
-  .record-button.is-recording {
+  .record-button.is-recording,
+  .mic-test.is-listening .mic-test-ring::after {
     animation: none;
+  }
+
+  .mic-test.is-listening .mic-test-ring::after {
+    opacity: 0.6;
+  }
+
+  .pick-up-chevron {
+    transition: none;
   }
 
   .act-progress > span {
@@ -4425,6 +5031,12 @@
   color: var(--accent-text);
 }
 
+/* Focus moves to each screen's heading for screen readers; it isn't something to click, so no ring. */
+.onboarding-slide h1:focus {
+  outline: none;
+  box-shadow: none;
+}
+
 .onboarding-slide h1 {
   font-size: clamp(32px, 9vw, 44px);
   font-weight: 400;
@@ -4493,4 +5105,91 @@
 
 .onboarding-actions .btn-ghost {
   color: var(--ink-soft);
+}
+
+/* Cast page: until the director sets a name, the cast sees the start of their email. */
+.name-prompt {
+  align-items: flex-start;
+  padding-right: var(--s-2);
+}
+
+.name-prompt-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.name-prompt-text {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.name-prompt-row {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.name-prompt-row .input {
+  flex: 1;
+  min-width: 0;
+  max-width: 280px;
+}
+
+.name-prompt-close {
+  margin-top: -8px;
+}
+
+/* The cast page's name line: under the share button, one quiet line until you change it. */
+.name-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+  color: var(--muted);
+}
+
+.name-line .link-btn {
+  font-size: inherit;
+}
+
+/* The prompt's text wraps on its own; the ✕ stays at the end of the first row. */
+.name-line:not(.name-line-form) {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.name-line:not(.name-line-form) > .grow {
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.name-line-close {
+  margin: -10px -8px -10px 0;
+}
+
+/* Field, Save and Cancel on one row, even on a phone. */
+.name-line-form {
+  flex-wrap: nowrap;
+  gap: var(--s-1);
+}
+
+.name-line-form .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.name-line-form .btn {
+  flex: none;
+  padding: 0 var(--s-3);
+}
+
+.name-line-form:has(.field-error) {
+  flex-wrap: wrap;
+}
+
+.name-line-form .field-error {
+  flex-basis: 100%;
 }

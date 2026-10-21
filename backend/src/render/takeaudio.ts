@@ -2,7 +2,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Ctx } from "../context.ts";
-import { encodeCue, normalizeClip } from "./ffmpeg.ts";
+import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
+import { flattenStretches } from "../taketiming.ts";
+import { encodeCue, normalizeClipCut } from "./ffmpeg.ts";
 
 export interface TakeAudioRow {
   id: string;
@@ -16,6 +18,9 @@ export interface NormalizedTake {
   normalizedKey: string; // 48 kHz mono FLAC, what the render stitches
   samples: number;
   streamKey: string | null; // AAC .m4a for line-by-line playback, when asked for
+  // Made just now: where the voice is in the clip (flat [start, end, ...] ms) and where the upload was cut.
+  speechMs?: number[];
+  trimStartMs?: number;
 }
 
 // Takes normalized by an older pipeline are made again on first use: the key names the version, so
@@ -66,16 +71,22 @@ async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { 
       await writeFile(flac, await storage.get(have.normalizedKey));
       await encodeCue(flac, m4a);
       await storage.put(streamKey, await readFile(m4a), "audio/mp4");
+      if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();
       await sql`update takes set stream_key = ${streamKey} where id = ${take.id}`;
       return { ...have, streamKey };
     }
     const source = path.join(dir, `source${path.extname(take.storageKey)}`);
     await writeFile(source, await storage.get(take.storageKey));
-    const samples = await normalizeClip(source, flac, m4a, { clean: true });
+    const { samples, cutStartMs, speech } = await normalizeClipCut(source, flac, m4a, { clean: true });
     const normalizedKey = `productions/${productionId}/normalized/${take.id}.${NORMALIZE_VERSION}.flac`;
     await Promise.all([storage.put(normalizedKey, await readFile(flac), "audio/flac"), storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
-    await sql`update takes set normalized_key = ${normalizedKey}, normalized_samples = ${samples}, stream_key = ${streamKey} where id = ${take.id}`;
-    return { normalizedKey, samples, streamKey };
+    if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();
+    // Where the voice is in the clip as served, and where it was cut from the upload (for the word starts).
+    await sql`
+      update takes set normalized_key = ${normalizedKey}, normalized_samples = ${samples}, stream_key = ${streamKey},
+        speech_ms = ${flattenStretches(speech)}::int[], trim_start_ms = ${Math.round(cutStartMs)}
+      where id = ${take.id}`;
+    return { normalizedKey, samples, streamKey, speechMs: flattenStretches(speech), trimStartMs: Math.round(cutStartMs) };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
