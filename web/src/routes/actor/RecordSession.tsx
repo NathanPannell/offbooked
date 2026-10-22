@@ -579,8 +579,10 @@ export function RecordSession({
         {failed.length === 0 && stuck.length > 0 && (
           <div className="notice" role="status">
             <span className="grow">
-              {stuck.length === 1 ? "A take hasn't" : `${stuck.length} takes haven't`} reached Offbooked yet. {stuck[0]!.error} They're safe on this phone and
-              keep trying by themselves.
+              {stuck.length === 1 ? "A take hasn't" : `${stuck.length} takes haven't`} reached Offbooked yet. {stuck[0]!.error}{" "}
+              {stuck.some((i) => i.volatile)
+                ? "They keep trying by themselves. Keep this page open until they're sent."
+                : "They're safe on this phone and keep trying by themselves."}
             </span>
             <button type="button" className="btn btn-sm btn-secondary" onClick={() => uploader.retryAll()}>
               Try now

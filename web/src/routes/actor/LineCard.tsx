@@ -282,7 +282,8 @@ async function playFromDevice(takeId: string, play: (url: string) => void) {
 
 /**
  * Only while a take is on its way: saving; kept on the phone while there's no signal or the server
- * won't take it yet (it keeps trying; tap to try now); or failed for good, with Retry.
+ * won't take it yet (it keeps trying; tap to try now; a take kept only in this tab's memory asks for
+ * the page to stay open); or failed for good, with Retry.
  */
 function UploadStatus({ upload, onRetry }: { upload: UploadItem | null; onRetry: (takeId: string) => void }) {
   if (!upload) return null;
@@ -298,13 +299,13 @@ function UploadStatus({ upload, onRetry }: { upload: UploadItem | null; onRetry:
     case "offline":
       return (
         <button type="button" className="chip chip-check" onClick={() => onRetry(upload.takeId)} title={upload.error ?? undefined}>
-          <CloudOff size={13} aria-hidden="true" /> No signal · on this phone
+          <CloudOff size={13} aria-hidden="true" /> No signal · {upload.volatile ? "keep this page open" : "on this phone"}
         </button>
       );
     case "retrying":
       return (
         <button type="button" className="chip chip-check" onClick={() => onRetry(upload.takeId)} title={upload.error ?? undefined}>
-          <Smartphone size={13} aria-hidden="true" /> Not sent yet · on this phone
+          <Smartphone size={13} aria-hidden="true" /> Not sent yet · {upload.volatile ? "keep this page open" : "on this phone"}
         </button>
       );
     case "failed":

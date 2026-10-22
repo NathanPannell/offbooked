@@ -157,14 +157,17 @@ export class Uploader {
       errorCode: null,
     };
     const audio = await take.audio.arrayBuffer();
+    let kept = item;
     try {
       await store.put(item, audio);
       this.askToPersist();
+      if (!this.persistent) kept = { ...item, volatile: true };
     } catch {
       // Uploading still beats losing the take; it only can't survive the tab closing.
       await this.spill.put(item, audio);
+      kept = { ...item, volatile: true };
     }
-    const { items, superseded } = enqueue(this.items, item);
+    const { items, superseded } = enqueue(this.items, kept);
     this.items = items;
     await Promise.all(superseded.map((id) => Promise.all([store.remove(id).catch(() => {}), this.spill.remove(id)])));
     this.emit();
@@ -250,18 +253,29 @@ export class Uploader {
     }
 
     this.busy = true;
-    this.apply(item.takeId, { type: "begin" });
+    let elsewhere = false;
     try {
-      const audio = await this.audioBytes(store, item.takeId).catch(() => {
-        throw new ApiError(0, "storage", "Couldn't read this take on this device. Trying again.", null);
+      this.apply(item.takeId, { type: "begin" });
+      // Tabs on the same device share the stored takes: one uploads at a time, and a take another
+      // tab has already sent (or replaced) is simply gone from the store.
+      const result = await withUploadLock(async () => {
+        if (!(await this.spill.has(item.takeId)) && !(await store.has(item.takeId).catch(() => true))) {
+          elsewhere = true;
+          return null;
+        }
+        const audio = await this.audioBytes(store, item.takeId).catch(() => {
+          throw new ApiError(0, "storage", "Couldn't read this take on this device. Trying again.", null);
+        });
+        if (!audio) throw new ApiError(0, "missing_audio", "This take was lost on this device. Record it again.", null);
+        const blob = new Blob([audio], { type: item.mime });
+        return sendInParts(blob, (body, part) => this.sendWithTimeout(item, body, part));
       });
-      if (!audio) throw new ApiError(0, "missing_audio", "This take was lost on this device. Record it again.", null);
-      const blob = new Blob([audio], { type: item.mime });
-      const result = await sendInParts(blob, (body, part) => this.sendWithTimeout(item, body, part));
-      this.failStreak = 0;
-      this.holdUntil = 0;
-      const saved = this.apply(item.takeId, { type: "succeeded" });
-      if (saved) this.savedListeners.forEach((l) => l(saved, result));
+      if (result) {
+        this.failStreak = 0;
+        this.holdUntil = 0;
+        const saved = this.apply(item.takeId, { type: "succeeded" });
+        if (saved) this.savedListeners.forEach((l) => l(saved, result));
+      }
     } catch (err) {
       const retryable = err instanceof ApiError ? err.retryable && err.code !== "missing_audio" : true;
       const jitter = this.random() * 2 - 1;
@@ -281,6 +295,10 @@ export class Uploader {
       });
     } finally {
       this.busy = false;
+    }
+    if (elsewhere) {
+      this.items = this.items.filter((i) => i.takeId !== item.takeId);
+      this.emit();
     }
     void this.pump();
   }
@@ -332,6 +350,12 @@ export function savedTakeId(
       resolve(null);
     }, timeoutMs);
   });
+}
+
+/** Runs `fn` while holding the device-wide upload lock, where the browser has Web Locks. */
+function withUploadLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  return locks ? (locks.request("offbooked.uploads", fn) as Promise<T>) : fn();
 }
 
 let shared: Uploader | null = null;

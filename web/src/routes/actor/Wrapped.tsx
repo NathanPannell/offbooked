@@ -55,6 +55,8 @@ export function Wrapped({
   // Kept on this phone and still being tried: no signal, or the server won't take them yet.
   const waiting = unsaved.filter((_, i) => states[i] === "offline" || states[i] === "retrying");
   const offline = states.includes("offline");
+  // Kept only in this tab's memory (no IndexedDB, or the phone refused to store them): closing loses them.
+  const volatile = unsaved.some((i) => i.volatile);
   const results = lines.map((l) => scores.get(l.line.id)?.result).filter((r) => !!r);
   const counts = verdictCounts(results);
   // Every line of the part (all the actor's lines without one), under its scene in script order.
@@ -80,12 +82,16 @@ export function Wrapped({
             </>
           ) : waiting.length > 0 ? (
             <>
-              <h1 className="display">Your takes are safe on this phone</h1>
+              <h1 className="display">{volatile ? "Keep this page open" : "Your takes are safe on this phone"}</h1>
               <p>
                 {plural(unsaved.length, "take")} {unsaved.length === 1 ? "hasn't" : "haven't"} reached Offbooked yet.{" "}
                 {offline ? "There's no signal right now." : waiting[0]!.error}
               </p>
-              <p className="muted">They keep trying by themselves. You can close this page: they go up the next time you open your link on this phone.</p>
+              <p className="muted">
+                {volatile
+                  ? "They keep trying by themselves, but this phone couldn't store them: closing this page before they're sent loses them."
+                  : "They keep trying by themselves. You can close this page: they go up the next time you open your link on this phone."}
+              </p>
               <button type="button" className="btn btn-secondary" onClick={() => unsaved.forEach((f) => onRetry(f.takeId))}>
                 Try now
               </button>

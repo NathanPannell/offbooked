@@ -32,7 +32,7 @@ const AUDIO_TYPES: Record<string, string> = {
   "audio/wave": "wav",
 };
 
-export const STORAGE_DOWN_MESSAGE = "Offbooked can't store recordings right now. Your take is safe on this phone and goes up by itself.";
+export const STORAGE_DOWN_MESSAGE = "Offbooked can't store recordings right now. The app keeps trying by itself.";
 
 export type Recorder = { kind: "actor"; actorId: string } | { kind: "director"; userId: string };
 

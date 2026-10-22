@@ -25,6 +25,11 @@ export interface UploadItem {
   attempts: number;
   nextAttemptAt: number;
   error: string | null;
+  /**
+   * Kept only in this tab's memory (no IndexedDB, or the device refused to store it): it is lost if
+   * the page closes before it lands, so the app must not say it's safe on the phone.
+   */
+  volatile?: boolean;
   /** The last failure's ApiError code ("network", "timeout", "storage_unavailable", …), for the status shown. */
   errorCode?: string | null;
 }

@@ -6,6 +6,8 @@ export interface TakeStore {
   put(item: UploadItem, audio: ArrayBuffer): Promise<void>;
   update(item: UploadItem): Promise<void>;
   audio(takeId: string): Promise<ArrayBuffer | null>;
+  /** Whether the take's row is still here (another tab may have uploaded or replaced it). */
+  has(takeId: string): Promise<boolean>;
   remove(takeId: string): Promise<void>;
 }
 
@@ -74,7 +76,10 @@ export function openDb(factory: IDBFactory = indexedDB, timeoutMs = OPEN_TIMEOUT
 }
 
 export class IdbTakeStore implements TakeStore {
+  /** The connection, or the open that will replace a dropped one. */
   private db: Promise<IDBDatabase>;
+  /** The open connection, null while a new one opens. */
+  private live: IDBDatabase | null = null;
 
   constructor(
     db: IDBDatabase,
@@ -85,44 +90,63 @@ export class IdbTakeStore implements TakeStore {
 
   /** Safari drops the connection when the page is backgrounded for a while; the next call opens a new one. */
   private watch(db: IDBDatabase): IDBDatabase {
-    db.onclose = () => this.reset();
+    this.live = db;
+    db.onclose = () => this.drop(db);
     db.onversionchange = () => {
       db.close();
-      this.reset();
+      this.drop(db);
     };
     return db;
   }
 
-  private reset() {
-    this.db = this.reopen().then((db) => this.watch(db));
-    // A failed reopen is tried again by the next call.
-    this.db.catch(() => {});
+  /** Replaces a connection that has gone (once, however many callers notice). */
+  private drop(db: IDBDatabase) {
+    if (this.live !== db) return;
+    this.live = null;
+    this.replace();
   }
 
-  private async attempt<T>(mode: IDBTransactionMode, fn: (tx: IDBTransaction) => IDBRequest<T> | Promise<T>): Promise<T> {
-    const db = await this.db;
+  private replace() {
+    this.db = this.reopen().then((db) => this.watch(db));
+    this.db.catch(() => {}); // a failed open is tried again by the next call (run)
+  }
+
+  private async attempt<T>(db: IDBDatabase, mode: IDBTransactionMode, fn: (tx: IDBTransaction) => IDBRequest<T> | Promise<T>): Promise<T> {
     const tx = db.transaction([TAKES, AUDIO], mode);
     const done = new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error ?? new DOMException("Transaction aborted", "AbortError"));
     });
+    done.catch(() => {}); // reported by the awaits below, never as an unhandled rejection
     const out = fn(tx);
     const result = out instanceof Promise ? await out : await promisify(out);
     await done;
     return result;
   }
 
-  private async run<T>(mode: IDBTransactionMode, fn: (tx: IDBTransaction) => IDBRequest<T> | Promise<T>): Promise<T> {
+  /** The connection; when the last open failed (timed out, blocked…), opens again rather than failing for good. */
+  private async connection(): Promise<IDBDatabase> {
+    const opening = this.db;
     try {
-      return await this.attempt(mode, fn);
+      return await opening;
+    } catch {
+      if (this.db === opening) this.replace();
+      return this.db;
+    }
+  }
+
+  private async run<T>(mode: IDBTransactionMode, fn: (tx: IDBTransaction) => IDBRequest<T> | Promise<T>): Promise<T> {
+    const db = await this.connection();
+    try {
+      return await this.attempt(db, mode, fn);
     } catch (err) {
       // "Connection to Indexed Database server lost" (UnknownError) or a closed database
       // (InvalidStateError): open it again and try once more.
       const name = err instanceof DOMException ? err.name : "";
       if (name !== "InvalidStateError" && name !== "UnknownError") throw err;
-      this.reset();
-      return this.attempt(mode, fn);
+      this.drop(db);
+      return this.attempt(await this.connection(), mode, fn);
     }
   }
 
@@ -150,6 +174,10 @@ export class IdbTakeStore implements TakeStore {
     return row?.audio ?? null;
   }
 
+  async has(takeId: string) {
+    return (await this.run("readonly", (tx) => tx.objectStore(TAKES).getKey(takeId))) !== undefined;
+  }
+
   async remove(takeId: string) {
     await this.run("readwrite", (tx) => {
       tx.objectStore(AUDIO).delete(takeId);
@@ -173,6 +201,9 @@ export class MemoryTakeStore implements TakeStore {
   }
   async audio(takeId: string) {
     return this.rows.get(takeId)?.audio ?? null;
+  }
+  async has(takeId: string) {
+    return this.rows.has(takeId);
   }
   async remove(takeId: string) {
     this.rows.delete(takeId);

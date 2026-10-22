@@ -85,6 +85,20 @@ describe("the take store", () => {
     expect((await store.list()).map((i) => i.takeId).sort()).toEqual(["t1", "t2"]);
   });
 
+  it("keeps trying to reopen after a reopen fails, instead of failing for good", async () => {
+    const factory = new IDBFactory();
+    const db = await openDb(factory);
+    let tries = 0;
+    const store = new IdbTakeStore(db, () => (++tries === 1 ? Promise.reject(new Error("IndexedDB didn't open")) : openDb(factory)));
+    await store.put(item(), bytes(1));
+    // The browser drops the connection and the first reopen times out.
+    db.onclose!(new Event("close"));
+    db.close();
+    expect(await store.has("t1")).toBe(true);
+    expect(tries).toBe(2);
+    expect(await store.has("nope")).toBe(false);
+  });
+
   it("falls back to memory when there is no IndexedDB", async () => {
     const { store, persistent } = await openTakeStore(undefined);
     expect(persistent).toBe(false);
@@ -92,6 +106,7 @@ describe("the take store", () => {
     await store.update(item({ attempts: 3 }));
     expect(await store.list()).toEqual([item({ attempts: 3 })]);
     expect(new Uint8Array((await store.audio("t1"))!)).toEqual(new Uint8Array([4]));
+    expect(await store.has("t1")).toBe(true);
     await store.remove("t1");
     expect(await store.audio("t1")).toBeNull();
   });

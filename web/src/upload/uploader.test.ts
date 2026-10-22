@@ -159,6 +159,38 @@ describe("the uploader", () => {
     expect(await up.audio("gone")).toBeNull();
   });
 
+  it("drops a take another tab has already sent, without sending it again or calling it lost", async () => {
+    vi.useFakeTimers();
+    const store = new MemoryTakeStore();
+    let calls = 0;
+    const up = uploader(
+      () => {
+        calls++;
+        return refused();
+      },
+      {},
+      store,
+    );
+    const takeId = await up.add(take());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1);
+    // Another tab on this phone uploads it and clears it from the shared store.
+    await store.remove(takeId);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls).toBe(1);
+    expect(up.getItems()).toEqual([]);
+  });
+
+  it("says when a take is only in this tab's memory", async () => {
+    const memoryOnly = new Uploader({ openStore: async () => ({ store: new MemoryTakeStore(), persistent: false }), send: refused });
+    uploaders.push(memoryOnly);
+    await memoryOnly.add(take());
+    expect(memoryOnly.getItems()[0]?.volatile).toBe(true);
+    const onDevice = uploader(refused);
+    await onDevice.add(take());
+    expect(onDevice.getItems()[0]?.volatile).toBeUndefined();
+  });
+
   it("still uploads a take the device wouldn't store", async () => {
     const full = new MemoryTakeStore();
     full.put = () => Promise.reject(new DOMException("full", "QuotaExceededError"));
@@ -172,6 +204,7 @@ describe("the uploader", () => {
       full,
     );
     await up.add(take());
+    expect(up.getItems()[0]?.volatile).toBe(true);
     await vi.waitFor(() => expect(statusOf(up)).toEqual(["saved"]));
     expect(bodies).toEqual(["\u0001\u0002\u0003"]);
   });
