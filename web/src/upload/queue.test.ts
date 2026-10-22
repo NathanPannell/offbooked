@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backoffMs, enqueue, latestForLine, MAX_AUTO_ATTEMPTS, nextDue, nextWakeAt, transition, type UploadItem } from "./queue";
+import { backoffMs, enqueue, latestForLine, MAX_BACKOFF_MS, nextDue, nextWakeAt, transition, uploadState, type UploadItem } from "./queue";
 
 function item(overrides: Partial<UploadItem> = {}): UploadItem {
   return {
@@ -30,9 +30,24 @@ describe("transition", () => {
     expect(failed).toMatchObject({ status: "queued", error: "offline", nextAttemptAt: 100 + backoffMs(1) });
   });
 
-  it("stops retrying after the attempt limit", () => {
-    const uploading = item({ status: "uploading", attempts: MAX_AUTO_ATTEMPTS });
-    expect(transition(uploading, { type: "failed", retryable: true, message: "x", now: 0 }).status).toBe("failed");
+  it("never gives up on a take that can still land", () => {
+    // The server refused every take for hours: the takes stayed queued, a minute apart at most.
+    const uploading = item({ status: "uploading", attempts: 500 });
+    const after = transition(uploading, { type: "failed", retryable: true, message: "server", code: "storage_unavailable", now: 0 });
+    expect(after).toMatchObject({ status: "queued", errorCode: "storage_unavailable", nextAttemptAt: MAX_BACKOFF_MS });
+  });
+
+  it("waits as long as the server asks", () => {
+    const uploading = item({ status: "uploading", attempts: 1 });
+    const after = transition(uploading, { type: "failed", retryable: true, message: "slow down", code: "rate_limited", now: 10, retryAfterMs: 90_000 });
+    expect(after.nextAttemptAt).toBe(90_010);
+  });
+
+  it("keeps the last error showing while it tries again, and clears it once saved", () => {
+    const waiting = item({ attempts: 2, error: "Can't reach Offbooked.", errorCode: "network" });
+    const again = transition(waiting, { type: "begin" });
+    expect(again).toMatchObject({ status: "uploading", attempts: 3, errorCode: "network" });
+    expect(transition(again, { type: "succeeded" })).toMatchObject({ status: "saved", error: null, errorCode: null });
   });
 
   it("fails at once on errors a retry can't fix", () => {
@@ -41,6 +56,11 @@ describe("transition", () => {
       status: "failed",
       error: "too big",
     });
+  });
+
+  it("retry now skips a queued take's wait", () => {
+    expect(transition(item({ nextAttemptAt: 60_000 }), { type: "retry", now: 5 }).nextAttemptAt).toBe(5);
+    expect(transition(item({ status: "uploading" }), { type: "retry", now: 5 }).status).toBe("uploading");
   });
 
   it("retries a failed take from scratch", () => {
@@ -60,6 +80,18 @@ describe("transition", () => {
     expect(transition(item({ status: "saved" }), { type: "resume", now: 9 }).status).toBe("saved");
   });
 
+  it("doesn't make a waiting take sit out an earlier visit's backoff", () => {
+    expect(transition(item({ nextAttemptAt: 60_000, attempts: 3 }), { type: "resume", now: 9 }).nextAttemptAt).toBe(9);
+  });
+
+  it("gives a failed take another go on the next launch", () => {
+    // Takes an older app gave up on (or the server refused) go up once whatever stopped them is fixed.
+    expect(transition(item({ status: "failed", attempts: 6, error: "x" }), { type: "resume", now: 9 })).toMatchObject({
+      status: "queued",
+      nextAttemptAt: 9,
+    });
+  });
+
   it("skips the backoff wait when the connection comes back", () => {
     expect(transition(item({ nextAttemptAt: 10_000 }), { type: "online", now: 5 }).nextAttemptAt).toBe(5);
   });
@@ -73,9 +105,21 @@ describe("transition", () => {
 
 describe("backoffMs", () => {
   it("doubles and caps", () => {
-    expect([1, 2, 3, 4, 10].map((n) => backoffMs(n))).toEqual([1000, 2000, 4000, 8000, 30_000]);
+    expect([1, 2, 3, 4, 10].map((n) => backoffMs(n))).toEqual([1000, 2000, 4000, 8000, 60_000]);
     expect(backoffMs(1, 1)).toBe(1200);
     expect(backoffMs(1, -1)).toBe(800);
+  });
+});
+
+describe("uploadState", () => {
+  it("tells waiting for a connection from a server refusing the take", () => {
+    expect(uploadState(item())).toBe("saving");
+    expect(uploadState(item({ status: "uploading" }))).toBe("saving");
+    expect(uploadState(item({ errorCode: "network" }))).toBe("offline");
+    expect(uploadState(item({ status: "uploading", errorCode: "timeout" }))).toBe("offline");
+    expect(uploadState(item({ errorCode: "storage_unavailable" }))).toBe("retrying");
+    expect(uploadState(item({ status: "failed", errorCode: "take_limit" }))).toBe("failed");
+    expect(uploadState(item({ status: "saved" }))).toBe("saved");
   });
 });
 

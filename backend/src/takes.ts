@@ -32,6 +32,8 @@ const AUDIO_TYPES: Record<string, string> = {
   "audio/wave": "wav",
 };
 
+export const STORAGE_DOWN_MESSAGE = "Offbooked can't store recordings right now. Your take is safe on this phone and goes up by itself.";
+
 export type Recorder = { kind: "actor"; actorId: string } | { kind: "director"; userId: string };
 
 export interface TakeUpload {
@@ -121,7 +123,14 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
   const [line] = await sql<{ text: string }[]>`select text from lines where id = ${u.lineId}`;
   const wordStarts = parseWordStarts(req.headers["x-word-starts"], line?.text ?? "", durationMs);
   const key = `productions/${u.productionId}/takes/${id}.${ext}`;
-  await storage.put(key, audio, contentType);
+  try {
+    await storage.put(key, audio, contentType);
+  } catch (err) {
+    // The bucket refused or didn't answer. Said plainly (and logged), so the app shows why and holds
+    // its queue for a while: the take stays on the phone and goes up once storage is back.
+    ctx.log.error({ err, key, bytes: audio.length }, "take storage failed");
+    throw new HttpError(503, "storage_unavailable", STORAGE_DOWN_MESSAGE, undefined, { "Retry-After": "30" });
+  }
   if (await sweepIfDeleted(ctx, u.productionId)) throw new HttpError(410, "content_deleted", new ContentDeletedError().message);
   await sql.begin(async (tx) => {
     const [inserted] = await tx`

@@ -59,7 +59,10 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
   });
 
   app.setErrorHandler((err: FastifyError | HttpError, req, reply) => {
-    if (err instanceof HttpError) return reply.code(err.status).send({ error: { code: err.code, message: err.message }, ...err.extra });
+    if (err instanceof HttpError) {
+      if (err.headers) reply.headers(err.headers);
+      return reply.code(err.status).send({ error: { code: err.code, message: err.message }, ...err.extra });
+    }
     const status = err.statusCode && err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 500;
     if (status === 500) req.log.error({ err }, "request failed");
     const message = status === 413 ? "That upload is too large." : status === 500 ? "Something went wrong on our side. Try again." : err.message;
@@ -75,7 +78,8 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     origin: (origin, cb) => cb(null, !origin || allowed(origin)),
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Authorization", "Content-Type", "X-Take-Id", "X-Duration-Ms", "X-Take-Parts", "X-Take-Part", "X-Word-Starts", "Range"],
-    exposedHeaders: ["Content-Range", "Accept-Ranges", "Content-Length"],
+    // Retry-After tells the app how long to hold its upload queue after a 429.
+    exposedHeaders: ["Content-Range", "Accept-Ranges", "Content-Length", "Retry-After"],
     maxAge: 600,
   });
   app.register(multipart, { limits: { fileSize: MAX_PDF_BYTES, files: 1, fields: 5 } });

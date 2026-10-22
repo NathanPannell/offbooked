@@ -182,3 +182,59 @@ test("the screen stays on while the run-through plays", async ({ page }) => {
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await expect.poll(wakeLock).toEqual({ requested: 1, released: 1 });
 });
+
+test("a take the server won't store stays on the phone through a reload, then goes up by itself", async ({ page, browser }, testInfo) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await signInAsDirector(page);
+  await createProduction(page, "Hamlet (outage)");
+  await page.getByRole("button", { name: "Cast, next step" }).click();
+  await page.getByRole("button", { name: "Copy the cast link" }).click();
+  const joinUrl = await page.evaluate(() => navigator.clipboard.readText());
+
+  const actor = await browser.newContext({ ...testInfo.project.use, permissions: ["microphone"] });
+  // What the cast saw on 2026-10-21: every take upload refused by the server.
+  let refusing = true;
+  let refused = 0;
+  await actor.route("**/api/invite/lines/*/take", async (route) => {
+    if (!refusing) return route.fallback();
+    refused++;
+    await route.fulfill({
+      status: 503,
+      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json", "Retry-After": "1" },
+      body: JSON.stringify({ error: { code: "storage_unavailable", message: "Offbooked can't store recordings right now." } }),
+    });
+  });
+  const phone = await actor.newPage();
+  await phone.goto(joinUrl);
+  await phone.getByRole("button", { name: "Skip intro" }).click();
+  await phone.getByRole("checkbox", { name: /^HORATIO, 2 lines/i }).check({ force: true });
+  await phone.getByLabel("Your name").fill("Riz");
+  await phone.getByRole("button", { name: /Start recording/ }).click();
+  await expect(phone.getByText("Friends to this ground.").first()).toBeVisible();
+  await phone.getByRole("button", { name: "Skip", exact: true }).click();
+
+  // The fake mic plays a steady tone, so the take runs until it's stopped.
+  await phone.getByRole("button", { name: "Record line 1" }).click();
+  await expect(phone.getByRole("button", { name: "Stop recording" })).toBeVisible();
+  await phone.waitForTimeout(1500);
+  await phone.getByRole("button", { name: "Stop recording" }).click();
+
+  // Not "Saving…" for ever: the take says where it is and why.
+  const kept = phone.getByRole("button", { name: /Not sent yet · on this phone/ });
+  await expect(kept).toBeVisible();
+  expect(refused).toBeGreaterThan(0);
+
+  // The page crashes or is closed: the take is still on the phone, and can be played back there.
+  await phone.reload();
+  await expect(kept).toBeVisible();
+  await expect(phone.getByRole("button", { name: "Play your take, kept on this device" })).toBeVisible();
+
+  // The server is back: the take goes up without the actor doing anything.
+  refusing = false;
+  await expect(kept).toHaveCount(0, { timeout: 30_000 });
+  const token = new URL(phone.url()).pathname.split("/")[2]!;
+  const lines = await phone.request.get("http://localhost:8080/api/invite/lines", { headers: { Authorization: `Invite ${token}` } });
+  const takes = ((await lines.json()) as { lines: { take: unknown }[] }).lines.filter((l) => l.take);
+  expect(takes).toHaveLength(1);
+  await actor.close();
+});

@@ -2,12 +2,15 @@ export class HttpError extends Error {
   status: number;
   code: string;
   extra: Record<string, unknown> | undefined;
+  /** Response headers to send with the error, e.g. Retry-After on a 429. */
+  headers: Record<string, string> | undefined;
 
-  constructor(status: number, code: string, message: string, extra?: Record<string, unknown>) {
+  constructor(status: number, code: string, message: string, extra?: Record<string, unknown>, headers?: Record<string, string>) {
     super(message);
     this.status = status;
     this.code = code;
     this.extra = extra;
+    this.headers = headers;
   }
 }
 

@@ -18,7 +18,12 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
-  use: { baseURL: webUrl, trace: "retain-on-failure" },
+  use: {
+    baseURL: webUrl,
+    trace: "retain-on-failure",
+    // A fake mic (a steady tone) that needs no permission prompt, for the recording journey.
+    launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
+  },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },
     { name: "phone", use: { ...devices["Pixel 7"] } },
