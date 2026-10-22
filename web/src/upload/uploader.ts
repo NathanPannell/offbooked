@@ -268,7 +268,10 @@ export class Uploader {
         });
         if (!audio) throw new ApiError(0, "missing_audio", "This take was lost on this device. Record it again.", null);
         const blob = new Blob([audio], { type: item.mime });
-        return sendInParts(blob, (body, part) => this.sendWithTimeout(item, body, part));
+        const landed = await sendInParts(blob, (body, part) => this.sendWithTimeout(item, body, part));
+        // Gone from the store before the lock is let go, so a tab waiting for it doesn't send it again.
+        await Promise.all([this.spill.remove(item.takeId), store.remove(item.takeId).catch(() => {})]);
+        return landed;
       });
       if (result) {
         this.failStreak = 0;
@@ -352,10 +355,36 @@ export function savedTakeId(
   });
 }
 
-/** Runs `fn` while holding the device-wide upload lock, where the browser has Web Locks. */
-function withUploadLock<T>(fn: () => Promise<T>): Promise<T> {
-  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
-  return locks ? (locks.request("offbooked.uploads", fn) as Promise<T>) : fn();
+/** How long a tab waits for another tab's upload before going ahead anyway. */
+export const LOCK_WAIT_MS = 30_000;
+
+/**
+ * Runs `fn` while holding the device-wide upload lock, where the browser has Web Locks. The wait is
+ * bounded: a tab frozen in the background mid-upload keeps its lock (its timers don't run), and
+ * waiting on it for good would stall this tab's takes. Going ahead without it is safe, because a
+ * repeated X-Take-Id returns the take already saved.
+ */
+export async function withUploadLock<T>(
+  fn: () => Promise<T>,
+  waitMs = LOCK_WAIT_MS,
+  locks: LockManager | null = typeof navigator === "undefined" ? null : (navigator.locks ?? null),
+): Promise<T> {
+  if (!locks) return fn();
+  const waited = new AbortController();
+  const timer = setTimeout(() => waited.abort(), waitMs);
+  let granted = false;
+  try {
+    return (await locks.request("offbooked.uploads", { signal: waited.signal }, () => {
+      granted = true;
+      clearTimeout(timer);
+      return fn();
+    })) as T;
+  } catch (err) {
+    if (!granted && waited.signal.aborted) return fn();
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 let shared: Uploader | null = null;

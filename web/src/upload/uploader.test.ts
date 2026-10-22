@@ -4,7 +4,7 @@ import type { TakePartResult, TakeUploadResult } from "../api/actor";
 import { ApiError } from "../api/client";
 import { uploadState, type UploadItem } from "./queue";
 import { MemoryTakeStore, openTakeStore, type TakeStore } from "./store";
-import { stallTimeoutMs, Uploader, type SendTake, type UploaderOptions } from "./uploader";
+import { stallTimeoutMs, Uploader, withUploadLock, type SendTake, type UploaderOptions } from "./uploader";
 
 const landed = (item: UploadItem) => ({ take: { id: `server-${item.takeId}` }, linesRecorded: 1, linesTotal: 2 }) as unknown as TakeUploadResult;
 const take = (lineId = "l1") => ({ token: "tok", lineId, audio: new Blob([new Uint8Array([1, 2, 3])], { type: "audio/webm" }), durationMs: 900 });
@@ -214,5 +214,32 @@ describe("stallTimeoutMs", () => {
   it("allows for the body at a weak signal's speed", () => {
     expect(stallTimeoutMs(0)).toBe(30_000);
     expect(stallTimeoutMs(160 * 1024)).toBe(40_000);
+  });
+});
+
+describe("withUploadLock", () => {
+  it("goes ahead without the lock when another tab holds it for too long", async () => {
+    // A tab frozen in the background mid-upload keeps the lock; this tab's takes still go up.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    void navigator.locks.request("offbooked.uploads", () => held);
+    expect(await withUploadLock(async () => "sent", 50)).toBe("sent");
+    release();
+  });
+
+  it("runs one upload at a time while the lock is free", async () => {
+    const order: string[] = [];
+    const run = (name: string) =>
+      withUploadLock(async () => {
+        order.push(`${name} start`);
+        await new Promise((r) => setTimeout(r, 10));
+        order.push(`${name} end`);
+      });
+    await Promise.all([run("a"), run("b")]);
+    expect(order).toEqual(["a start", "a end", "b start", "b end"]);
+  });
+
+  it("works where the browser has no Web Locks", async () => {
+    expect(await withUploadLock(async () => 1, 10, null)).toBe(1);
   });
 });
