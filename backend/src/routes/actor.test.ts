@@ -166,6 +166,51 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     );
   });
 
+  test("a take the bucket refuses is a 503 with Retry-After, and the same take goes up once storage is back", async () => {
+    const line = linesOf("HORATIO")[0]!;
+    const takeId = randomUUID();
+    const put = t.ctx.storage.put;
+    t.ctx.storage.put = async () => {
+      throw new Error("AccessDenied");
+    };
+    try {
+      const refused = await upload(horatio, line.id, takeId);
+      assert.equal(refused.statusCode, 503);
+      assert.equal(refused.json().error.code, "storage_unavailable");
+      assert.equal(refused.headers["retry-after"], "30");
+      const [row] = await t.ctx.sql`select count(*)::int as n from takes where id = ${takeId}`;
+      assert.equal(row!.n, 0);
+    } finally {
+      t.ctx.storage.put = put;
+    }
+    const later = await upload(horatio, line.id, takeId);
+    assert.equal(later.statusCode, 200);
+    assert.equal(later.json().take.id, takeId);
+  });
+
+  test("too many uploads says when to try again", async () => {
+    const line = linesOf("MARCELLUS")[0]!;
+    await t.ctx.sql`insert into rate_limits (key, window_start, count)
+      values (${`take:${horatio.id}`}, to_timestamp(floor(extract(epoch from now()) / 600) * 600), 1000)
+      on conflict (key, window_start) do update set count = 1000`;
+    try {
+      const res = await upload(horatio, line.id);
+      assert.equal(res.statusCode, 429);
+      const wait = Number(res.headers["retry-after"]);
+      assert.ok(wait >= 1 && wait <= 600, `Retry-After ${wait}`);
+      const cors = await t.app.inject({
+        method: "OPTIONS",
+        url: `/api/invite/lines/${line.id}/take`,
+        headers: { origin: "https://app.test", "access-control-request-method": "PUT" },
+      });
+      assert.equal(cors.statusCode, 204);
+      const exposed = await t.app.inject({ method: "PUT", url: `/api/invite/lines/${line.id}/take`, headers: { ...as(horatio), origin: "https://app.test" } });
+      assert.match(String(exposed.headers["access-control-expose-headers"]), /Retry-After/);
+    } finally {
+      await t.ctx.sql`delete from rate_limits where key = ${`take:${horatio.id}`}`;
+    }
+  });
+
   test("per-line take cap", async () => {
     const line = linesOf("MARCELLUS")[0]!;
     await t.ctx.sql`insert into takes (id, production_id, line_id, actor_id, storage_key, content_type, bytes, duration_ms)

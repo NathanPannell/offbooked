@@ -17,12 +17,15 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly body: Record<string, unknown> | null;
+  /** How long the server asked us to wait before trying again (its Retry-After), if it said. */
+  readonly retryAfterMs: number | null;
 
-  constructor(status: number, code: string, message: string, body: Record<string, unknown> | null) {
+  constructor(status: number, code: string, message: string, body: Record<string, unknown> | null, retryAfterMs: number | null = null) {
     super(message);
     this.status = status;
     this.code = code;
     this.body = body;
+    this.retryAfterMs = retryAfterMs;
   }
 
   /** Network failures, timeouts, rate limits and 5xx are worth retrying. */
@@ -88,9 +91,24 @@ export async function request<T>(path: string, options: RequestOptions): Promise
       session.clear();
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
-    throw new ApiError(response.status, error.code ?? "http_" + response.status, error.message ?? defaultMessage(response.status), data);
+    throw new ApiError(
+      response.status,
+      error.code ?? "http_" + response.status,
+      error.message ?? defaultMessage(response.status),
+      data,
+      retryAfterMs(response.headers.get("Retry-After")),
+    );
   }
   return data as T;
+}
+
+/** A Retry-After header (seconds, or an HTTP date) in ms from now; null when absent or unreadable. */
+export function retryAfterMs(header: string | null, now = Date.now()): number | null {
+  if (!header?.trim()) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return seconds >= 0 ? Math.round(seconds * 1000) : null;
+  const at = Date.parse(header);
+  return Number.isNaN(at) ? null : Math.max(0, at - now);
 }
 
 function defaultMessage(status: number): string {

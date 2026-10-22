@@ -25,48 +25,57 @@ export interface UploadItem {
   attempts: number;
   nextAttemptAt: number;
   error: string | null;
+  /**
+   * Kept only in this tab's memory (no IndexedDB, or the device refused to store it): it is lost if
+   * the page closes before it lands, so the app must not say it's safe on the phone.
+   */
+  volatile?: boolean;
+  /** The last failure's ApiError code ("network", "timeout", "storage_unavailable", …), for the status shown. */
+  errorCode?: string | null;
 }
 
-/** Automatic attempts before a take waits for a manual retry. */
-export const MAX_AUTO_ATTEMPTS = 6;
+/** Longest wait between automatic attempts. A take that can still land is never given up on. */
+export const MAX_BACKOFF_MS = 60_000;
 
 export type QueueEvent =
   | { type: "begin" }
   | { type: "succeeded" }
-  | { type: "failed"; retryable: boolean; message: string; now: number; jitter?: number }
+  | { type: "failed"; retryable: boolean; message: string; code?: string; now: number; jitter?: number; retryAfterMs?: number | null }
   | { type: "retry"; now: number }
   | { type: "resume"; now: number }
   | { type: "online"; now: number };
 
-/** 1 s, 2 s, 4 s … capped at 30 s, with ±20% jitter (jitter in -1..1). */
+/** 1 s, 2 s, 4 s … capped at a minute, with ±20% jitter (jitter in -1..1). */
 export function backoffMs(attempts: number, jitter = 0): number {
-  const base = Math.min(30_000, 1000 * 2 ** Math.max(0, attempts - 1));
+  const base = Math.min(MAX_BACKOFF_MS, 1000 * 2 ** Math.max(0, attempts - 1));
   return Math.round(base * (1 + 0.2 * jitter));
 }
 
 export function transition(item: UploadItem, event: QueueEvent): UploadItem {
   switch (event.type) {
     case "begin":
-      return item.status === "queued" ? { ...item, status: "uploading", attempts: item.attempts + 1, error: null } : item;
+      // The last error stays until the attempt ends, so the status doesn't flicker back to "Saving…".
+      return item.status === "queued" ? { ...item, status: "uploading", attempts: item.attempts + 1 } : item;
     case "succeeded":
-      return item.status === "uploading" ? { ...item, status: "saved", error: null } : item;
+      return item.status === "uploading" ? { ...item, status: "saved", error: null, errorCode: null } : item;
     case "failed": {
       if (item.status !== "uploading") return item;
-      if (event.retryable && item.attempts < MAX_AUTO_ATTEMPTS) {
-        return {
-          ...item,
-          status: "queued",
-          error: event.message,
-          nextAttemptAt: event.now + backoffMs(item.attempts, event.jitter ?? 0),
-        };
+      const errorCode = event.code ?? null;
+      if (event.retryable) {
+        // Keeps trying, however long the server or the signal is gone: the take is safe on the device.
+        const wait = Math.max(backoffMs(item.attempts, event.jitter ?? 0), event.retryAfterMs ?? 0);
+        return { ...item, status: "queued", error: event.message, errorCode, nextAttemptAt: event.now + wait };
       }
-      return { ...item, status: "failed", error: event.message };
+      return { ...item, status: "failed", error: event.message, errorCode };
     }
     case "retry":
-      return item.status === "failed" ? { ...item, status: "queued", attempts: 0, nextAttemptAt: event.now } : item;
+      if (item.status === "failed") return { ...item, status: "queued", attempts: 0, nextAttemptAt: event.now };
+      return item.status === "queued" ? { ...item, nextAttemptAt: Math.min(item.nextAttemptAt, event.now) } : item;
     case "resume":
-      // An upload cut off by a reload goes again; X-Take-Id makes that safe.
-      return item.status === "uploading" ? { ...item, status: "queued", nextAttemptAt: event.now } : item;
+      // On launch everything left goes at once: an upload cut off by a reload or a crash (X-Take-Id
+      // makes that safe), one still waiting out an earlier visit's backoff, and one that failed before,
+      // in case what stopped it (a server fault, an old app) is fixed.
+      return item.status === "saved" ? item : { ...item, status: "queued", nextAttemptAt: event.now };
     case "online":
       return item.status === "queued" ? { ...item, nextAttemptAt: Math.min(item.nextAttemptAt, event.now) } : item;
   }
@@ -94,6 +103,18 @@ export function nextDue(items: UploadItem[], now: number): UploadItem | null {
 export function nextWakeAt(items: UploadItem[]): number | null {
   const waiting = items.filter((i) => i.status === "queued").map((i) => i.nextAttemptAt);
   return waiting.length ? Math.min(...waiting) : null;
+}
+
+export type UploadState = "saving" | "offline" | "retrying" | "failed" | "saved";
+
+/**
+ * What to tell the person about a take: still going up, waiting for a connection, refused by the
+ * server for now (it keeps trying), or failed for good (it needs them).
+ */
+export function uploadState(item: UploadItem): UploadState {
+  if (item.status === "saved" || item.status === "failed") return item.status;
+  if (!item.errorCode) return "saving";
+  return item.errorCode === "network" || item.errorCode === "timeout" ? "offline" : "retrying";
 }
 
 /** The newest take for a line, which is the one the UI reports on. */

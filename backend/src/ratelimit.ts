@@ -45,7 +45,13 @@ export async function enforce(sql: Sql, log: Log, key: string, limit: Limit, mes
   }
   if (await consume(sql, key, limit)) return;
   log.warn({ key }, "rate limit exceeded");
-  throw new HttpError(429, "rate_limited", message);
+  throw new HttpError(429, "rate_limited", message, undefined, { "Retry-After": String(secondsLeft(limit.windowSeconds)) });
+}
+
+// Seconds until the current fixed window ends, when the count starts again (at least 1).
+export function secondsLeft(windowSeconds: number, nowMs = Date.now()): number {
+  const now = nowMs / 1000;
+  return Math.max(1, Math.ceil(Math.floor(now / windowSeconds) * windowSeconds + windowSeconds - now));
 }
 
 export async function pruneRateLimits(sql: Sql): Promise<void> {

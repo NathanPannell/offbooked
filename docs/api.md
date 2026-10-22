@@ -11,7 +11,7 @@ The backend (`backend/`, Railway, `https://api.offbooked.com`) and the web app (
   - Actor: `Authorization: Invite <inviteToken>`.
 - CORS: allow origins from `CORS_ORIGINS` (comma list, `*` wildcards in a host allowed), the methods used here, and the headers `Authorization, Content-Type, X-Take-Id, X-Duration-Ms, X-Take-Parts, X-Take-Part, X-Word-Starts, Range`.
 - Audio URLs returned by the API are short-lived signed URLs (about 1 hour) that a plain `<audio src>` can load without headers. They must support HTTP `Range` requests (Safari needs this to play or seek). Send `Cross-Origin-Resource-Policy: cross-origin` on audio responses.
-- Rate limits return 429 with `error.code = "rate_limited"`.
+- Rate limits return 429 with `error.code = "rate_limited"` and `Retry-After` (seconds until the limit's window ends). CORS exposes `Retry-After`.
 
 ## Core types
 
@@ -392,6 +392,8 @@ The parse is taken as read: there is no review step. Lines are saved unflagged, 
 ### Long takes in parts (2026-10-18)
 
 Takes have no practical length limit (the server refuses only past 65 minutes; the app stops a take left running for an hour). A take bigger than one request (8 MB) is sent as byte ranges of the same file: each request carries `X-Take-Parts: n` (2–12) and `X-Take-Part: i` (0-based), with the same `X-Take-Id`, `Content-Type` and `X-Duration-Ms`. Until every part is in, the answer is `{ partial: true, parts, missing: number[] }`; the request that completes it answers like a one-request upload. Parts wait in the server's temp folder (not storage) and are joined into the exact recorded file. A part sent after the take is saved returns the take. The web app sends takes over 6 MB in parts and resends any part reported missing.
+
+When storage refuses a take (the bucket is down, out of space or suspended), the upload answers 503 `storage_unavailable` with `Retry-After: 30` and nothing is saved; the same `X-Take-Id` can be sent again later. The web app keeps every take on the device until the server answers with it: it holds its whole queue after a failure (1 s doubling to a minute, or `Retry-After`), cuts off a request that hasn't answered in 30 s plus 1 s per 16 KB, never gives up on a retryable failure, and tries everything left on the device again each time the app opens.
 
 ### Open parts (2026-10-20)
 

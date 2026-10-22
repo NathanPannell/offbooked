@@ -1,4 +1,4 @@
-import { AlertCircle, Check, CloudUpload, Pause, Play, RotateCcw, Trash2, Users } from "lucide-react";
+import { AlertCircle, Check, CloudOff, CloudUpload, Pause, Play, RotateCcw, Smartphone, Trash2, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ActorLine } from "../../api/types";
 import { AccuracyChip } from "../../components/AccuracyChip";
@@ -7,7 +7,8 @@ import { WordDiff } from "../../components/WordDiff";
 import { pieceStates, segmentLine } from "../../stt/live";
 import { verdict, VERDICT_MESSAGE } from "../../stt/score";
 import { joinNames, titleCase } from "../../lib/format";
-import type { UploadItem } from "../../upload/queue";
+import { uploadState, type UploadItem } from "../../upload/queue";
+import { getUploader } from "../../upload/uploader";
 import { recordedByLabel, type TakeAuthor } from "./recordedBy";
 import type { Score } from "./RecordSession";
 
@@ -159,6 +160,18 @@ export function LineCard({
                 <span>{mine ? "Listen back" : "Listen"}</span>
                 <span className="take-progress" aria-hidden="true" style={{ transform: `scaleX(${playing === takeKey ? progress : 0})` }} />
               </button>
+            ) : upload ? (
+              // Not on the server yet (say, after a reload or a crash): it plays from this device.
+              <button
+                type="button"
+                className={`take-play${playing === takeKey ? " is-playing" : ""}`}
+                onClick={() => void playFromDevice(upload.takeId, (url) => onPlay(takeKey, url))}
+                aria-label={`${playing === takeKey ? "Pause" : "Play"} your take, kept on this device`}
+              >
+                {playing === takeKey ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
+                <span>Listen back</span>
+                <span className="take-progress" aria-hidden="true" style={{ transform: `scaleX(${playing === takeKey ? progress : 0})` }} />
+              </button>
             ) : (
               <span className="take-play is-pending">
                 <CloudUpload size={16} aria-hidden="true" /> Saving…
@@ -256,23 +269,44 @@ function CueText({ text }: { text: string }) {
   );
 }
 
-/** Only while a take is on its way: saving, waiting for signal, or failed with Retry. */
+/** The one blob URL for a take played from the device; revoked when another plays. */
+let deviceUrl: string | null = null;
+
+async function playFromDevice(takeId: string, play: (url: string) => void) {
+  const blob = await getUploader().audio(takeId);
+  if (!blob) return;
+  if (deviceUrl) URL.revokeObjectURL(deviceUrl);
+  deviceUrl = URL.createObjectURL(blob);
+  play(deviceUrl);
+}
+
+/**
+ * Only while a take is on its way: saving; kept on the phone while there's no signal or the server
+ * won't take it yet (it keeps trying; tap to try now; a take kept only in this tab's memory asks for
+ * the page to stay open); or failed for good, with Retry.
+ */
 function UploadStatus({ upload, onRetry }: { upload: UploadItem | null; onRetry: (takeId: string) => void }) {
   if (!upload) return null;
-  switch (upload.status) {
+  switch (uploadState(upload)) {
     case "saved":
       return null;
-    case "uploading":
+    case "saving":
       return (
         <span className="chip">
           <CloudUpload size={13} aria-hidden="true" /> Saving…
         </span>
       );
-    case "queued":
+    case "offline":
       return (
-        <span className="chip" title={upload.error ?? undefined}>
-          <CloudUpload size={13} aria-hidden="true" /> {upload.attempts > 0 ? "Waiting for signal…" : "Saving…"}
-        </span>
+        <button type="button" className="chip chip-check" onClick={() => onRetry(upload.takeId)} title={upload.error ?? undefined}>
+          <CloudOff size={13} aria-hidden="true" /> No signal · {upload.volatile ? "keep this page open" : "on this phone"}
+        </button>
+      );
+    case "retrying":
+      return (
+        <button type="button" className="chip chip-check" onClick={() => onRetry(upload.takeId)} title={upload.error ?? undefined}>
+          <Smartphone size={13} aria-hidden="true" /> Not sent yet · {upload.volatile ? "keep this page open" : "on this phone"}
+        </button>
       );
     case "failed":
       return (
