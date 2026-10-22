@@ -7,7 +7,7 @@ import { plural, titleCase } from "../../lib/format";
 import { VERDICT_CHIP } from "../../components/AccuracyChip";
 import { formatVerdictCounts, scoreLabel, verdict, verdictCounts } from "../../stt/score";
 import type { SttState } from "../../stt/session";
-import type { UploadItem } from "../../upload/queue";
+import { uploadState, type UploadItem } from "../../upload/queue";
 import { byScene } from "./byScene";
 import { PickUpParts } from "./PickUpParts";
 import type { Score } from "./RecordSession";
@@ -49,8 +49,14 @@ export function Wrapped({
 }) {
   const [pickUpOpen, setPickUpOpen] = useState(false);
 
-  const saving = unsaved.filter((i) => i.status !== "failed");
-  const failed = unsaved.filter((i) => i.status === "failed");
+  const states = unsaved.map(uploadState);
+  const saving = unsaved.filter((_, i) => states[i] === "saving");
+  const failed = unsaved.filter((_, i) => states[i] === "failed");
+  // Kept on this phone and still being tried: no signal, or the server won't take them yet.
+  const waiting = unsaved.filter((_, i) => states[i] === "offline" || states[i] === "retrying");
+  const offline = states.includes("offline");
+  // Kept only in this tab's memory (no IndexedDB, or the phone refused to store them): closing loses them.
+  const volatile = unsaved.some((i) => i.volatile);
   const results = lines.map((l) => scores.get(l.line.id)?.result).filter((r) => !!r);
   const counts = verdictCounts(results);
   // Every line of the part (all the actor's lines without one), under its scene in script order.
@@ -60,16 +66,34 @@ export function Wrapped({
   const nextPart = otherParts.find((p) => p.left > 0);
   const allComplete = results.length > 0 && counts.partial === 0 && counts.unattempted === 0;
 
-  if (saving.length > 0 || failed.length > 0) {
+  if (unsaved.length > 0) {
     return (
       <main className="wrapped page page-narrow">
         <div className="card stack" aria-live="polite">
           {failed.length > 0 ? (
             <>
               <h1 className="display">Almost there</h1>
-              <p>{failed.length === 1 ? "One take" : `${failed.length} takes`} didn't upload. They're safe on this phone.</p>
+              <p>
+                {failed.length === 1 ? "One take" : `${failed.length} takes`} didn't upload. {failed[0]!.error}
+              </p>
               <button type="button" className="btn btn-primary" onClick={() => failed.forEach((f) => onRetry(f.takeId))}>
                 Try uploading again
+              </button>
+            </>
+          ) : waiting.length > 0 ? (
+            <>
+              <h1 className="display">{volatile ? "Keep this page open" : "Your takes are safe on this phone"}</h1>
+              <p>
+                {plural(unsaved.length, "take")} {unsaved.length === 1 ? "hasn't" : "haven't"} reached Offbooked yet.{" "}
+                {offline ? "There's no signal right now." : waiting[0]!.error}
+              </p>
+              <p className="muted">
+                {volatile
+                  ? "They keep trying by themselves, but this phone couldn't store them: closing this page before they're sent loses them."
+                  : "They keep trying by themselves. You can close this page: they go up the next time you open your link on this phone."}
+              </p>
+              <button type="button" className="btn btn-secondary" onClick={() => unsaved.forEach((f) => onRetry(f.takeId))}>
+                Try now
               </button>
             </>
           ) : (

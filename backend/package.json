@@ -12,7 +12,7 @@
     "seed": "node --env-file-if-exists=.env src/seed.ts",
     "test": "node --env-file-if-exists=.env --test --test-concurrency=4 \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "test:coverage": "node --env-file-if-exists=.env --test --test-concurrency=4 --experimental-test-coverage --test-coverage-lines=93 --test-coverage-branches=84 --test-coverage-functions=90 \"src/**/*.test.ts\"",
+    "test:coverage": "node --env-file-if-exists=.env --test --test-concurrency=4 --experimental-test-coverage --test-coverage-lines=94 --test-coverage-branches=86 --test-coverage-functions=91 \"src/**/*.test.ts\"",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write \"src/**/*.ts\" \"bench/*.ts\" eslint.config.js",
     "format:check": "prettier --check \"src/**/*.ts\" \"bench/*.ts\" eslint.config.js"

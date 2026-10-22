@@ -23,7 +23,7 @@ import { recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
 import { takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
-import { latestForLine } from "../../upload/queue";
+import { latestForLine, uploadState } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
@@ -462,6 +462,8 @@ export function RecordSession({
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
   const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
   const failed = unsaved.filter((i) => i.status === "failed");
+  // Kept on the phone but refused for a while (a server fault, not the signal): say so, with the reason.
+  const stuck = unsaved.filter((i) => uploadState(i) === "retrying" && i.attempts >= 3);
   const profile = (
     <CastProfile
       name={invite.actor.name}
@@ -573,6 +575,19 @@ export function RecordSession({
           <p className="notice small" role="status">
             Accuracy check isn't available on this device. Your recordings work as normal.
           </p>
+        )}
+        {failed.length === 0 && stuck.length > 0 && (
+          <div className="notice" role="status">
+            <span className="grow">
+              {stuck.length === 1 ? "A take hasn't" : `${stuck.length} takes haven't`} reached Offbooked yet. {stuck[0]!.error}{" "}
+              {stuck.some((i) => i.volatile)
+                ? "They keep trying by themselves. Keep this page open until they're sent."
+                : "They're safe on this phone and keep trying by themselves."}
+            </span>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={() => uploader.retryAll()}>
+              Try now
+            </button>
+          </div>
         )}
         {failed.length > 0 && (
           <div className="notice notice-error" role="alert">
