@@ -261,9 +261,14 @@ describe("take word timing", { skip: dbSkip }, () => {
     near(body.speech![1]!.startMs, L + 1000, "second stretch starts");
     near(body.speech![1]!.endMs, L + 1600, "second stretch ends");
     assert.ok(body.speech![1]!.endMs <= body.durationMs);
-    assert.deepEqual(body.wordStartsMs, [L + 20, L + 300, L + 1020]);
-    // Served from what was stored, the same again.
-    assert.deepEqual(await lineAudio(line.id), body);
+    // Re-timed on the voice (realign.ts): "Hello" where the voice starts, "there," within the first
+    // stretch by length, "friend." where the voice comes back after the pause.
+    assert.deepEqual(body.wordStartsMs, [L, L + 270, L + 1000]);
+    const [aligned] = await t.ctx.sql<{ alignedWordStartsMs: number[] }[]>`select aligned_word_starts_ms from takes where line_id = ${line.id}`;
+    assert.deepEqual(aligned!.alignedWordStartsMs, [500, 770, 1500], "stored in ms of the recording, beside what the app sent");
+    // Served from what was stored, the same again (but for the signed URL's expiry, in whole seconds).
+    const again = await lineAudio(line.id);
+    assert.deepEqual({ ...again, audioUrl: undefined }, { ...body, audioUrl: undefined });
   });
 
   test("once normalized, the recorder plays the take cut to its voice, not the upload", async () => {
@@ -280,7 +285,7 @@ describe("take word timing", { skip: dbSkip }, () => {
   test("the director's takes carry word starts too; ones that don't fit the line are dropped", async () => {
     const [, ben, anna2] = lines;
     assert.equal((await put(`/api/lines/${ben!.id}/take`, bearer(alice), "520,1520")).statusCode, 200);
-    assert.deepEqual((await lineAudio(ben!.id)).wordStartsMs, [L + 20, L + 1020]);
+    assert.deepEqual((await lineAudio(ben!.id)).wordStartsMs, [L, L + 1000]);
     // "Goodbye now, Ben." has three spoken words, not two: the take is kept, the starts aren't.
     assert.equal((await put(`/api/lines/${anna2!.id}/take`, bearer(alice), "520,1520")).statusCode, 200);
     const body = await lineAudio(anna2!.id);
@@ -311,7 +316,7 @@ describe("take word timing", { skip: dbSkip }, () => {
     const next = await lineAudio(line.id);
     assert.equal(next.speech?.length, 2);
     near(next.speech![1]!.startMs, L + 1000, "second stretch starts");
-    assert.deepEqual(next.wordStartsMs, [L + 20, L + 300, L + 1020]);
+    assert.deepEqual(next.wordStartsMs, [L, L + 270, L + 1000]);
   });
 
   test("lines without a take have neither", async () => {
@@ -333,5 +338,35 @@ describe("take word timing", { skip: dbSkip }, () => {
     });
     const allowed = String(res.headers["access-control-allow-headers"]).toLowerCase();
     for (const h of ["x-word-starts", "x-take-parts", "x-take-part"]) assert.ok(allowed.includes(h), allowed);
+  });
+});
+
+describe("re-timing a take as soon as it is uploaded", { skip: dbSkip }, () => {
+  let t: TestApp;
+  let alice: string;
+  let lineId: string;
+  before(async () => {
+    t = await createTestApp({ env: { NORMALIZE_ON_UPLOAD: "1" } });
+    alice = await signIn(t, "alice@example.test");
+    const made = await productionWithScript(t, alice, "ANNA: Hello there, friend.\nBEN: And you.", "Soon");
+    lineId = made.script.lines.find((l: Line) => l.kind === "dialogue").id;
+  });
+  after(() => t.close());
+
+  test("normalizes the take in the background and lays the app's word starts on its voice", async () => {
+    // The app heard "friend." a pause late; the server puts it where the voice comes back.
+    const res = await t.app.inject({
+      method: "PUT",
+      url: `/api/lines/${lineId}/take`,
+      headers: { ...bearer(alice), "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "2600", "x-word-starts": "520,800,1900" },
+      payload: wav([false, 500], [true, 600], [false, 400], [true, 600], [false, 500]),
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await t.ctx.jobs.idle();
+    const [row] = await t.ctx.sql<{ normalizedKey: string | null; streamKey: string | null; alignedWordStartsMs: number[] | null; wordStartsMs: number[] }[]>`
+      select normalized_key, stream_key, aligned_word_starts_ms, word_starts_ms from takes where line_id = ${lineId}`;
+    assert.ok(row!.normalizedKey && row!.streamKey, "normalized without anyone playing it");
+    assert.deepEqual(row!.alignedWordStartsMs, [500, 770, 1500]);
+    assert.deepEqual(row!.wordStartsMs, [520, 800, 1900], "what the app sent is kept");
   });
 });

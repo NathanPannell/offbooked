@@ -131,14 +131,15 @@ export async function normalizeClip(input: string, output: string, m4a?: string,
 }
 
 // normalizeClip, also saying where the cut started in the input (ms), so timings measured on the
-// input (TTS word timings, a take's word starts) can be moved onto the output, and where the voice
-// is in the output (`speech`, in ms of it: trim.ts's stretches, split on pauses).
+// input (TTS word timings, a take's word starts) can be moved onto the output, where the voice
+// is in the output (`speech`, in ms of it: trim.ts's stretches, split on pauses), and whether it
+// was cut to the voice at all (`cut`; false when the clip was kept whole).
 export async function normalizeClipCut(
   input: string,
   output: string,
   m4a?: string,
   opts: { clean?: boolean } = {},
-): Promise<{ samples: number; cutStartMs: number; speech: Stretch[] }> {
+): Promise<{ samples: number; cutStartMs: number; speech: Stretch[]; cut: boolean }> {
   const run = async (pre: string) => {
     const filters = `${pre}${levelTo(await measureLoudness(input, pre))}`;
     return ffmpeg(
@@ -182,9 +183,9 @@ export async function normalizeClipCut(
     // Nearly everything was below the silence threshold; keep the take untrimmed instead.
     await run(clean);
     const whole = await measure(output);
-    return { samples: whole, cutStartMs: 0, speech: shiftStretches(cut.stretches, 0, lengthMs(whole)) };
+    return { samples: whole, cutStartMs: 0, speech: shiftStretches(cut.stretches, 0, lengthMs(whole)), cut: false };
   }
-  return { samples, cutStartMs: cut.startMs, speech: shiftStretches(cut.stretches, cut.startMs, lengthMs(samples)) };
+  return { samples, cutStartMs: cut.startMs, speech: shiftStretches(cut.stretches, cut.startMs, lengthMs(samples)), cut: cut.filters !== "" };
 }
 
 export function normalizeTake(input: string, output: string): Promise<number> {

@@ -7,6 +7,7 @@ import { isUuid } from "./crypto.ts";
 import { HttpError, badRequest, conflict, notFound } from "./errors.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
 import { probeDurationSeconds } from "./render/ffmpeg.ts";
+import { normalizeSoon } from "./render/takeaudio.ts";
 import { scheduleRender } from "./render/queue.ts";
 import { ContentDeletedError, sweepIfDeleted } from "./retention.ts";
 import { parseWordStarts } from "./taketiming.ts";
@@ -132,13 +133,15 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
     throw new HttpError(503, "storage_unavailable", STORAGE_DOWN_MESSAGE, undefined, { "Retry-After": "30" });
   }
   if (await sweepIfDeleted(ctx, u.productionId)) throw new HttpError(410, "content_deleted", new ContentDeletedError().message);
-  await sql.begin(async (tx) => {
+  const created = await sql.begin(async (tx) => {
     const [inserted] = await tx`
       insert into takes (id, production_id, line_id, actor_id, recorded_by, recorded_by_user_id, storage_key, content_type, bytes, duration_ms, character_id, word_starts_ms)
       values (${id}, ${u.productionId}, ${u.lineId}, ${actorId}, ${u.recorder.kind}, ${userId}, ${key}, ${contentType}, ${audio.length}, ${durationMs}, ${voiceId}, ${wordStarts}::int[])
       on conflict (id) do nothing returning id`;
     if (inserted) await tx`update lines set current_take_id = ${id}, updated_at = now() where id = ${u.lineId}`;
+    return !!inserted;
   });
+  if (created) normalizeSoon(ctx, u.productionId, { id, storageKey: key, normalizedKey: null, normalizedSamples: null, streamKey: null });
   return respond(true);
 }
 

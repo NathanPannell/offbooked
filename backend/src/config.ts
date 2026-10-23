@@ -22,6 +22,8 @@ export interface Config {
   email: { driver: "log" | "resend"; resendApiKey: string | null; from: string };
   storage: StorageConfig;
   renderDebounceMs: number;
+  /** Normalize each take as soon as it is uploaded (its cut, levelled clip and re-timed words), one at a time. */
+  normalizeOnUpload: boolean;
   tts: TtsConfig;
 }
 
@@ -73,6 +75,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     email: { driver: emailDriver, resendApiKey, from: env.EMAIL_FROM?.trim() || "Offbooked <hello@offbooked.com>" },
     storage,
     renderDebounceMs: Number(env.RENDER_DEBOUNCE_MS ?? 15_000),
+    normalizeOnUpload: env.NORMALIZE_ON_UPLOAD?.trim() !== "0",
     tts: {
       driver: env.TTS_DRIVER?.trim() === "off" ? "off" : "piper",
       piperBin: env.PIPER_BIN?.trim() || "/opt/piper/piper",
