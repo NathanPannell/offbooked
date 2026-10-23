@@ -670,7 +670,7 @@ export function RecordSession({
           cueing
             ? "Listening to the cue… tap to start now."
             : recorder.recording && firstTakeHint
-              ? firstTakeHintText(keepRecording && live?.mode === "live")
+              ? firstTakeHintText(keepRecording && (live ? live.mode === "live" : sttState.status === "ready"))
               : undefined
         }
         disabled={!current}

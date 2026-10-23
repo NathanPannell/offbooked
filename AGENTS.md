@@ -94,7 +94,7 @@ Vite + React 19 + TypeScript + React Router in `web/`, plain CSS with tokens in 
 cd web
 npm install
 npm run dev        # http://localhost:5173, API at VITE_API_URL (first run downloads the ~40 MB speech model)
-npm test           # Vitest (npm run test:coverage for the floor): scoring, live words and auto-advance, take word timing, the mic check, cues played to their end, the recorder's follow band, play queue planning, line timing, upload queue, browser detection, review scrolling, joining and splitting lines, join memory, parse progress, source matching, next step, the one-screen setup (file and date checks, reading lines, create-then-upload retries), hosted speech model files
+npm test           # Vitest (npm run test:coverage for the floor): the recording options' defaults, scoring, live words and auto-advance, take word timing, the mic check, cues played to their end, the recorder's follow band, play queue planning, line timing, upload queue, browser detection, review scrolling, joining and splitting lines, join memory, parse progress, source matching, next step, the one-screen setup (file and date checks, reading lines, create-then-upload retries), hosted speech model files
 npm run typecheck
 npm run build      # tsc, then vite build to dist/ (what Vercel runs)
 npm run lint
