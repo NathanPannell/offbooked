@@ -85,18 +85,23 @@ export async function deleteAccount(ctx: Ctx, userId: string): Promise<{ product
       where production_id in (select id from productions where owner_id = ${userId})`;
     await tx`update notifications set recipient = null where production_id in (select id from productions where owner_id = ${userId})`;
   });
-  const owned = await ctx.sql<{ id: string }[]>`select id from productions where owner_id = ${userId} and content_deleted_at is null`;
-  let objects = 0;
-  for (const { id } of owned) {
-    try {
-      objects += (await deleteProductionContent(ctx, id))?.objects ?? 0;
-    } catch (err) {
-      ctx.log.error({ err, productionId: id }, "deleting a deleted account's production failed; the retention worker retries");
+  // The account is gone now. Whatever happens below, the worker is told, so content left by a
+  // failure (even of the list itself) doesn't wait for the next restart.
+  try {
+    const owned = await ctx.sql<{ id: string }[]>`select id from productions where owner_id = ${userId} and content_deleted_at is null`;
+    let objects = 0;
+    for (const { id } of owned) {
+      try {
+        objects += (await deleteProductionContent(ctx, id))?.objects ?? 0;
+      } catch (err) {
+        ctx.log.error({ err, productionId: id }, "deleting a deleted account's production failed; the retention worker retries");
+      }
     }
+    ctx.log.info({ userId, productions: owned.length, objects }, "account deleted");
+    return { productions: owned.length, objects };
+  } finally {
+    ctx.retention.kick();
   }
-  ctx.retention.kick();
-  ctx.log.info({ userId, productions: owned.length, objects }, "account deleted");
-  return { productions: owned.length, objects };
 }
 
 // The deletion itself, for a production already archived. `retention` keeps the cast details tied
