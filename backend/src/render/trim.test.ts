@@ -92,10 +92,21 @@ describe("ends anchored on the voice", () => {
     assert.equal(breath.startMs, 870 - TRIM.leadPadMs);
   });
 
+  test("a last word said too fast to show its pitch is still kept, while a quieter exhale is cut", () => {
+    // Voiced to 1000 ms, then 500 ms of loud sound with dips (fast speech) in the same run, then room.
+    const fast = speechBounds(levels([-70, 500], [-20, 500], [-24, 100], [-40, 50], [-22, 250], [-30, 100], [-70, 800]), 10, voicedIn([500, 1000]))!;
+    assert.equal(fast.endMs, 1500 + TRIM.tailPadMs);
+    // The same after a short silence, in a run of its own.
+    const apart = speechBounds(levels([-70, 500], [-20, 500], [-70, 130], [-24, 300], [-70, 800]), 10, voicedIn([500, 1000]))!;
+    assert.equal(apart.endMs, 1430 + TRIM.tailPadMs);
+    const exhale = speechBounds(levels([-70, 500], [-20, 500], [-40, 600], [-70, 800]), 10, voicedIn([500, 1000]))!;
+    assert.equal(exhale.endMs, 1000 + TRIM.releaseMs + TRIM.tailPadMs);
+  });
+
   test("a final unvoiced sound is kept, up to TRIM.releaseMs", () => {
     const t = speechBounds(levels([-70, 500], [-20, 600], [-30, 120], [-70, 800]), 10, voicedIn([500, 1100]))!;
     assert.equal(t.endMs, 1220 + TRIM.tailPadMs);
-    const long = speechBounds(levels([-70, 500], [-20, 600], [-32, 900], [-70, 500]), 10, voicedIn([500, 1100]))!;
+    const long = speechBounds(levels([-70, 500], [-20, 600], [-35, 900], [-70, 500]), 10, voicedIn([500, 1100]))!;
     assert.equal(long.endMs, 1100 + TRIM.releaseMs + TRIM.tailPadMs);
   });
 

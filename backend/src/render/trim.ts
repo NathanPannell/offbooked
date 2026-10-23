@@ -28,11 +28,14 @@ export const TRIM = {
   minRangeDb: 10, // below this between floor and speech, the clip can't be told apart: keep it whole
   pauseMs: 150, // a quiet gap this long inside the speech splits it into two stretches (see speechStretches)
   voicedRunMs: 50, // periodic sound this long is a voice (a vowel); breaths, clicks and bumps never are
-  voicing: 0.55, // normalized autocorrelation in the pitch range (60–400 Hz) that counts as voiced
+  voicing: 0.6, // normalized autocorrelation at the pitch period (60–400 Hz) that counts as voiced
+  valley: 0.3, // how far it must have dipped at shorter lags first (noise only fades, a pitch comes back)
   onsetMs: 300, // sound joined to the first voiced part (an "s", "f" or "th" before the vowel) kept, at most
   releaseMs: 250, // and joined to the last (a final "s" or "t", the voice dying away)
   closureMs: 120, // a quiet gap this short beside the voice is a stop's closure ("s|peak", "fact|s"), not a pause
   neighbourDb: 15, // sound across such a gap counts with the word when it is within this of the speech level (an "s" is; a breath isn't)
+  loudDb: 12, // after the last voiced part, sound this close to the speech level is still the line (a word said too fast to show its pitch)
+  loudGapMs: 300, // ...in the same run, or in one starting this soon after
 } as const;
 
 export interface SpeechBounds {
@@ -131,30 +134,46 @@ function voicedSpan(
     const latest = at + Math.round(TRIM.releaseMs / frameMs);
     let end = Math.min(runs[r]![1], latest);
     for (let k = r + 1; k < runs.length && runs[k]![0] <= latest && runs[k]![0] - end - 1 <= closure && loud(runs[k]!); k++)
-      end = Math.min(runs[k]![1], latest);
+      end = Math.max(end, Math.min(runs[k]![1], latest));
+    // Loud sound further on, in the same run or one just after, is speech the pitch check missed:
+    // an exhale is quieter, and the breath for the next line comes much later.
+    const loudGap = Math.round(TRIM.loudGapMs / frameMs);
+    for (let k = r; k < runs.length && (k === r || runs[k]![0] - end - 1 <= loudGap); k++) {
+      let last = -1;
+      for (let i = runs[k]![1]; i >= Math.max(runs[k]![0], end + 1); i--) {
+        if (levels[i]! >= speechDb - TRIM.loudDb) {
+          last = i;
+          break;
+        }
+      }
+      if (last < 0) {
+        if (k === r) continue;
+        break;
+      }
+      end = last;
+    }
     return [start, end];
   }
   return null;
 }
 
 /**
- * Whether each 10 ms frame of 16 kHz PCM is voiced: its 30 ms window, at 8 kHz and pre-emphasized, repeats at a pitch
- * between 60 and 400 Hz (normalized autocorrelation of at least TRIM.voicing). Breath, hiss,
- * clicks and bumps are noise and never repeat like that. Worked out only for frames asked about,
- * once each, so a take costs a few ms however long it is.
+ * Whether each 10 ms frame of 16 kHz PCM is voiced: its 30 ms window, at 8 kHz, repeats at a pitch
+ * between 60 and 400 Hz (normalized autocorrelation of at least TRIM.voicing at that period, after
+ * falling at least TRIM.valley below it at shorter lags). Breath, hiss, clicks and bumps never
+ * repeat like that, and rumble or pink room noise, which looks alike from one ms to the next, only
+ * fades with the lag: it never dips and comes back. Worked out only for frames asked about, once
+ * each, so a take costs a few ms however long it is.
  */
 export function voicing(pcm: Int16Array, rate: number = TRIM.analysisRate, frameMs: number = TRIM.frameMs): (frame: number) => boolean {
-  // At 8 kHz, with pre-emphasis: rumble, hum and pink room noise are mostly low frequencies, which
-  // look alike from one ms to the next; flattening them leaves only a pitch's repeats to find.
+  // At 8 kHz: a voice's pitch and its first harmonics are all well below 4 kHz. (No pre-emphasis:
+  // it takes away most of a low voice's fundamental and, with it, the repeats to find.)
   const step = Math.max(1, Math.round(rate / 8000));
   const low = new Float32Array(Math.floor(pcm.length / step));
-  let prev = 0;
   for (let i = 0; i < low.length; i++) {
     let sum = 0;
     for (let k = 0; k < step; k++) sum += pcm[i * step + k]!;
-    const x = sum / step;
-    low[i] = x - 0.95 * prev;
-    prev = x;
+    low[i] = sum / step;
   }
   const lowRate = rate / step;
   const hop = (lowRate * frameMs) / 1000;
@@ -173,8 +192,11 @@ export function voicing(pcm: Int16Array, rate: number = TRIM.analysisRate, frame
       mean /= size + maxLag;
       let e0 = 0;
       for (let i = from; i < from + size; i++) e0 += (low[i]! - mean) ** 2;
+      // From the shortest lags, so a high voice's dip (half its period) is seen too.
       let best = 0;
-      for (let lag = minLag; lag <= maxLag && e0 > 0; lag++) {
+      let depth = 0;
+      let lowest = 1;
+      for (let lag = 2; lag <= maxLag && e0 > 0; lag++) {
         let cross = 0;
         let e1 = 0;
         for (let i = from; i < from + size; i++) {
@@ -183,9 +205,14 @@ export function voicing(pcm: Int16Array, rate: number = TRIM.analysisRate, frame
           cross += a * b;
           e1 += b * b;
         }
-        if (e1 > 0) best = Math.max(best, cross / Math.sqrt(e0 * e1));
+        const r = e1 > 0 ? cross / Math.sqrt(e0 * e1) : 0;
+        lowest = Math.min(lowest, r);
+        if (lag >= minLag && r > best) {
+          best = r;
+          depth = r - lowest;
+        }
       }
-      result = best >= TRIM.voicing;
+      result = best >= TRIM.voicing && depth >= TRIM.valley;
     }
     cache.set(frame, result);
     return result;
