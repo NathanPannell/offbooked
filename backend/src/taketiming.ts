@@ -26,6 +26,28 @@ export function pieceCount(text: string): number {
   return linePieces(text).length;
 }
 
+/** A short first word this far before the next, with no comma or full stop after it, was something else ("Um, I…"). */
+export const LONE_FIRST_WORD_MS = 1500;
+
+/**
+ * When the line's first and last said words start, from a take's word starts (one per piece, ms of
+ * the recording; the narrator's pieces skipped), for cutting the take by them. A short first word
+ * heard far ahead of the rest with no break after it ("I" in "Um, I… [2 s] I shall…") is taken for
+ * noise and the cut starts at the next word. Null when they don't fit the line.
+ */
+export function wordAnchors(starts: readonly number[] | null, text: string): { firstMs: number; lastMs: number } | null {
+  const pieces = linePieces(text);
+  if (!starts?.length || starts.length !== pieces.length) return null;
+  const said = pieces.flatMap((p, i) => (p.narrator ? [] : [{ ms: starts[i]!, text: p.text }]));
+  if (!said.length) return null;
+  const lone =
+    said.length >= 3 &&
+    said[1]!.ms - said[0]!.ms > LONE_FIRST_WORD_MS &&
+    said[0]!.text.replace(/[^\p{L}\p{N}]/gu, "").length <= 4 &&
+    !/[,;:.!?\u2014-]['"\u2019\u201d)]*$/.test(said[0]!.text);
+  return { firstMs: said[lone ? 1 : 0]!.ms, lastMs: said[said.length - 1]!.ms };
+}
+
 /** The pieces `pieceCount` counts, in order: their text, and whether the narrator says them (a [direction]) rather than the character. */
 export function linePieces(text: string): { text: string; narrator: boolean }[] {
   const braces = new Array<boolean>(text.length).fill(false);

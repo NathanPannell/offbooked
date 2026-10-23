@@ -3,7 +3,7 @@ import { open, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { RENDER_SETTINGS } from "./plan.ts";
-import { analyzeSpeech, shiftStretches, type Stretch } from "./trim.ts";
+import { analyzeSpeech, shiftStretches, type Stretch, type WordsOnVoice } from "./trim.ts";
 
 const exec = promisify(execFile);
 const RATE = RENDER_SETTINGS.sampleRate;
@@ -72,8 +72,8 @@ const measure = async (flac: string) => (await flacSamples(flac)) ?? (await prob
 
 // The filters that cut a clip to its speech (see trim.ts), with a few ms of fade at each cut so it
 // never clicks. Empty when there is nothing to cut. `stretches` is where the voice is in the input.
-async function trimFilters(input: string): Promise<{ filters: string; startMs: number; stretches: Stretch[] }> {
-  const { bounds: b, stretches } = await analyzeSpeech(input);
+async function trimFilters(input: string, words?: WordsOnVoice | null): Promise<{ filters: string; startMs: number; stretches: Stretch[] }> {
+  const { bounds: b, stretches } = await analyzeSpeech(input, words);
   if (!b || b.endMs - b.startMs < 50) return { filters: "", startMs: 0, stretches };
   const s = (ms: number) => (ms / 1000).toFixed(3);
   const length = b.endMs - b.startMs;
@@ -138,7 +138,7 @@ export async function normalizeClipCut(
   input: string,
   output: string,
   m4a?: string,
-  opts: { clean?: boolean } = {},
+  opts: { clean?: boolean; words?: WordsOnVoice | null } = {},
 ): Promise<{ samples: number; cutStartMs: number; speech: Stretch[]; cut: boolean }> {
   const run = async (pre: string) => {
     const filters = `${pre}${levelTo(await measureLoudness(input, pre))}`;
@@ -175,7 +175,7 @@ export async function normalizeClipCut(
     );
   };
   const clean = opts.clean ? CLEAN : "";
-  const cut = await trimFilters(input);
+  const cut = await trimFilters(input, opts.words);
   await run(`${cut.filters}${clean}`);
   const samples = await measure(output);
   const lengthMs = (n: number) => (n * 1000) / RATE;

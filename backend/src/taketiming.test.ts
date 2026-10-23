@@ -15,11 +15,22 @@ import {
   servedSpeech,
   servedWordStarts,
   pieceCount,
+  wordAnchors,
 } from "./taketiming.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "./test/helpers.ts";
 
 // Frame levels: `ms` of each level in turn, in 10 ms frames.
 const levels = (...parts: [number, number][]) => parts.flatMap(([db, ms]) => Array<number>(ms / 10).fill(db));
+
+test("the line's first and last said words, for cutting by them", () => {
+  assert.deepEqual(wordAnchors([500, 800, 1500], "Hello there, friend."), { firstMs: 500, lastMs: 1500 });
+  assert.deepEqual(wordAnchors([500, 900, 900], "Go [Exit] away"), { firstMs: 500, lastMs: 900 }, "the narrator's pieces don't count");
+  assert.equal(wordAnchors([500, 800], "Hello there, friend."), null, "they don't fit the line");
+  // "Um, I… [2.4 s] I shall in all": the lone short first word was something else.
+  assert.deepEqual(wordAnchors([400, 3200, 3530, 3760], "I shall in all"), { firstMs: 3200, lastMs: 3760 });
+  // With a comma after it, a pause after the first word is the actor's.
+  assert.deepEqual(wordAnchors([400, 3200, 3530], "Ay, madam, common."), { firstMs: 400, lastMs: 3530 });
+});
 
 test("counts the words a character says as the web player does", () => {
   // The same lines as web/src/player/words.test.ts (lineTokens) and web/src/stt/wordTiming.test.ts.
