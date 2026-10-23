@@ -31,6 +31,8 @@ export const TRIM = {
   voicing: 0.55, // normalized autocorrelation in the pitch range (60–400 Hz) that counts as voiced
   onsetMs: 300, // sound joined to the first voiced part (an "s", "f" or "th" before the vowel) kept, at most
   releaseMs: 250, // and joined to the last (a final "s" or "t", the voice dying away)
+  closureMs: 120, // a quiet gap this short beside the voice is a stop's closure ("s|peak", "fact|s"), not a pause
+  neighbourDb: 15, // sound across such a gap counts with the word when it is within this of the speech level (an "s" is; a breath isn't)
 } as const;
 
 export interface SpeechBounds {
@@ -74,18 +76,28 @@ export function speechBounds(levels: number[], frameMs: number = TRIM.frameMs, v
   const runs = soundRuns(levels, l.thresholdDb, frameMs);
   if (runs.length === 0) return null;
   const totalMs = levels.length * frameMs;
-  const span = (voiced && voicedSpan(runs, voiced, frameMs)) ?? [runs[0]![0], runs[runs.length - 1]![1]];
+  const span = (voiced && voicedSpan(runs, voiced, frameMs, levels, l.speechDb)) ?? [runs[0]![0], runs[runs.length - 1]![1]];
   const startMs = Math.max(0, span[0] * frameMs - TRIM.leadPadMs);
   const endMs = Math.min(totalMs, (span[1] + 1) * frameMs + TRIM.tailPadMs);
   return { startMs, endMs, ...l };
 }
 
 /**
- * From the first voiced stretch (TRIM.voicedRunMs) to the last, each widened to the sound run it
- * sits in by at most TRIM.onsetMs before and TRIM.releaseMs after, as [first, last] frames. Null
- * when no run has a voice in it.
+ * From the first voiced stretch (TRIM.voicedRunMs) to the last, as [first, last] frames, widened
+ * by at most TRIM.onsetMs before and TRIM.releaseMs after: to the sound run it sits in, and across
+ * a stop's closure (TRIM.closureMs) to a run as loud as speech, so an "s" split off by the
+ * silence of a "p", "t" or "k" stays with its word while a breath, quieter, doesn't. Null when no
+ * run has a voice in it.
  */
-function voicedSpan(runs: [number, number][], voiced: (frame: number) => boolean, frameMs: number): [number, number] | null {
+function voicedSpan(
+  runs: [number, number][],
+  voiced: (frame: number) => boolean,
+  frameMs: number,
+  levels: number[],
+  speechDb: number,
+): [number, number] | null {
+  const closure = Math.round(TRIM.closureMs / frameMs);
+  const loud = ([a, b]: [number, number]) => Math.max(...levels.slice(a, b + 1)) >= speechDb - TRIM.neighbourDb;
   const need = Math.max(1, Math.round(TRIM.voicedRunMs / frameMs));
   const firstIn = ([a, b]: [number, number]) => {
     let n = 0;
@@ -104,17 +116,23 @@ function voicedSpan(runs: [number, number][], voiced: (frame: number) => boolean
     return -1;
   };
   let start: number | null = null;
-  for (const run of runs) {
-    const at = firstIn(run);
-    if (at >= 0) {
-      start = Math.max(run[0], at - Math.round(TRIM.onsetMs / frameMs));
-      break;
-    }
+  for (let r = 0; r < runs.length; r++) {
+    const at = firstIn(runs[r]!);
+    if (at < 0) continue;
+    const earliest = at - Math.round(TRIM.onsetMs / frameMs);
+    start = Math.max(runs[r]![0], earliest);
+    for (let k = r - 1; k >= 0 && runs[k]![1] >= earliest && start - runs[k]![1] - 1 <= closure && loud(runs[k]!); k--) start = Math.max(runs[k]![0], earliest);
+    break;
   }
   if (start === null) return null;
   for (let r = runs.length - 1; r >= 0; r--) {
     const at = lastIn(runs[r]!);
-    if (at >= 0) return [start, Math.min(runs[r]![1], at + Math.round(TRIM.releaseMs / frameMs))];
+    if (at < 0) continue;
+    const latest = at + Math.round(TRIM.releaseMs / frameMs);
+    let end = Math.min(runs[r]![1], latest);
+    for (let k = r + 1; k < runs.length && runs[k]![0] <= latest && runs[k]![0] - end - 1 <= closure && loud(runs[k]!); k++)
+      end = Math.min(runs[k]![1], latest);
+    return [start, end];
   }
   return null;
 }

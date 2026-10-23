@@ -80,6 +80,18 @@ describe("ends anchored on the voice", () => {
     assert.equal(breath.startMs, 1000 - TRIM.onsetMs - TRIM.leadPadMs);
   });
 
+  test('an "s" split from its vowel by a stop\'s closure stays with the word', () => {
+    // "Speak": a 130 ms "s", the 70 ms silence of the "p", then the vowel.
+    const speak = speechBounds(levels([-70, 500], [-30, 130], [-70, 70], [-20, 500], [-70, 800]), 10, voicedIn([700, 1200]))!;
+    assert.equal(speak.startMs, 500 - TRIM.leadPadMs);
+    // "...facts": the vowel, the "t"'s closure, then the final "s".
+    const facts = speechBounds(levels([-70, 700], [-20, 500], [-70, 60], [-30, 120], [-70, 800]), 10, voicedIn([700, 1200]))!;
+    assert.equal(facts.endMs, 1380 + TRIM.tailPadMs);
+    // A breath, quieter than speech, across the same short gap is still cut.
+    const breath = speechBounds(levels([-70, 500], [-42, 300], [-70, 70], [-20, 500], [-70, 800]), 10, voicedIn([870, 1370]))!;
+    assert.equal(breath.startMs, 870 - TRIM.leadPadMs);
+  });
+
   test("a final unvoiced sound is kept, up to TRIM.releaseMs", () => {
     const t = speechBounds(levels([-70, 500], [-20, 600], [-30, 120], [-70, 800]), 10, voicedIn([500, 1100]))!;
     assert.equal(t.endMs, 1220 + TRIM.tailPadMs);
