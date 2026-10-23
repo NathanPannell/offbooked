@@ -31,6 +31,9 @@ interface Line {
 type FlagCode = "speaker" | "missed_cue" | "direction" | "text" | "heading" | "backup";
 interface Take {
   id: string; lineId: string; audioUrl: string; durationMs: number; createdAt: string;
+  // audioUrl (here, in `current`, `together` and a cue voiced by a take): the take's stream .m4a once
+  // it has been normalized (cut to the voice, levelled), else the upload as recorded. durationMs is
+  // always the recording's length.
   stt: { transcript: string; accuracy: number; ops: WordOp[] } | null;   // accuracy 0..1, from on-device STT
 }
 interface WordOp { op: "ok" | "sub" | "del" | "ins"; expected?: string; heard?: string }

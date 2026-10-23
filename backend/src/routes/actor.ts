@@ -13,7 +13,7 @@ import { runThrough } from "../runthrough.ts";
 import { partCards } from "./join.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
 import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
-import { castRows, linesOf, lineView, sectionsOf, sectionView, takeColumns, takeView, voicesOf, type LineRow, type TakeRow } from "../views.ts";
+import { castRows, linesOf, lineView, sectionsOf, sectionView, takeColumns, takePlayKey, takeView, voicesOf, type LineRow, type TakeRow } from "../views.ts";
 
 const WORD_OPS = new Set(["ok", "sub", "del", "ins"]);
 
@@ -288,6 +288,7 @@ interface CurrentTakeRow {
   actorId: string | null;
   recordedBy: "actor" | "director";
   storageKey: string;
+  streamKey: string | null;
   actorName: string | null;
   userName: string | null;
   userEmail: string | null;
@@ -298,7 +299,7 @@ async function currentTakes(ctx: Ctx, lineIds: string[], characterIds: string[],
   const out = new Map<string, CurrentTakeView>();
   if (!lineIds.length) return out;
   const rows = await ctx.sql<CurrentTakeRow[]>`
-    select lv.line_id, t.actor_id, t.recorded_by, t.storage_key, coalesce(a.first_name, split_part(a.name, ' ', 1)) as actor_name,
+    select lv.line_id, t.actor_id, t.recorded_by, t.storage_key, t.stream_key, coalesce(a.first_name, split_part(a.name, ' ', 1)) as actor_name,
       u.name as user_name, u.email as user_email
     from line_voices lv join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id)
       left join actors a on a.id = t.actor_id
@@ -308,7 +309,7 @@ async function currentTakes(ctx: Ctx, lineIds: string[], characterIds: string[],
   for (const r of rows) {
     if (out.has(r.lineId) || r.actorId === actorId) continue;
     const recordedBy = takeRecorder(r);
-    out.set(r.lineId, { source: r.recordedBy, by: recordedBy.name, recordedBy, mine: false, audioUrl: await ctx.storage.signedUrl(r.storageKey) });
+    out.set(r.lineId, { source: r.recordedBy, by: recordedBy.name, recordedBy, mine: false, audioUrl: await ctx.storage.signedUrl(takePlayKey(r)) });
   }
   return out;
 }
@@ -325,8 +326,10 @@ export async function togetherViews(ctx: Ctx, productionId: string, lines: LineR
   const out = new Map<string, TogetherView[]>();
   const shared = lines.filter((l) => l.voiceIds);
   if (!shared.length) return out;
-  const rows = await ctx.sql<{ lineId: string; characterId: string; name: string; storageKey: string | null; recordedBy: "actor" | "director" | null }[]>`
-    select lv.line_id, lv.character_id, c.name, t.storage_key, t.recorded_by
+  const rows = await ctx.sql<
+    { lineId: string; characterId: string; name: string; storageKey: string | null; streamKey: string | null; recordedBy: "actor" | "director" | null }[]
+  >`
+    select lv.line_id, lv.character_id, c.name, t.storage_key, t.stream_key, t.recorded_by
     from line_voices lv join characters c on c.id = lv.character_id
       left join takes t on t.id = voice_take(lv.line_id, lv.shared, lv.character_id)
     where lv.production_id = ${productionId} and lv.line_id = any(${shared.map((l) => l.id)}::uuid[])
@@ -340,7 +343,7 @@ export async function togetherViews(ctx: Ctx, productionId: string, lines: LineR
       views.push({
         characterId: id,
         characterName: r.name,
-        audioUrl: r.storageKey ? await ctx.storage.signedUrl(r.storageKey) : null,
+        audioUrl: r.storageKey ? await ctx.storage.signedUrl(takePlayKey({ storageKey: r.storageKey, streamKey: r.streamKey })) : null,
         audioSource: r.recordedBy ?? "none",
       });
     }

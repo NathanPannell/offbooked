@@ -16,6 +16,8 @@ export interface LocalTake {
   clientTakeId: string;
   url: string;
   durationMs: number;
+  /** Where Listen back stops: the end of the line's voice, before the pause that ended the take (`listenEndMs`). */
+  endMs?: number | null;
 }
 
 /**
@@ -30,6 +32,7 @@ export function LineCard({
   current,
   recording,
   localTake,
+  finishing = false,
   upload,
   author,
   score,
@@ -52,6 +55,8 @@ export function LineCard({
   current: boolean;
   recording: boolean;
   localTake: LocalTake | null;
+  /** The take just recorded here is still being kept (the next line is already recording): shown as saving. */
+  finishing?: boolean;
   upload: UploadItem | null;
   /** Who recorded the take that plays for this line now; null when nobody has. */
   author: TakeAuthor | null;
@@ -65,7 +70,7 @@ export function LineCard({
   liveHint?: string;
   /** How far the playing preview has got, 0 to 1. */
   progress?: number;
-  onPlay: (key: string, url: string) => void;
+  onPlay: (key: string, url: string, endMs?: number | null) => void;
   /** Plays several clips at once: a shared line's take with the others'. */
   onPlayTogether?: (key: string, urls: string[]) => void;
   onSelect: () => void;
@@ -77,10 +82,10 @@ export function LineCard({
   const [showDiff, setShowDiff] = useState(false);
   const { line, cue, directions, take } = actorLine;
   // A take recorded on this screen is the person's own, whoever's played before.
-  const who: TakeAuthor | null = localTake || upload ? { kind: author?.kind ?? "actor", name: "you", mine: true } : author;
+  const who: TakeAuthor | null = localTake || upload || finishing ? { kind: author?.kind ?? "actor", name: "you", mine: true } : author;
   const mine = who?.mine ?? false;
   const takeUrl = localTake?.url ?? take?.audioUrl ?? actorLine.current?.audioUrl ?? null;
-  const recorded = !!takeUrl || !!upload;
+  const recorded = !!takeUrl || !!upload || finishing;
   const takeKey = `take:${line.id}`;
   const cueKey = `cue:${line.id}`;
   const togetherKey = `together:${line.id}`;
@@ -153,7 +158,7 @@ export function LineCard({
               <button
                 type="button"
                 className={`take-play${playing === takeKey ? " is-playing" : ""}`}
-                onClick={() => onPlay(takeKey, takeUrl)}
+                onClick={() => onPlay(takeKey, takeUrl, localTake?.url === takeUrl ? localTake.endMs : null)}
                 aria-label={`${playing === takeKey ? "Pause" : "Play"} ${mine ? "your take" : `${who?.name ?? "their"}'s take`}`}
               >
                 {playing === takeKey ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}

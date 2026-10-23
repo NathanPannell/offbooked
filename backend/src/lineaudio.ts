@@ -1,7 +1,7 @@
 import type { Ctx } from "./context.ts";
 import type { AudioSource } from "./render/plan.ts";
 import { TTS_PRIORITY } from "./tts/service.ts";
-import { takeColumns, type LineRow, type TakeRow } from "./views.ts";
+import { takeColumns, takePlayKey, type LineRow, type TakeRow } from "./views.ts";
 
 export interface CueView {
   characterName: string;
@@ -37,7 +37,7 @@ export async function cueViews(ctx: Ctx, productionId: string, cues: (LineRow | 
       if (!cue) return null;
       const base = { characterName: names.get(cue.characterId!) ?? "", text: cue.text };
       const take = cue.currentTakeId ? takes.get(cue.currentTakeId) : undefined;
-      if (take) return { ...base, audioUrl: await storage.signedUrl(take.storageKey), audioSource: take.recordedBy };
+      if (take) return { ...base, audioUrl: await storage.signedUrl(takePlayKey(take)), audioSource: take.recordedBy };
       const url = ttsUrls.get(cue.id);
       return url ? { ...base, audioUrl: url, audioSource: "tts" as const } : { ...base, audioUrl: null, audioSource: "none" as const };
     }),

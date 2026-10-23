@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { shiftStretches, speechStretches, TRIM } from "./render/trim.ts";
+
+/** What the trim keeps before the first sound. */
+const L = TRIM.leadPadMs;
 import type { Ctx } from "./context.ts";
 import {
   backfillTiming,
@@ -120,8 +123,8 @@ describe("backfilling a take's timing", () => {
     await backfillTiming(ctx, take("ok"), 860);
     assert.equal(gets.length, 1);
     assert.equal(updates.length, 1);
-    assert.deepEqual(updates[0]![0], [120, 620], "the speech, moved onto the trimmed clip");
-    assert.equal(updates[0]![1], 180, "the trim's cut");
+    assert.deepEqual(updates[0]![0], [L, L + 500], "the speech, moved onto the trimmed clip");
+    assert.equal(updates[0]![1], 300 - L, "the trim's cut");
   });
 
   test("tries a take again after a passing failure, but only once the cooldown is over", async () => {
@@ -246,27 +249,38 @@ describe("take word timing", { skip: dbSkip }, () => {
     assert.equal(res.statusCode, 200, res.body);
     const body = await lineAudio(line.id);
     assert.equal(body.source, "actor");
-    // The trim keeps 120 ms before the first sound: the clip starts 380 ms into the recording.
+    // The trim keeps TRIM.leadPadMs before the first sound: the clip starts that much before 500 ms.
     const [row] = await t.ctx.sql<{ trimStartMs: number; speechMs: number[]; wordStartsMs: number[] }[]>`
       select trim_start_ms, speech_ms, word_starts_ms from takes where line_id = ${line.id}`;
     assert.equal(row!.trimStartMs, 500 - TRIM.leadPadMs);
     assert.deepEqual(row!.wordStartsMs, [520, 800, 1520], "kept as the app sent them, in ms of the recording");
     assert.equal(row!.speechMs.length, 4, "stored once, with the take");
     assert.equal(body.speech?.length, 2, JSON.stringify(body.speech));
-    near(body.speech![0]!.startMs, 120, "first stretch starts");
-    near(body.speech![0]!.endMs, 720, "first stretch ends");
-    near(body.speech![1]!.startMs, 1120, "second stretch starts");
-    near(body.speech![1]!.endMs, 1720, "second stretch ends");
+    near(body.speech![0]!.startMs, L, "first stretch starts");
+    near(body.speech![0]!.endMs, L + 600, "first stretch ends");
+    near(body.speech![1]!.startMs, L + 1000, "second stretch starts");
+    near(body.speech![1]!.endMs, L + 1600, "second stretch ends");
     assert.ok(body.speech![1]!.endMs <= body.durationMs);
-    assert.deepEqual(body.wordStartsMs, [140, 420, 1140]);
+    assert.deepEqual(body.wordStartsMs, [L + 20, L + 300, L + 1020]);
     // Served from what was stored, the same again.
     assert.deepEqual(await lineAudio(line.id), body);
+  });
+
+  test("once normalized, the recorder plays the take cut to its voice, not the upload", async () => {
+    const line = lines[0]!;
+    const res = await t.app.inject({ method: "GET", url: "/api/invite/lines", headers: invite(riz.inviteUrl) });
+    assert.equal(res.statusCode, 200, res.body);
+    const take = (res.json() as { lines: { line: { id: string }; take: { audioUrl: string; durationMs: number } | null }[] }).lines.find(
+      (l) => l.line.id === line.id,
+    )!.take!;
+    assert.match(take.audioUrl, /normalized/);
+    assert.equal(take.durationMs, 2600, "still the recording's length");
   });
 
   test("the director's takes carry word starts too; ones that don't fit the line are dropped", async () => {
     const [, ben, anna2] = lines;
     assert.equal((await put(`/api/lines/${ben!.id}/take`, bearer(alice), "520,1520")).statusCode, 200);
-    assert.deepEqual((await lineAudio(ben!.id)).wordStartsMs, [140, 1140]);
+    assert.deepEqual((await lineAudio(ben!.id)).wordStartsMs, [L + 20, L + 1020]);
     // "Goodbye now, Ben." has three spoken words, not two: the take is kept, the starts aren't.
     assert.equal((await put(`/api/lines/${anna2!.id}/take`, bearer(alice), "520,1520")).statusCode, 200);
     const body = await lineAudio(anna2!.id);
@@ -293,11 +307,11 @@ describe("take word timing", { skip: dbSkip }, () => {
     assert.equal(first.wordStartsMs, undefined, "not before the cut is known again");
     await t.ctx.jobs.idle();
     const [row] = await t.ctx.sql<{ trimStartMs: number; speechMs: number[] }[]>`select trim_start_ms, speech_ms from takes where line_id = ${line.id}`;
-    assert.equal(row!.trimStartMs, 380);
+    assert.equal(row!.trimStartMs, 500 - L);
     const next = await lineAudio(line.id);
     assert.equal(next.speech?.length, 2);
-    near(next.speech![1]!.startMs, 1120, "second stretch starts");
-    assert.deepEqual(next.wordStartsMs, [140, 420, 1140]);
+    near(next.speech![1]!.startMs, L + 1000, "second stretch starts");
+    assert.deepEqual(next.wordStartsMs, [L + 20, L + 300, L + 1020]);
   });
 
   test("lines without a take have neither", async () => {

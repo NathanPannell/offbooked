@@ -12,6 +12,18 @@ export const MIN_TAKE_MS = 400;
 
 export type MicStatus = "idle" | "requesting" | "ready";
 
+export type FinishedTake = RecordedTake & { tooShort: boolean };
+
+const finished = (recorded: RecordedTake): FinishedTake => ({
+  ...recorded,
+  tooShort: recorded.durationMs < MIN_TAKE_MS || recorded.blob.size === 0,
+});
+
+/** Stops `current` once `next` is really recording, so the two overlap and no audio falls between them. */
+export function overlapTakes(current: ActiveTake, next: ActiveTake): Promise<RecordedTake> {
+  return next.started.then(() => current.stop());
+}
+
 /**
  * One take at a time from a shared mic: asks for the mic on the first tap, keeps the screen awake
  * while recording, stops itself at the time limit. Used by the actor's recorder and the director's
@@ -70,13 +82,34 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
   }, []);
 
   /** Stops the take. Resolves null when nothing was recording or the take was too short to keep. */
-  const stop = useCallback(async (): Promise<(RecordedTake & { tooShort: boolean }) | null> => {
+  const stop = useCallback(async (): Promise<FinishedTake | null> => {
     const take = takeRef.current;
     takeRef.current = null;
     setRecording(null);
     if (!take) return null;
-    const recorded = await take.stop();
-    return { ...recorded, tooShort: recorded.durationMs < MIN_TAKE_MS || recorded.blob.size === 0 };
+    return finished(await take.stop());
+  }, []);
+
+  /**
+   * Hands the mic straight on to the next line: its take starts now, on the same open mic, and the
+   * one recording stops only once the new one is really taking audio, so the two overlap by a few
+   * ms and nothing said between them is lost. Returns the finished take, still being wrapped up
+   * (null when nothing was recording or the next take couldn't start: then stop and start instead).
+   */
+  const handoff = useCallback((nextLineId: string): Promise<FinishedTake> | null => {
+    const take = takeRef.current;
+    const mic = micRef.current;
+    if (!take || !mic?.isOpen) return null;
+    let next: ActiveTake;
+    try {
+      next = mic.start(MAX_TAKE_MS, () => onLimitRef.current?.(nextLineId));
+    } catch {
+      return null;
+    }
+    takeRef.current = next;
+    setElapsed(0);
+    setRecording({ lineId: nextLineId, startedAt: performance.now() });
+    return overlapTakes(take, next).then(finished);
   }, []);
 
   /** Remembers the mic picked in mic settings; the next take opens it. */
@@ -98,6 +131,7 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     capture: micRef.current?.capture ?? null,
     start,
     stop,
+    handoff,
     setDevice,
   };
 }
@@ -105,7 +139,8 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
 /**
  * One shared player for previews (takes and cues), so only one thing plays at a time. `playTogether`
  * plays several clips at once (a shared line: your take with the others'). `progress` is how far the
- * playing clip has got, 0 to 1.
+ * playing clip has got, 0 to 1. With `endMs`, playback ends there, as if the clip did (a take just
+ * recorded, which still has the pause that ended it).
  */
 export function usePlayback(onError?: () => void) {
   const players = useRef<HTMLAudioElement[]>([]);
@@ -113,9 +148,13 @@ export function usePlayback(onError?: () => void) {
   const [progress, setProgress] = useState(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopAll = useCallback(() => {
+    if (endTimer.current) clearTimeout(endTimer.current);
+    endTimer.current = null;
     for (const a of players.current) {
+      a.onplaying = null;
       a.onpause = null;
       a.onended = null;
       a.ontimeupdate = null;
@@ -126,7 +165,7 @@ export function usePlayback(onError?: () => void) {
   useEffect(() => () => stopAll(), [stopAll]);
 
   const playTogether = useCallback(
-    (key: string, urls: string[]) => {
+    (key: string, urls: string[], endMs: number | null = null) => {
       stopAll();
       if (playing === key || urls.length === 0) {
         setPlaying(null);
@@ -150,9 +189,25 @@ export function usePlayback(onError?: () => void) {
         };
         // The longest clip drives the progress.
         audio.ontimeupdate = () => {
+          if (endMs !== null) {
+            if (i === 0) setProgress(Math.min(1, (audio.currentTime * 1000) / endMs));
+            return;
+          }
           const longest = used.reduce((a, b) => ((b.duration || 0) > (a.duration || 0) ? b : a));
-          if (audio === longest && longest.duration) setProgress(Math.min(1, audio.currentTime / longest.duration));
+          if (audio === longest && Number.isFinite(longest.duration) && longest.duration) setProgress(Math.min(1, audio.currentTime / longest.duration));
         };
+        if (endMs !== null && i === 0) {
+          audio.onplaying = () => {
+            if (endTimer.current) clearTimeout(endTimer.current);
+            endTimer.current = setTimeout(
+              () => {
+                stopAll();
+                setPlaying((p) => (p === key ? null : p));
+              },
+              Math.max(0, endMs - audio.currentTime * 1000) / (audio.playbackRate || 1),
+            );
+          };
+        }
       });
       Promise.all(used.map((a) => a.play())).then(
         () => setPlaying(key),
@@ -166,7 +221,7 @@ export function usePlayback(onError?: () => void) {
     [playing, stopAll],
   );
 
-  const play = useCallback((key: string, url: string) => playTogether(key, [url]), [playTogether]);
+  const play = useCallback((key: string, url: string, endMs: number | null = null) => playTogether(key, [url], endMs), [playTogether]);
 
   const pause = useCallback(() => {
     stopAll();
