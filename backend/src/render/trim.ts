@@ -392,9 +392,18 @@ export async function analyzeSpeech(file: string, words?: WordsOnVoice | null): 
     ["-hide_banner", "-nostdin", "-i", file, "-vn", "-ac", "1", "-ar", String(TRIM.analysisRate), "-f", "s16le", "-acodec", "pcm_s16le", "-"],
     { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, timeout: 2 * 60_000 },
   );
-  const bytes = stdout as Buffer;
+  return analyzePcm(pcmOf(stdout as Buffer), words);
+}
+
+/** 16-bit little-endian samples from a buffer ffmpeg wrote. */
+export function pcmOf(bytes: Buffer): Int16Array {
   const pcm = new Int16Array(Math.floor(bytes.length / 2));
   for (let i = 0; i < pcm.length; i++) pcm[i] = bytes.readInt16LE(i * 2);
+  return pcm;
+}
+
+/** `analyzeSpeech` on 16 kHz mono samples already decoded. */
+export function analyzePcm(pcm: Int16Array, words?: WordsOnVoice | null): SpeechAnalysis {
   const levels = frameLevels(pcm);
   const voiced = voicing(pcm);
   const stretches = speechStretches(levels);

@@ -32,8 +32,9 @@ export interface NormalizedTake {
 // render or playback of each take redoes it once. t2: cut to the speech (trim.ts). t3: light noise
 // clean-up and two-pass loudness, so every take plays at the same level as the TTS. t4: the cut is
 // anchored on voiced sound, so breaths and bumps at the ends go too (trim.ts). t5: cut by the line's
-// words when the app heard them (`wordBounds`), re-timed on the voice first.
-export const NORMALIZE_VERSION = "t5";
+// words when the app heard them (`wordBounds`), re-timed on the voice first. t6: one decode of the
+// upload (cleaned at 48 kHz beside the 16 kHz copy for the speech), loudness measured in-process.
+export const NORMALIZE_VERSION = "t6";
 export const isCurrentNormalized = (key: string | null): key is string => Boolean(key?.endsWith(`.${NORMALIZE_VERSION}.flac`));
 
 // Each take is normalized as soon as it is uploaded (normalizeSoon), so the recorder, the cues and
