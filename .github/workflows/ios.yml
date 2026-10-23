@@ -79,7 +79,8 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app"
           xcrun simctl spawn "$UDID" log stream --style compact --level debug --predicate 'process == "App"' > "$RUNNER_TEMP/out/app.log" 2>&1 &
-          xcrun simctl launch "$UDID" com.offbooked.app
+          # Capacitor prints to stdout: the page it loads, and the web app's console in debug builds.
+          xcrun simctl launch --stdout="$RUNNER_TEMP/out/console.log" --stderr="$RUNNER_TEMP/out/console.log" "$UDID" com.offbooked.app
       - name: Screenshot the landing screen
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -88,8 +89,9 @@ jobs:
           xcrun simctl io "$UDID" screenshot "$RUNNER_TEMP/out/launch.png"
           # Still running, and the bundled page loaded (Capacitor logs it in debug builds).
           xcrun simctl spawn "$UDID" launchctl list | grep -q com.offbooked.app || { echo "::error::the app is not running"; exit 1; }
-          grep -q "Loading app at capacitor://localhost" "$RUNNER_TEMP/out/app.log" || { echo "::error::the bundled web app never loaded"; tail -100 "$RUNNER_TEMP/out/app.log"; exit 1; }
-          if grep -E "ERROR MESSAGE|Unhandled Promise Rejection|TypeError" "$RUNNER_TEMP/out/app.log"; then echo "::error::the web app logged errors"; exit 1; fi
+          cat "$RUNNER_TEMP/out/console.log"
+          grep -q "Loading app at capacitor://localhost" "$RUNNER_TEMP/out/console.log" || { echo "::error::the bundled web app never loaded"; exit 1; }
+          if grep -E "\[error\]|ERROR MESSAGE|Unhandled Promise Rejection" "$RUNNER_TEMP/out/console.log"; then echo "::error::the web app logged errors"; exit 1; fi
       - name: Open a cast link inside the app (offbooked:// custom scheme)
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -98,6 +100,7 @@ jobs:
           sleep 10
           xcrun simctl io "$UDID" screenshot "$RUNNER_TEMP/out/join-link.png"
           xcrun simctl spawn "$UDID" launchctl list | grep -q com.offbooked.app || { echo "::error::the app is not running"; exit 1; }
+          if grep -E "\[error\]|ERROR MESSAGE|Unhandled Promise Rejection" "$RUNNER_TEMP/out/console.log"; then echo "::error::the web app logged errors"; exit 1; fi
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v7.0.1

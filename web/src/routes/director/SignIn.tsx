@@ -5,6 +5,7 @@ import { errorMessage, session } from "../../api/client";
 import { auth } from "../../api/director";
 import { Brand } from "../../components/Brand";
 import { safeNext } from "../../lib/names";
+import { isNativeApp } from "../../native/platform";
 
 export default function SignIn() {
   const [params] = useSearchParams();
@@ -21,7 +22,7 @@ export default function SignIn() {
     setState("sending");
     setError(null);
     try {
-      const result = await auth.request(email.trim(), next);
+      const result = await auth.request(email.trim(), next, isNativeApp());
       setDevLink(result?.devLink ?? null);
       setState("sent");
     } catch (err) {
@@ -40,6 +41,7 @@ export default function SignIn() {
           <p>
             We sent a sign-in link to <strong>{email}</strong>. It works once and expires in 15 minutes.
           </p>
+          {isNativeApp() && <p className="small muted">Open it on this iPhone and it signs you in here, in the app.</p>}
           {devLink && (
             <a className="btn btn-primary" href={devLink}>
               Use dev sign-in link

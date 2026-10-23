@@ -217,6 +217,27 @@ describe("stallTimeoutMs", () => {
   });
 });
 
+describe("the uploader in the app", () => {
+  it("says when it is sending (for iOS background time) and tries again at once when asked", async () => {
+    vi.useFakeTimers();
+    let down = true;
+    const busy: boolean[] = [];
+    const up = uploader((item) => (down ? refused() : Promise.resolve(landed(item))), { onBusyChange: (b) => busy.push(b) });
+    await up.add(take());
+    await vi.advanceTimersByTimeAsync(0);
+    // Refused once: the queue holds for a second, and has nothing to send meanwhile.
+    expect(busy).toEqual([true, false]);
+    expect(statusOf(up)).toEqual(["queued"]);
+
+    // The phone gets its signal back (or the app comes to the front): no waiting out the backoff.
+    down = false;
+    up.retryNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(statusOf(up)).toEqual(["saved"]);
+    expect(busy).toEqual([true, false, true, false]);
+  });
+});
+
 describe("withUploadLock", () => {
   it("goes ahead without the lock when another tab holds it for too long", async () => {
     // A tab frozen in the background mid-upload keeps the lock; this tab's takes still go up.
