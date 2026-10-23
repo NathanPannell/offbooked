@@ -50,7 +50,7 @@ The web app's microphone request is granted inside the app by Capacitor; iOS ask
 1. `npm ci`, `npm run build` (the production build, with the speech model), `npx cap sync ios`.
 2. Picks an iPhone on the newest iOS runtime (`.github/scripts/pick-simulator.mjs`) and builds the Debug app for the simulator with `CODE_SIGNING_ALLOWED=NO`.
 3. Boots the simulator, installs and launches the app, and fails unless it is still running after 25 s, Capacitor logged `Loading app at capacitor://localhost`, and the web console logged no errors (`console.log` in the artifact).
-4. Opens `offbooked://join/not-a-real-link` and checks the app handles it.
+4. Opens `offbooked://join/not-a-real-link`: the screenshot shows iOS offering to open it in Offbooked (simctl can't tap Open), which proves the scheme is registered and the app keeps running. Where a link lands inside the app is covered by `src/native/links.test.ts`; universal links need a phone and the real Team ID.
 5. Uploads `ios-simulator` (screenshots `launch.png`, `join-link.png`, the app's console and system log, the xcodebuild log) and `ios-simulator-app` (the built `.app`, zipped, for the Mac checklist).
 
 To iterate from Windows: push, then `gh run list --branch <branch> --workflow iOS`, `gh run view <id> --log-failed` and `gh run download <id> -n ios-simulator`.

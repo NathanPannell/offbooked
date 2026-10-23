@@ -95,7 +95,10 @@ jobs:
           cat "$RUNNER_TEMP/out/console.log"
           grep -q "Loading app at capacitor://localhost" "$RUNNER_TEMP/out/console.log" || { echo "::error::the bundled web app never loaded"; exit 1; }
           if grep -E "\[error\]|ERROR MESSAGE|Unhandled Promise Rejection" "$RUNNER_TEMP/out/console.log"; then echo "::error::the web app logged errors"; exit 1; fi
-      - name: Open a cast link inside the app (offbooked:// custom scheme)
+      # iOS asks "Open in Offbooked?" before handing over a custom-scheme link, and simctl cannot tap
+      # Open: this proves the scheme belongs to the app and the app survives it. Routing the link to its
+      # page is unit-tested (src/native/links.test.ts).
+      - name: An offbooked:// link goes to the app
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
