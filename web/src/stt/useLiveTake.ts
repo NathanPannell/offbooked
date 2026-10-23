@@ -128,8 +128,8 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
 
     // Mic level: from the captured samples, or by polling the level meter where AudioWorklet is missing.
     if (capture) {
-      capture.begin();
-      cleanups.push(() => capture.end());
+      const take = capture.begin();
+      cleanups.push(() => capture.end(take));
       cleanups.push(
         capture.onChunk((chunk) => {
           for (let start = 0; start < chunk.length; start += FRAME_SAMPLES) {

@@ -30,6 +30,7 @@ export function LineCard({
   current,
   recording,
   localTake,
+  finishing = false,
   upload,
   author,
   score,
@@ -52,6 +53,8 @@ export function LineCard({
   current: boolean;
   recording: boolean;
   localTake: LocalTake | null;
+  /** The take just recorded here is still being kept (the next line is already recording): shown as saving. */
+  finishing?: boolean;
   upload: UploadItem | null;
   /** Who recorded the take that plays for this line now; null when nobody has. */
   author: TakeAuthor | null;
@@ -77,10 +80,10 @@ export function LineCard({
   const [showDiff, setShowDiff] = useState(false);
   const { line, cue, directions, take } = actorLine;
   // A take recorded on this screen is the person's own, whoever's played before.
-  const who: TakeAuthor | null = localTake || upload ? { kind: author?.kind ?? "actor", name: "you", mine: true } : author;
+  const who: TakeAuthor | null = localTake || upload || finishing ? { kind: author?.kind ?? "actor", name: "you", mine: true } : author;
   const mine = who?.mine ?? false;
   const takeUrl = localTake?.url ?? take?.audioUrl ?? actorLine.current?.audioUrl ?? null;
-  const recorded = !!takeUrl || !!upload;
+  const recorded = !!takeUrl || !!upload || finishing;
   const takeKey = `take:${line.id}`;
   const cueKey = `cue:${line.id}`;
   const togetherKey = `together:${line.id}`;
