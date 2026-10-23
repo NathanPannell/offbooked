@@ -110,6 +110,15 @@ jobs:
             ${{ runner.temp }}/out/
             ${{ runner.temp }}/xcodebuild.log
           retention-days: 14
+      # The built app, so a Mac can install it in its own simulator (`xcrun simctl install booted
+      # Offbooked.app`) and debug it with Safari's Web Inspector without building anything.
+      - name: Zip the simulator app
+        run: ditto -c -k --keepParent "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app" "$RUNNER_TEMP/Offbooked-simulator.zip"
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-simulator-app
+          path: ${{ runner.temp }}/Offbooked-simulator.zip
+          retention-days: 14
 
   testflight:
     name: TestFlight (archive, sign, upload)
