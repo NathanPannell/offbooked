@@ -17,12 +17,14 @@ concurrency:
 permissions:
   contents: read
 
-# ffmpeg for the backend tests and the e2e run: a pinned static build, checked against its hash and
-# cached, so most runs never download it (see .github/scripts/install-ffmpeg.sh). Ubuntu's apt
+# ffmpeg for the backend tests and the e2e run: pinned static builds (ffmpeg 6.1.1, the
+# ffmpeg-static package's GitHub release, served from GitHub), checked against their hashes and
+# cached, so most runs never download them (see .github/scripts/install-ffmpeg.sh). Ubuntu's apt
 # mirror for the runners can crawl at a few kB/s (it once held a job past its 20-minute limit).
 env:
-  FFMPEG_URL: https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz
-  FFMPEG_SHA256: 28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5
+  FFMPEG_RELEASE: https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1
+  FFMPEG_SHA256: bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa
+  FFPROBE_SHA256: 25d9b6ccb05e3d9de9e04e31e2506d8dd7f9f0418981965ac6df12e8d3afd067
 
 jobs:
   backend:
@@ -58,7 +60,7 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ~/ffmpeg
-          key: ffmpeg-${{ env.FFMPEG_SHA256 }}
+          key: ffmpeg-${{ env.FFMPEG_SHA256 }}-${{ env.FFPROBE_SHA256 }}
       - name: Install ffmpeg
         timeout-minutes: 8
         run: bash "$GITHUB_WORKSPACE/.github/scripts/install-ffmpeg.sh"
@@ -131,7 +133,7 @@ jobs:
         uses: actions/cache@v6.1.0
         with:
           path: ~/ffmpeg
-          key: ffmpeg-${{ env.FFMPEG_SHA256 }}
+          key: ffmpeg-${{ env.FFMPEG_SHA256 }}-${{ env.FFPROBE_SHA256 }}
       - name: Install ffmpeg
         timeout-minutes: 8
         run: bash "$GITHUB_WORKSPACE/.github/scripts/install-ffmpeg.sh"
