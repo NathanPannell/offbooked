@@ -10,15 +10,33 @@ const exec = promisify(execFile);
 // The levels are relative to the clip itself: the noise floor is a low percentile of 10 ms frame
 // levels and the speech level a high one, so a quiet phone in a quiet room and a loud one in a
 // noisy room are judged the same way. A short spike (a tap or a click) never counts as speech.
+//
+// Loud enough isn't enough at the two ends, though. A hands-free take has the actor's breath in
+// before the line, the exhale after it, and, near the end of the auto-advance pause, the breath for
+// the next line: all well above the floor, so cutting at the first and last sound kept up to 2.7 s
+// of dead air. So the ends are anchored on voiced sound (it repeats at a pitch; breath, hiss,
+// clicks and bumps never do), widened only by the unvoiced sound joined to it (an "s" before the
+// vowel, a final "t"). Measured on hands-free fixtures (room noise, breaths, a bump): 98 ms kept
+// before the first word and 170 ms after the last on average (373 ms and 1,334 ms before).
 
 export const TRIM = {
   frameMs: 10,
   analysisRate: 16_000,
-  leadPadMs: 120, // kept before the first sound, so word onsets and the breath into them survive
-  tailPadMs: 200, // kept after the last, for trailing consonants and the decay of the voice
+  leadPadMs: 100, // kept before the first word's sound, for the softest part of its onset
+  tailPadMs: 150, // kept after the last word's, for the decay of the voice
   minRunMs: 40, // sound must last this long to count as speech (a click is 5–20 ms)
   minRangeDb: 10, // below this between floor and speech, the clip can't be told apart: keep it whole
   pauseMs: 150, // a quiet gap this long inside the speech splits it into two stretches (see speechStretches)
+  voicedRunMs: 50, // periodic sound this long is a voice (a vowel); breaths, clicks and bumps never are
+  voicing: 0.6, // normalized autocorrelation at the pitch period (60–400 Hz) that counts as voiced
+  valley: 0.3, // how far it must have dipped at shorter lags first (noise only fades, a pitch comes back)
+  onsetMs: 300, // sound joined to the first voiced part (an "s", "f" or "th" before the vowel) kept, at most
+  releaseMs: 250, // and joined to the last (a final "s" or "t", the voice dying away)
+  closureMs: 120, // a quiet gap this short beside the voice is a stop's closure ("s|peak", "fact|s"), not a pause
+  neighbourDb: 15, // sound across such a gap counts with the word when it is within this of the speech level (an "s" is; a breath isn't)
+  loudDb: 12, // after the last voiced part, sound this close to the speech level is still the line (a word said too fast to show its pitch)
+  loudGapMs: 300, // ...in the same run, or in one starting this soon after
+  maxVoicingScanMs: 120_000, // the pitch check looks at no more sound than this (from both ends together) before falling back to the sound itself
 } as const;
 
 export interface SpeechBounds {
@@ -48,18 +66,182 @@ export function frameLevels(pcm: Int16Array, rate: number = TRIM.analysisRate, f
 }
 
 /**
- * The span to keep, from frame levels: from just before the first sustained sound to just after
- * the last, padded. Null when the clip has no clear speech above its floor (keep it whole).
+ * The span to keep, from frame levels: from just before the first word to just after the last,
+ * padded. With `voiced` (whether a frame is periodic, see `voicing`), the words are the sound that
+ * has a voice in it, with the unvoiced sound joined to it (up to TRIM.onsetMs before and
+ * TRIM.releaseMs after): a breath in before the line, the exhale after it, the breath for the next
+ * line and any bump in the pause are sound, but have no voice, so they're cut. Without it, or when
+ * nothing is voiced (a whisper), the first and last sustained sound. Null when the clip has no clear
+ * speech above its floor (keep it whole).
  */
-export function speechBounds(levels: number[], frameMs: number = TRIM.frameMs): SpeechBounds | null {
+export function speechBounds(levels: number[], frameMs: number = TRIM.frameMs, voiced?: (frame: number) => boolean): SpeechBounds | null {
   const l = levelsOf(levels);
   if (!l) return null;
   const runs = soundRuns(levels, l.thresholdDb, frameMs);
   if (runs.length === 0) return null;
   const totalMs = levels.length * frameMs;
-  const startMs = Math.max(0, runs[0]![0] * frameMs - TRIM.leadPadMs);
-  const endMs = Math.min(totalMs, (runs[runs.length - 1]![1] + 1) * frameMs + TRIM.tailPadMs);
+  const span = (voiced && voicedSpan(runs, voiced, frameMs, levels, l.speechDb)) ?? [runs[0]![0], runs[runs.length - 1]![1]];
+  const startMs = Math.max(0, span[0] * frameMs - TRIM.leadPadMs);
+  const endMs = Math.min(totalMs, (span[1] + 1) * frameMs + TRIM.tailPadMs);
   return { startMs, endMs, ...l };
+}
+
+/**
+ * From the first voiced stretch (TRIM.voicedRunMs) to the last, as [first, last] frames, widened
+ * by at most TRIM.onsetMs before and TRIM.releaseMs after: to the sound run it sits in, and across
+ * a stop's closure (TRIM.closureMs) to a run as loud as speech, so an "s" split off by the
+ * silence of a "p", "t" or "k" stays with its word while a breath, quieter, doesn't. Null when no
+ * run has a voice in it.
+ */
+function voicedSpan(
+  runs: [number, number][],
+  voiced: (frame: number) => boolean,
+  frameMs: number,
+  levels: number[],
+  speechDb: number,
+): [number, number] | null {
+  const closure = Math.round(TRIM.closureMs / frameMs);
+  const loud = ([a, b]: [number, number]) => {
+    for (let i = a; i <= b; i++) if (levels[i]! >= speechDb - TRIM.neighbourDb) return true;
+    return false;
+  };
+  const need = Math.max(1, Math.round(TRIM.voicedRunMs / frameMs));
+  // The pitch check costs about 50 µs a frame: past this many frames looked at from the two ends without
+  // finding a voice (minutes of whisper, or rain on the mic), the sound-based ends are used instead.
+  let budget = Math.round(TRIM.maxVoicingScanMs / frameMs);
+  const isVoiced = (i: number) => {
+    if (--budget < 0) throw SCAN_SPENT;
+    return voiced(i);
+  };
+  const firstIn = ([a, b]: [number, number]) => {
+    let n = 0;
+    for (let i = a; i <= b; i++) {
+      n = isVoiced(i) ? n + 1 : 0;
+      if (n === need) return i - need + 1;
+    }
+    return -1;
+  };
+  const lastIn = ([a, b]: [number, number]) => {
+    let n = 0;
+    for (let i = b; i >= a; i--) {
+      n = isVoiced(i) ? n + 1 : 0;
+      if (n === need) return i + need - 1;
+    }
+    return -1;
+  };
+  try {
+    return spanOf(runs, firstIn, lastIn, loud, frameMs, levels, speechDb, closure);
+  } catch (err) {
+    if (err === SCAN_SPENT) return null;
+    throw err;
+  }
+}
+
+const SCAN_SPENT = new Error("voicing scan spent");
+
+function spanOf(
+  runs: [number, number][],
+  firstIn: (run: [number, number]) => number,
+  lastIn: (run: [number, number]) => number,
+  loud: (run: [number, number]) => boolean,
+  frameMs: number,
+  levels: number[],
+  speechDb: number,
+  closure: number,
+): [number, number] | null {
+  let start: number | null = null;
+  for (let r = 0; r < runs.length; r++) {
+    const at = firstIn(runs[r]!);
+    if (at < 0) continue;
+    const earliest = at - Math.round(TRIM.onsetMs / frameMs);
+    start = Math.max(runs[r]![0], earliest);
+    for (let k = r - 1; k >= 0 && runs[k]![1] >= earliest && start - runs[k]![1] - 1 <= closure && loud(runs[k]!); k--) start = Math.max(runs[k]![0], earliest);
+    break;
+  }
+  if (start === null) return null;
+  for (let r = runs.length - 1; r >= 0; r--) {
+    const at = lastIn(runs[r]!);
+    if (at < 0) continue;
+    const latest = at + Math.round(TRIM.releaseMs / frameMs);
+    let end = Math.min(runs[r]![1], latest);
+    for (let k = r + 1; k < runs.length && runs[k]![0] <= latest && runs[k]![0] - end - 1 <= closure && loud(runs[k]!); k++)
+      end = Math.max(end, Math.min(runs[k]![1], latest));
+    // Loud sound further on, in the same run or one just after, is speech the pitch check missed:
+    // an exhale is quieter, and the breath for the next line comes much later.
+    const loudGap = Math.round(TRIM.loudGapMs / frameMs);
+    for (let k = r; k < runs.length && (k === r || runs[k]![0] - end - 1 <= loudGap); k++) {
+      for (let i = runs[k]![1]; i > end && i >= runs[k]![0]; i--) {
+        if (levels[i]! >= speechDb - TRIM.loudDb) {
+          end = i;
+          break;
+        }
+      }
+    }
+    return [start, end];
+  }
+  return null;
+}
+
+/**
+ * Whether each 10 ms frame of 16 kHz PCM is voiced: its 30 ms window, at 8 kHz, repeats at a pitch
+ * between 60 and 400 Hz (normalized autocorrelation of at least TRIM.voicing at that period, after
+ * falling at least TRIM.valley below it at shorter lags). Breath, hiss, clicks and bumps never
+ * repeat like that, and rumble or pink room noise, which looks alike from one ms to the next, only
+ * fades with the lag: it never dips and comes back. Worked out only for frames asked about, once
+ * each: a take costs a few ms, and at most TRIM.maxVoicingScanMs of sound is ever checked.
+ */
+export function voicing(pcm: Int16Array, rate: number = TRIM.analysisRate, frameMs: number = TRIM.frameMs): (frame: number) => boolean {
+  // At 8 kHz: a voice's pitch and its first harmonics are all well below 4 kHz. (No pre-emphasis:
+  // it takes away most of a low voice's fundamental and, with it, the repeats to find.)
+  const step = Math.max(1, Math.round(rate / 8000));
+  const low = new Float32Array(Math.floor(pcm.length / step));
+  for (let i = 0; i < low.length; i++) {
+    let sum = 0;
+    for (let k = 0; k < step; k++) sum += pcm[i * step + k]!;
+    low[i] = sum / step;
+  }
+  const lowRate = rate / step;
+  const hop = (lowRate * frameMs) / 1000;
+  const size = Math.round(lowRate * 0.03);
+  const minLag = Math.floor(lowRate / 400);
+  const maxLag = Math.ceil(lowRate / 60);
+  const cache = new Map<number, boolean>();
+  return (frame) => {
+    const known = cache.get(frame);
+    if (known !== undefined) return known;
+    const from = Math.round(frame * hop + hop / 2 - size / 2);
+    let result = false;
+    if (from >= 0 && from + size + maxLag <= low.length) {
+      let mean = 0;
+      for (let i = from; i < from + size + maxLag; i++) mean += low[i]!;
+      mean /= size + maxLag;
+      let e0 = 0;
+      for (let i = from; i < from + size; i++) e0 += (low[i]! - mean) ** 2;
+      // From the shortest lags, so a high voice's dip (half its period) is seen too.
+      let best = 0;
+      let depth = 0;
+      let lowest = 1;
+      for (let lag = 2; lag <= maxLag && e0 > 0; lag++) {
+        let cross = 0;
+        let e1 = 0;
+        for (let i = from; i < from + size; i++) {
+          const a = low[i]! - mean;
+          const b = low[i + lag]! - mean;
+          cross += a * b;
+          e1 += b * b;
+        }
+        const r = e1 > 0 ? cross / Math.sqrt(e0 * e1) : 0;
+        lowest = Math.min(lowest, r);
+        if (lag >= minLag && r > best) {
+          best = r;
+          depth = r - lowest;
+        }
+      }
+      result = best >= TRIM.voicing && depth >= TRIM.valley;
+    }
+    cache.set(frame, result);
+    return result;
+  };
 }
 
 /** The clip's own levels: its noise floor, its speech level and the threshold between them. Null when they can't be told apart. */
@@ -146,5 +328,5 @@ export async function analyzeSpeech(file: string): Promise<SpeechAnalysis> {
   const pcm = new Int16Array(Math.floor(bytes.length / 2));
   for (let i = 0; i < pcm.length; i++) pcm[i] = bytes.readInt16LE(i * 2);
   const levels = frameLevels(pcm);
-  return { bounds: speechBounds(levels), stretches: speechStretches(levels) };
+  return { bounds: speechBounds(levels, TRIM.frameMs, voicing(pcm)), stretches: speechStretches(levels) };
 }

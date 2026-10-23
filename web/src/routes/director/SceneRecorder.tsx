@@ -15,7 +15,7 @@ import { useToast } from "../../components/Toast";
 import { useResource } from "../../lib/useResource";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
-import { takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
+import { listenEndMs, takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
@@ -283,7 +283,7 @@ function SceneLines({
         const next = new Map(m);
         const old = next.get(lineId);
         if (old) URL.revokeObjectURL(old.url);
-        next.set(lineId, { clientTakeId, url, durationMs: take.durationMs });
+        next.set(lineId, { clientTakeId, url, durationMs: take.durationMs, endMs: listenEndMs(timing, lineId, take.durationMs) });
         return next;
       });
       return true;

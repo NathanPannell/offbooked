@@ -158,6 +158,7 @@ export interface TakeRow {
   userName: string | null; // the director's name and email, for a director's take
   userEmail: string | null;
   storageKey: string;
+  streamKey: string | null;
   durationMs: number;
   createdAt: Date;
   sttTranscript: string | null;
@@ -167,11 +168,18 @@ export interface TakeRow {
 
 // Used as `select ${takeColumns(sql)} from takes where …` (the table unaliased).
 export const takeColumns = (sql: Sql) => sql`
-  takes.id, takes.line_id, takes.recorded_by, takes.actor_id, takes.recorded_by_user_id, takes.storage_key, takes.duration_ms,
+  takes.id, takes.line_id, takes.recorded_by, takes.actor_id, takes.recorded_by_user_id, takes.storage_key, takes.stream_key, takes.duration_ms,
   takes.created_at, takes.stt_transcript, takes.stt_accuracy, takes.stt_ops,
   (select coalesce(a.first_name, split_part(a.name, ' ', 1)) from actors a where a.id = takes.actor_id) as actor_name,
   (select u.name from users u where u.id = takes.recorded_by_user_id) as user_name,
   (select u.email from users u where u.id = takes.recorded_by_user_id) as user_email`;
+
+/**
+ * The file a take plays from in the recorder, the cues and shared lines: its stream once it has
+ * been normalized (cut to the voice and levelled, as the run-through plays it), else the upload as
+ * it came, with all the room and breath around the line.
+ */
+export const takePlayKey = (t: { storageKey: string; streamKey: string | null }) => t.streamKey ?? t.storageKey;
 
 /** Who is looking: a cast member (their invite) or the director. `mine` on a take is relative to it. */
 export type Viewer = { actorId: string } | { userId: string };
@@ -183,7 +191,7 @@ export async function takeView(storage: Storage, t: TakeRow, viewer: Viewer) {
   return {
     id: t.id,
     lineId: t.lineId,
-    audioUrl: await storage.signedUrl(t.storageKey),
+    audioUrl: await storage.signedUrl(takePlayKey(t)),
     durationMs: t.durationMs,
     createdAt: iso(t.createdAt)!,
     recordedBy: takeRecorder(t),

@@ -16,6 +16,8 @@ export interface LocalTake {
   clientTakeId: string;
   url: string;
   durationMs: number;
+  /** Where Listen back stops: the end of the line's voice, before the pause that ended the take (`listenEndMs`). */
+  endMs?: number | null;
 }
 
 /**
@@ -68,7 +70,7 @@ export function LineCard({
   liveHint?: string;
   /** How far the playing preview has got, 0 to 1. */
   progress?: number;
-  onPlay: (key: string, url: string) => void;
+  onPlay: (key: string, url: string, endMs?: number | null) => void;
   /** Plays several clips at once: a shared line's take with the others'. */
   onPlayTogether?: (key: string, urls: string[]) => void;
   onSelect: () => void;
@@ -156,7 +158,7 @@ export function LineCard({
               <button
                 type="button"
                 className={`take-play${playing === takeKey ? " is-playing" : ""}`}
-                onClick={() => onPlay(takeKey, takeUrl)}
+                onClick={() => onPlay(takeKey, takeUrl, localTake?.url === takeUrl ? localTake.endMs : null)}
                 aria-label={`${playing === takeKey ? "Pause" : "Play"} ${mine ? "your take" : `${who?.name ?? "their"}'s take`}`}
               >
                 {playing === takeKey ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
