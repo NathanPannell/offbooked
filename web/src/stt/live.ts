@@ -142,8 +142,10 @@ export function alignPartial(expected: readonly string[], heard: readonly string
       // Two words of the line heard as one ("to morrow", or "lesson" for "less than"), and one heard as two.
       if (r > 1 && j > 0) {
         const joined = expected[i - 2] + expected[i - 1];
-        const near = joined === heard[j - 1] ? OK : soundsLikeJoined(expected[i - 2]!, expected[i - 1]!, heard[j - 1]!) ? SOUND : 0;
-        if (near) offer(score[r - 2][j - 1] + 2 * near, "merge21");
+        // Spelled as the two together, as much as two matches; only sounding like them, no more than one
+        // match, so a word heard exactly never lights the word after it too.
+        const near = joined === heard[j - 1] ? 2 * OK : soundsLikeJoined(expected[i - 2]!, expected[i - 1]!, heard[j - 1]!) ? SOUND : 0;
+        if (near) offer(score[r - 2][j - 1] + near, "merge21");
       }
       if (r > 0 && j > 1) {
         const joined = heard[j - 2] + heard[j - 1];

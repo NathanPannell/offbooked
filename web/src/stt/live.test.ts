@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   alignPartial,
@@ -421,6 +422,14 @@ describe("following the script through mishearings", () => {
     expect(applyPass(startProgress(tokens.length), tokens, "a little more than kin and lesson kind").cursor).toBe(9);
   });
 
+  it("never takes a word heard alone for it and the word after it", () => {
+    // "bound" is not "bound to", "from" is not "from me": the second word is still to come.
+    expect(follow("Speak. I am bound to hear.", "speak i am bound").cursor).toBe(4);
+    const letter = follow("Go thou, and take this letter from me", "go thou and take this letter from");
+    expect(letter.cursor).toBe(7);
+    expect(letter.ended).toBe(false);
+  });
+
   it("never lets a sound-alike carry the cursor past words not yet said", () => {
     // "king" is not "kin and"; "mercy" is not "mercy is"; "and" is not "into".
     expect(follow("A little more than kin, and less than kind.", "a little more than king").cursor).toBe(4);
@@ -477,5 +486,32 @@ describe("pauseBegan", () => {
     // The first 20 ms frame with PAUSE_PASS_MS of silence after the voice.
     const at = Math.ceil(PAUSE_PASS_MS / 20) * 20;
     expect(fired).toEqual([800 + at, 1500 + at]);
+  });
+});
+
+describe("the cursor across real scripts", () => {
+  // Speeches of 4 to 40 words from the parser benchmark's scripts (every tenth, to keep it quick;
+  // all of them pass too), heard word by word exactly as written: the cursor must never be ahead of
+  // the words said, nor the line end early.
+  const dir = new URL("../../../backend/bench/fixtures/", import.meta.url);
+  const speeches = readdirSync(dir).flatMap(
+    (d) => (JSON.parse(readFileSync(new URL(`${d}/golden.json`, dir), "utf8")) as { speeches: { text: string }[] }).speeches,
+  );
+
+  it("never runs ahead of what has been said", { timeout: 30_000 }, () => {
+    let states = 0;
+    const ahead: string[] = [];
+    for (const { text } of speeches.filter((_, i) => i % 10 === 0)) {
+      const { tokens } = segmentLine(text);
+      if (tokens.length < 4 || tokens.length > 40) continue;
+      let p = startProgress(tokens.length);
+      for (let said = 1; said <= tokens.length - 2; said++) {
+        p = applyPass(p, tokens, tokens.slice(0, said).join(" "));
+        states++;
+        if (p.cursor > said || p.ended) ahead.push(`${text} | said ${said}, cursor ${p.cursor}`);
+      }
+    }
+    expect(states).toBeGreaterThan(2_000);
+    expect(ahead.slice(0, 5)).toEqual([]);
   });
 });

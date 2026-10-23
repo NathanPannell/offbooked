@@ -8,8 +8,21 @@ const VOWELS = new Set(["a", "e", "i", "o", "u", "y"]);
 const VOICING: Record<string, string> = { b: "p", d: "t", g: "k", v: "f", z: "s", j: "k", q: "k" };
 const VOWEL_KEY = /^[AEIOUY]/;
 
+/** Keys worked out so far: the alignment asks for the same few words many times a pass. */
+const keys = new Map<string, string>();
+const MAX_KEYS = 5000;
+
 /** A word's sound key, e.g. "thought" → "0T", "dew" → "T", "kind" → "KNT", "lesson" → "LSN", "into" → "INT". */
 export function soundKey(word: string): string {
+  const known = keys.get(word);
+  if (known !== undefined) return known;
+  if (keys.size >= MAX_KEYS) keys.clear();
+  const key = keyOf(word);
+  keys.set(word, key);
+  return key;
+}
+
+function keyOf(word: string): string {
   const w = word.toLowerCase().replace(/[^a-z]/g, "");
   if (!w) return "";
   const s = w
@@ -77,13 +90,16 @@ export function soundsAlike(expected: string, heard: string): boolean {
  * Whether one word sounds like two run together ("lesson" for "less than"), more strictly than
  * `soundsAlike`: the pair's sounds, or with one sound dropped (said quickly) as long as each word
  * keeps one; never a sound swapped for another ("king" is not "kin and") or a word gone
- * altogether ("mercy" is not "mercy is"). Both of the pair have two letters or more.
+ * altogether ("mercy" is not "mercy is", "bound" is not "bound to", "from" is not "from me").
+ * Both of the pair have two letters or more.
  */
 export function soundsLikeJoined(first: string, second: string, heard: string): boolean {
   if (first.length < 2 || second.length < 2 || heard.length < 4) return false;
   const a = soundKey(first);
   const b = soundKey(second);
   const one = soundKey(heard);
+  // Heard as just one of them: the other wasn't said (whichever sound the key would drop).
+  if (one === a || one === b) return false;
   const pair = a + b;
   if (pair === one) return /[^AEIOUY]/.test(one);
   if (pair.length < 4 || one.length !== pair.length - 1) return false;
