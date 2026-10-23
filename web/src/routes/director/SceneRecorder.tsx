@@ -10,7 +10,7 @@ import { CharacterName } from "../../components/CharacterName";
 import { Loading } from "../../components/Loading";
 import { PartProgress } from "../../components/PartProgress";
 import { RecordDock } from "../../components/RecordDock";
-import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions } from "../../components/RecordOptions";
+import { firstTakeHint as firstTakeHintText, RecordOptions, useRecordOptions } from "../../components/RecordOptions";
 import { useToast } from "../../components/Toast";
 import { useResource } from "../../lib/useResource";
 import { useLiveTake } from "../../stt/useLiveTake";
@@ -167,7 +167,7 @@ function SceneLines({
   });
   // Hands-free like the cast's recorder: words light up as they're heard, and a pause at the end of
   // the line stops the take and moves on (mic settings turn that off, or record the next line too).
-  const { session: stt } = useSttSession();
+  const { session: stt, state: sttState } = useSttSession();
   const options = useRecordOptions();
   const { autoAdvance, keepRecording } = options;
   const [firstTakeHint, setFirstTakeHint] = useState(false);
@@ -423,7 +423,7 @@ function SceneLines({
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
-        note={recorder.recording && firstTakeHint ? FIRST_TAKE_HINT : undefined}
+        note={recorder.recording && firstTakeHint ? firstTakeHintText(keepRecording && (live ? live.mode === "live" : sttState.status === "ready")) : undefined}
         disabled={!current}
         label={current ? `Record ${current.characterName}'s line` : "Record"}
         onToggle={() => (recorder.recording ? void stop() : current && void start(current.line.id))}

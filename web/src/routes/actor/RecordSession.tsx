@@ -13,7 +13,7 @@ import { InAppBanner } from "../../components/InAppBanner";
 import { PartProgress } from "../../components/PartProgress";
 import { Loading } from "../../components/Loading";
 import { RecordDock } from "../../components/RecordDock";
-import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions, useStoredFlag } from "../../components/RecordOptions";
+import { firstTakeHint as firstTakeHintText, RecordOptions, useRecordOptions, useStoredFlag } from "../../components/RecordOptions";
 import { SectionNav } from "../../components/SectionNav";
 import { useToast } from "../../components/Toast";
 import { claimFirstTakeHint } from "../../audio/micPrefs";
@@ -666,7 +666,13 @@ export function RecordSession({
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
-        note={cueing ? "Listening to the cue… tap to start now." : recorder.recording && firstTakeHint ? FIRST_TAKE_HINT : undefined}
+        note={
+          cueing
+            ? "Listening to the cue… tap to start now."
+            : recorder.recording && firstTakeHint
+              ? firstTakeHintText(keepRecording && (live ? live.mode === "live" : sttState.status === "ready"))
+              : undefined
+        }
         disabled={!current}
         label={current ? `Record line ${actorLines.indexOf(current) + 1}` : "Record"}
         onToggle={() => {
