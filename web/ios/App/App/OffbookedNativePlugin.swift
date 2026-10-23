@@ -63,7 +63,8 @@ public class OffbookedNativePlugin: CAPPlugin, CAPBridgedPlugin {
         let session = AVAudioSession.sharedInstance()
         do {
             if session.category != .playback {
-                try session.setCategory(.playback, mode: .spokenAudio, options: [.allowAirPlay, .allowBluetoothA2DP])
+                // AirPlay and Bluetooth come with .playback; those options are only for .playAndRecord.
+                try session.setCategory(.playback, mode: .spokenAudio)
             }
             try session.setActive(true)
         } catch {

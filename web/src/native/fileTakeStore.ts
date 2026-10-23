@@ -42,7 +42,29 @@ const safeId = (takeId: string) => takeId.replace(/[^a-zA-Z0-9-]/g, "_");
  * gets a signal back (native/network.ts).
  */
 export class FileTakeStore implements TakeStore {
+  /** Writes and removes run one at a time, so a status change can't land after its take is removed. */
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor(private files: TakeFiles) {}
+
+  private serial<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.queue.then(work, work);
+    this.queue = next.catch(() => {});
+    return next;
+  }
+
+  /**
+   * Checks the folder can be written (it throws if not, so the caller can use another store) and
+   * deletes recordings left without their row, by a crash between the two writes of a take or a
+   * row that couldn't be written. Run once, before any take is added.
+   */
+  async open(): Promise<void> {
+    await this.files.writeText(".probe", "ok");
+    await this.files.remove(".probe");
+    const names = await this.files.list();
+    const rows = new Set(names.filter((n) => n.endsWith(ROW)).map((n) => n.slice(0, -ROW.length)));
+    for (const name of names) if (name.endsWith(AUDIO) && !rows.has(name.slice(0, -AUDIO.length))) await this.files.remove(name);
+  }
 
   async list(): Promise<UploadItem[]> {
     const names = (await this.files.list()).filter((n) => n.endsWith(ROW));
@@ -51,15 +73,19 @@ export class FileTakeStore implements TakeStore {
   }
 
   // The recording goes first: a row is only ever there with its audio beside it.
-  async put(item: UploadItem, audio: ArrayBuffer): Promise<void> {
+  put(item: UploadItem, audio: ArrayBuffer): Promise<void> {
     const id = safeId(item.takeId);
-    await this.files.writeBase64(id + AUDIO, toBase64(audio));
-    await this.files.writeText(id + ROW, JSON.stringify(item));
+    return this.serial(async () => {
+      await this.files.writeBase64(id + AUDIO, toBase64(audio));
+      await this.files.writeText(id + ROW, JSON.stringify(item));
+    });
   }
 
   /** Only a take that is still here: a status change never brings a removed take back. */
-  async update(item: UploadItem): Promise<void> {
-    if (await this.has(item.takeId)) await this.files.writeText(safeId(item.takeId) + ROW, JSON.stringify(item));
+  update(item: UploadItem): Promise<void> {
+    return this.serial(async () => {
+      if (await this.has(item.takeId)) await this.files.writeText(safeId(item.takeId) + ROW, JSON.stringify(item));
+    });
   }
 
   async audio(takeId: string): Promise<ArrayBuffer | null> {
@@ -71,10 +97,12 @@ export class FileTakeStore implements TakeStore {
     return (await this.files.readText(safeId(takeId) + ROW)) !== null;
   }
 
-  async remove(takeId: string): Promise<void> {
+  remove(takeId: string): Promise<void> {
     const id = safeId(takeId);
-    await this.files.remove(id + ROW);
-    await this.files.remove(id + AUDIO);
+    return this.serial(async () => {
+      await this.files.remove(id + ROW);
+      await this.files.remove(id + AUDIO);
+    });
   }
 }
 

@@ -78,8 +78,24 @@ describe("the app's take store (files)", () => {
     expect((await store.list()).map((i) => i.takeId)).toEqual(["../../escape"]);
   });
 
-  it("falls back to the web view's store when the folder can't be read", async () => {
-    const broken = { ...folder(), list: () => Promise.reject(new Error("no folder")) };
+  it("never brings back a take removed while its status change was on the way", async () => {
+    const store = new FileTakeStore(folder());
+    await store.put(item(), bytes(7));
+    await Promise.all([store.update(item({ status: "failed" })), store.remove("t1")]);
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("on opening, deletes recordings whose row never got written", async () => {
+    const files = folder();
+    const store = new FileTakeStore(files);
+    await store.put(item({ takeId: "kept" }), bytes(1));
+    files.files.set("lost.audio", "AAAA");
+    await store.open();
+    expect([...files.files.keys()].sort()).toEqual(["kept.audio", "kept.json"]);
+  });
+
+  it("falls back to the web view's store when the folder can't be written", async () => {
+    const broken = { ...folder(), writeText: () => Promise.reject(new Error("read-only")) };
     const fallback = vi.fn(async () => ({ store: new MemoryTakeStore(), persistent: false }));
     expect((await openNativeTakeStore(broken, fallback)).persistent).toBe(false);
     const ok = await openNativeTakeStore(folder(), fallback);

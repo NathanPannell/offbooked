@@ -9,7 +9,7 @@ import { OffbookedNative } from "./offbooked";
 export async function openNativeTakeStore(files: TakeFiles = capacitorTakeFiles, fallback = openTakeStore): Promise<{ store: TakeStore; persistent: boolean }> {
   const store = new FileTakeStore(files);
   try {
-    await store.list();
+    await store.open();
     return { store, persistent: true };
   } catch {
     return fallback();

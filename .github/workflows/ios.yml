@@ -64,12 +64,14 @@ jobs:
           xcrun simctl list devices | grep "$udid"
       - name: Build for the simulator
         run: |
-          set -o pipefail
+          status=0
           xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath "$RUNNER_TEMP/dd" -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
-            CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: .*OffbookedNative|\*\* BUILD" || true
-          test -d "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app"
+            CODE_SIGNING_ALLOWED=NO build > "$RUNNER_TEMP/xcodebuild.log" 2>&1 || status=$?
+          grep -E "error:|warning: .*(MainViewController|OffbookedNative)|\*\* BUILD" "$RUNNER_TEMP/xcodebuild.log" || true
+          [ "$status" = 0 ] || { tail -50 "$RUNNER_TEMP/xcodebuild.log"; exit "$status"; }
+          test -x "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app/App"
       - name: Boot, install and launch
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -80,7 +82,8 @@ jobs:
           xcrun simctl install "$UDID" "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app"
           xcrun simctl spawn "$UDID" log stream --style compact --level debug --predicate 'process == "App"' > "$RUNNER_TEMP/out/app.log" 2>&1 &
           # Capacitor prints to stdout: the page it loads, and the web app's console in debug builds.
-          xcrun simctl launch --stdout="$RUNNER_TEMP/out/console.log" --stderr="$RUNNER_TEMP/out/console.log" "$UDID" com.offbooked.app
+          # On a pty, so each line is written as it comes (into a file, stdout would sit in a buffer).
+          xcrun simctl launch --console-pty "$UDID" com.offbooked.app > "$RUNNER_TEMP/out/console.log" 2>&1 &
       - name: Screenshot the landing screen
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -129,19 +132,20 @@ jobs:
     defaults:
       run:
         working-directory: web
-    env:
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    # The secrets themselves only reach the two steps that sign and upload, never npm.
     steps:
       - name: Check the signing secrets
         id: secrets
         working-directory: .
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID != '' }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID != '' }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 != '' }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
         run: |
           missing=""
           for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
-            [ -n "${!name}" ] || missing="$missing $name"
+            [ "${!name}" = true ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
             echo "::notice::TestFlight skipped: missing secrets:$missing (see docs/mobile.md)"
@@ -167,8 +171,13 @@ jobs:
         run: npx cap sync ios
       - name: Archive (automatic signing with the API key)
         if: steps.secrets.outputs.ready == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          set -o pipefail
+          status=0
           key="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
           printf '%s\n' "$ASC_KEY_P8" > "$key"
           # Build numbers only ever go up: the UTC time of this run.
@@ -180,19 +189,27 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath "$key" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="$build" \
-            archive | tee "$RUNNER_TEMP/archive.log" | grep -E "error:|\*\* ARCHIVE" || true
+            archive > "$RUNNER_TEMP/archive.log" 2>&1 || status=$?
+          grep -E "error:|\*\* ARCHIVE" "$RUNNER_TEMP/archive.log" || true
+          [ "$status" = 0 ] || { tail -50 "$RUNNER_TEMP/archive.log"; exit "$status"; }
           test -d "$RUNNER_TEMP/App.xcarchive"
       - name: Export and upload to App Store Connect
         if: steps.secrets.outputs.ready == 'true'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          set -o pipefail
+          status=0
           key="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
           sed "s/__TEAM_ID__/$APPLE_TEAM_ID/" ios/ExportOptions.plist > "$RUNNER_TEMP/ExportOptions.plist"
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$key" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            | tee "$RUNNER_TEMP/export.log" | grep -E "error:|Upload succeeded|EXPORT" || true
+            > "$RUNNER_TEMP/export.log" 2>&1 || status=$?
+          grep -E "error:|Upload succeeded|EXPORT" "$RUNNER_TEMP/export.log" || true
+          [ "$status" = 0 ] || { tail -50 "$RUNNER_TEMP/export.log"; exit "$status"; }
           grep -qE "Upload succeeded|\*\* EXPORT SUCCEEDED \*\*" "$RUNNER_TEMP/export.log"
       - name: Remove the key
         if: always() && steps.secrets.outputs.ready == 'true'

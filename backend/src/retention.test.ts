@@ -9,6 +9,7 @@ import { scheduleRender, processDueRenders } from "./render/queue.ts";
 import { startScriptParse } from "./parse/job.ts";
 import {
   ContentDeletedError,
+  deleteAccount,
   deleteProductionContent,
   dueContent,
   RETENTION_DAYS,
@@ -380,6 +381,31 @@ describe("content retention", { skip: dbSkip }, () => {
     const again = await signIn(t, "leaving@example.test");
     assert.deepEqual((await get("/api/productions", again)).json().productions, []);
     assert.equal((await get(`/api/productions/${other.id}`)).statusCode, 200);
+  });
+
+  test("an account deleted while storage is down is gone at once; retention deletes its content later", async () => {
+    const leaving = await signIn(t, "flaky-leaver@example.test");
+    const [{ id: userId }] = await t.ctx.sql<{ id: string }[]>`select id from users where email = 'flaky-leaver@example.test'`;
+    const { id } = await productionWithScript(t, leaving, SEED_SCENE, "Flaky leaver");
+    let kicks = 0;
+    const ctx: Ctx = {
+      ...t.ctx,
+      retention: { kick: () => void kicks++, touch() {} },
+      storage: Object.assign(Object.create(Object.getPrototypeOf(t.ctx.storage)), t.ctx.storage, {
+        deletePrefix: async () => {
+          throw new Error("bucket unavailable");
+        },
+      }),
+    };
+    await deleteAccount(ctx, userId!);
+    assert.equal(kicks, 1, "the retention worker is told");
+    assert.equal((await get("/api/me", leaving)).statusCode, 401, "signed out even though storage failed");
+    const [row] = await t.ctx.sql<{ title: string; contentDeletedAt: Date | null }[]>`select title, content_deleted_at from productions where id = ${id}`;
+    assert.equal(row!.title, "", "who and what it was goes at once");
+    assert.equal(row!.contentDeletedAt, null, "the content waits for storage");
+    assert.ok((await dueContent(t.ctx.sql)).dueIds.includes(id), "and is due now");
+    assert.ok((await deleteProductionContent(t.ctx, id))?.objects, "the next pass deletes it");
+    assert.ok(!(await dueContent(t.ctx.sql)).dueIds.includes(id));
   });
 });
 
