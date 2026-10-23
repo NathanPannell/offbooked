@@ -1,0 +1,196 @@
+name: iOS
+
+# The iOS app (web/ios, Capacitor) on GitHub's macOS runners, so nobody needs a Mac to build it.
+# - simulator: every PR that touches web/ builds the app for the iOS Simulator, boots a simulator,
+#   launches the app, checks it stays up and uploads screenshots and the app's log.
+# - testflight: archives, signs (automatic signing with an App Store Connect API key, so no
+#   certificates live anywhere) and uploads to TestFlight. Run by hand (Actions → iOS → Run
+#   workflow, "testflight"), or on push to main once the repo variable TESTFLIGHT_ON_MAIN is
+#   "true". It skips cleanly while the ASC_* / APPLE_TEAM_ID secrets are missing.
+# See docs/mobile.md.
+on:
+  pull_request:
+    branches: [staging, main]
+    paths: ["web/**", ".github/workflows/ios.yml"]
+  push:
+    branches: [main]
+    paths: ["web/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: Archive and upload to TestFlight
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    name: iOS simulator (build, launch, screenshot)
+    # Standard macOS runners are free for this public repo. Never a larger runner.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # The production build: bundled into the app, calling https://api.offbooked.com.
+      - run: npm run build
+      - name: Copy the web app into the iOS project
+        run: npx cap sync ios
+      - name: Xcode and simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes available
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          udid=$(xcrun simctl list devices available --json | node ../.github/scripts/pick-simulator.mjs)
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices | grep "$udid"
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/dd" -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
+            CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: .*OffbookedNative|\*\* BUILD" || true
+          test -d "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app"
+      - name: Boot, install and launch
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app"
+          xcrun simctl spawn "$UDID" log stream --style compact --level debug --predicate 'process == "App"' > "$RUNNER_TEMP/out/app.log" 2>&1 &
+          xcrun simctl launch "$UDID" com.offbooked.app
+      - name: Screenshot the landing screen
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          sleep 25
+          xcrun simctl io "$UDID" screenshot "$RUNNER_TEMP/out/launch.png"
+          # Still running, and the bundled page loaded (Capacitor logs it in debug builds).
+          xcrun simctl spawn "$UDID" launchctl list | grep -q com.offbooked.app || { echo "::error::the app is not running"; exit 1; }
+          grep -q "Loading app at capacitor://localhost" "$RUNNER_TEMP/out/app.log" || { echo "::error::the bundled web app never loaded"; tail -100 "$RUNNER_TEMP/out/app.log"; exit 1; }
+          if grep -E "ERROR MESSAGE|Unhandled Promise Rejection|TypeError" "$RUNNER_TEMP/out/app.log"; then echo "::error::the web app logged errors"; exit 1; fi
+      - name: Open a cast link inside the app (offbooked:// custom scheme)
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          xcrun simctl openurl "$UDID" "offbooked://join/not-a-real-link"
+          sleep 10
+          xcrun simctl io "$UDID" screenshot "$RUNNER_TEMP/out/join-link.png"
+          xcrun simctl spawn "$UDID" launchctl list | grep -q com.offbooked.app || { echo "::error::the app is not running"; exit 1; }
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ios-simulator
+          path: |
+            ${{ runner.temp }}/out/
+            ${{ runner.temp }}/xcodebuild.log
+          retention-days: 14
+
+  testflight:
+    name: TestFlight (archive, sign, upload)
+    needs: simulator
+    if: (github.event_name == 'workflow_dispatch' && inputs.testflight) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.TESTFLIGHT_ON_MAIN == 'true')
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: web
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Check the signing secrets
+        id: secrets
+        working-directory: .
+        run: |
+          missing=""
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice::TestFlight skipped: missing secrets:$missing (see docs/mobile.md)"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7.0.1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.0.0
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - if: steps.secrets.outputs.ready == 'true'
+        run: npm ci
+      - if: steps.secrets.outputs.ready == 'true'
+        run: npm run build
+      - if: steps.secrets.outputs.ready == 'true'
+        run: npx cap sync ios
+      - name: Archive (automatic signing with the API key)
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          set -o pipefail
+          key="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$key"
+          # Build numbers only ever go up: the UTC time of this run.
+          build=$(date -u +%y%m%d%H%M)
+          echo "Build number $build"
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination "generic/platform=iOS" -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/spm" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$key" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION="$build" \
+            archive | tee "$RUNNER_TEMP/archive.log" | grep -E "error:|\*\* ARCHIVE" || true
+          test -d "$RUNNER_TEMP/App.xcarchive"
+      - name: Export and upload to App Store Connect
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          set -o pipefail
+          key="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          sed "s/__TEAM_ID__/$APPLE_TEAM_ID/" ios/ExportOptions.plist > "$RUNNER_TEMP/ExportOptions.plist"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$key" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | tee "$RUNNER_TEMP/export.log" | grep -E "error:|Upload succeeded|EXPORT" || true
+          grep -qE "Upload succeeded|\*\* EXPORT SUCCEEDED \*\*" "$RUNNER_TEMP/export.log"
+      - name: Remove the key
+        if: always() && steps.secrets.outputs.ready == 'true'
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
+      - name: Upload the build logs
+        if: always() && steps.secrets.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: testflight-logs
+          path: |
+            ${{ runner.temp }}/archive.log
+            ${{ runner.temp }}/export.log
+          retention-days: 14
