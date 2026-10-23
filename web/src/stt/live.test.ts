@@ -1,7 +1,10 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   alignPartial,
   applyPass,
+  BEAT_SILENCE_MS,
+  clauseBreaks,
   decideAdvance,
   END_SILENCE_MS,
   endPauseMs,
@@ -9,11 +12,15 @@ import {
   LONG_SILENCE_MS,
   matchedCount,
   MID_LINE_SILENCE_MS,
+  NEAR_END_SILENCE_MS,
   nextPassInterval,
+  PAUSE_PASS_MS,
+  pauseBegan,
   pieceStates,
   segmentLine,
   startProgress,
   startVad,
+  tailHeard,
   vadStep,
   type AdvanceInput,
   type LiveProgress,
@@ -186,16 +193,39 @@ describe("decideAdvance", () => {
     expect(decideAdvance({ ...base, silenceMs: 200 })).toBe("wait");
   });
 
-  it("moves on after a 1.2 s pause once the cursor reaches the end of the line", () => {
+  it("moves on after a 0.7 s pause once the end of the line is heard", () => {
     expect(decideAdvance({ ...base, silenceMs: END_SILENCE_MS - 100 })).toBe("wait");
     expect(decideAdvance({ ...base, silenceMs: END_SILENCE_MS })).toBe("advance");
-    expect(END_SILENCE_MS).toBe(1200);
+    expect(END_SILENCE_MS).toBe(700);
+    // Its last words heard, with one in the middle missed: ended all the same.
+    expect(endPauseMs({ ...base, cursor: 7, ended: true })).toBe(END_SILENCE_MS);
   });
 
-  it("counts a cursor one word from the end as the end (the last word is often missed)", () => {
-    expect(endPauseMs({ ...base, cursor: 9 })).toBe(END_SILENCE_MS);
-    expect(decideAdvance({ ...base, cursor: 9, silenceMs: END_SILENCE_MS })).toBe("advance");
-    expect(endPauseMs({ ...base, cursor: 8 })).not.toBe(END_SILENCE_MS);
+  it("waits a little longer one word from the end (the last word is often missed)", () => {
+    expect(endPauseMs({ ...base, cursor: 9 })).toBe(NEAR_END_SILENCE_MS);
+    expect(decideAdvance({ ...base, cursor: 9, silenceMs: NEAR_END_SILENCE_MS })).toBe("advance");
+    expect(endPauseMs({ ...base, cursor: 8 })).not.toBe(NEAR_END_SILENCE_MS);
+  });
+
+  it("waits longest at a comma or full stop partway through the line, the word after it included", () => {
+    const beat = { ...base, cursor: 5, speechMs: 1500, breaks: new Set([5]) };
+    expect(endPauseMs(beat)).toBe(BEAT_SILENCE_MS);
+    expect(endPauseMs({ ...beat, cursor: 6, speechMs: 1700 })).toBe(BEAT_SILENCE_MS);
+    expect(endPauseMs({ ...beat, cursor: 7, speechMs: 1900 })).toBe(MID_LINE_SILENCE_MS);
+    expect(decideAdvance({ ...beat, silenceMs: BEAT_SILENCE_MS - 100 })).toBe("wait");
+    expect(decideAdvance({ ...beat, silenceMs: BEAT_SILENCE_MS })).toBe("advance");
+    // Not when the transcript is behind: then the cursor's place says nothing.
+    expect(endPauseMs({ ...beat, caughtUp: false })).toBe(LONG_SILENCE_MS);
+  });
+
+  it("catches a lagging transcript up from the actor's own pace, a few words from the end", () => {
+    // 7 words heard in 2.1 s of voice (300 ms a word), 3 left, and 0.9 s of voice since that pass.
+    const behind = { ...base, cursor: 7, caughtUp: false, coveredSpeechMs: 2100, speechMs: 3000 };
+    expect(endPauseMs(behind)).toBe(NEAR_END_SILENCE_MS);
+    // Too little voice since for three more words: still waiting for the transcript.
+    expect(endPauseMs({ ...behind, speechMs: 2500 })).toBe(LONG_SILENCE_MS);
+    // Further from the end, speaking time never ends the take.
+    expect(endPauseMs({ ...behind, cursor: 6, coveredSpeechMs: 1800, speechMs: 6000 })).toBe(LONG_SILENCE_MS);
   });
 
   it("never ends on speech time alone: words not heard wait for a long pause", () => {
@@ -245,12 +275,12 @@ describe("decideAdvance", () => {
   it("ends a short line soon when its last word is missed", () => {
     const short = { ...base, totalTokens: 3, speechMs: 800 };
     expect(decideAdvance({ ...short, cursor: 3, silenceMs: END_SILENCE_MS })).toBe("advance");
-    expect(decideAdvance({ ...short, cursor: 2, silenceMs: END_SILENCE_MS })).toBe("advance");
-    expect(decideAdvance({ ...short, cursor: 1, silenceMs: END_SILENCE_MS })).toBe("wait");
+    expect(decideAdvance({ ...short, cursor: 2, silenceMs: NEAR_END_SILENCE_MS })).toBe("advance");
+    expect(decideAdvance({ ...short, cursor: 1, silenceMs: NEAR_END_SILENCE_MS })).toBe("wait");
   });
 
-  it("ends a one-word line, or one with nothing to say, on the short pause", () => {
-    expect(endPauseMs({ ...base, totalTokens: 1, cursor: 0 })).toBe(END_SILENCE_MS);
+  it("ends a one-word line soon, and one with nothing to say on the short pause", () => {
+    expect(endPauseMs({ ...base, totalTokens: 1, cursor: 0 })).toBe(NEAR_END_SILENCE_MS);
     expect(endPauseMs({ ...base, totalTokens: 0, cursor: 0 })).toBe(END_SILENCE_MS);
   });
 
@@ -287,8 +317,8 @@ describe("decideAdvance", () => {
     }
     const first = decisions.indexOf("advance");
     expect(decisions.slice(0, first).every((d) => d === "wait")).toBe(true);
-    // Speech ends at 1.8 s; the move comes 1.2 s later.
-    expect((first + 1) * 100).toBe(3000);
+    // Speech ends at 1.8 s and the whole line is heard at 2 s; the move comes 0.7 s after the speech.
+    expect((first + 1) * 100).toBe(2500);
   });
 
   it("replays a slow reading: a breath mid-line never ends the take", () => {
@@ -306,13 +336,15 @@ describe("decideAdvance", () => {
         mode: "live",
         totalTokens: tokens.length,
         cursor: progress.cursor,
+        ended: progress.ended,
+        breaks: clauseBreaks("To be, or not to be, that is the question."),
         speechMs: vad.speechMs,
         silenceMs: vad.silenceMs,
         caughtUp: true,
       });
       if (d === "advance") first = t;
     }
-    expect(first).toBe(6200);
+    expect(first).toBe(5700);
   });
 
   it("replays a take the model misheard: it still moves on, after a long pause", () => {
@@ -374,5 +406,112 @@ describe("nextPassInterval", () => {
     expect(nextPassInterval(100)).toBe(350);
     expect(nextPassInterval(600)).toBe(870);
     expect(nextPassInterval(5000)).toBe(2000);
+  });
+});
+
+describe("following the script through mishearings", () => {
+  const follow = (text: string, transcript: string) => applyPass(startProgress(segmentLine(text).tokens.length), segmentLine(text).tokens, transcript);
+
+  it("takes a word that sounds like the line's for it", () => {
+    expect(follow("Thaw, and resolve itself into a dew!", "thought and resolve itself into a due").cursor).toBe(7);
+    expect(follow("Frailty, thy name is woman!", "prayalty my name is woman").cursor).toBe(5);
+  });
+
+  it("takes one word for two said quickly, and two for one", () => {
+    const { tokens } = segmentLine("A little more than kin, and less than kind.");
+    expect(applyPass(startProgress(tokens.length), tokens, "a little more than kin and lesson kind").cursor).toBe(9);
+  });
+
+  it("never takes a word heard alone for it and the word after it", () => {
+    // "bound" is not "bound to", "from" is not "from me": the second word is still to come.
+    expect(follow("Speak. I am bound to hear.", "speak i am bound").cursor).toBe(4);
+    const letter = follow("Go thou, and take this letter from me", "go thou and take this letter from");
+    expect(letter.cursor).toBe(7);
+    expect(letter.ended).toBe(false);
+  });
+
+  it("never lets a sound-alike carry the cursor past words not yet said", () => {
+    // "king" is not "kin and"; "mercy" is not "mercy is"; "and" is not "into".
+    expect(follow("A little more than kin, and less than kind.", "a little more than king").cursor).toBe(4);
+    expect(follow("The quality of mercy is not strained", "the quantity of mercy").cursor).toBe(4);
+    expect(follow("Thaw, and resolve itself into a dew!", "thou and resolve and resolve").cursor).toBe(3);
+  });
+
+  it("ends the line once its last words are heard, whatever was missed on the way", () => {
+    const text = "O, that this too too solid flesh would melt, Thaw, and resolve itself into a dew!";
+    const p = follow(text, "oh that this solid flesh would melt and resolve it into a due");
+    expect(p.ended).toBe(true);
+    expect(p.cursor).toBe(segmentLine(text).tokens.length);
+  });
+});
+
+describe("tailHeard", () => {
+  const tokens = (text: string) => segmentLine(text).tokens;
+
+  it("hears the end of the line in the newest words", () => {
+    expect(tailHeard(tokens("Thaw, and resolve itself into a dew!"), ["resolve", "it", "into", "a", "due"])).toBe(true);
+    expect(tailHeard(tokens("Frailty, thy name is woman!"), ["name", "is", "woman"])).toBe(true);
+  });
+
+  it("needs two of the last words, the last of them among the newest two heard", () => {
+    expect(tailHeard(tokens("Frailty, thy name is woman!"), ["woman"])).toBe(false);
+    expect(tailHeard(tokens("Frailty, thy name is woman!"), ["name", "is", "woman", "and", "then", "more"])).toBe(false);
+  });
+
+  it("never takes the start of the line for its end", () => {
+    // "than" comes twice, so "more than king" can't be "less than kind".
+    expect(tailHeard(tokens("A little more than kin, and less than kind."), ["a", "little", "more", "than", "king"])).toBe(false);
+    // The last word comes earlier too: the end can't be told apart.
+    expect(tailHeard(tokens("Seems, madam! Nay, it is; I know not 'seems.'"), ["i", "know", "not", "seems"])).toBe(false);
+  });
+});
+
+describe("clauseBreaks", () => {
+  it("marks where the line pauses as written", () => {
+    expect([...clauseBreaks("A little more than kin, and less than kind.")]).toEqual([5, 9]);
+    expect([...clauseBreaks("Seems, madam! Nay, it is; I know not 'seems.'")]).toEqual([1, 2, 3, 5, 9]);
+    expect([...clauseBreaks("To be [beat] or not")]).toEqual([]);
+  });
+});
+
+describe("pauseBegan", () => {
+  it("fires once when the voice stops, never before any speech", () => {
+    let vad = startVad();
+    const fired: number[] = [];
+    for (let t = 20; t <= 2000; t += 20) {
+      const before = vad;
+      vad = vadStep(vad, (t > 200 && t <= 800) || (t > 1400 && t <= 1500) ? -22 : -70, 20);
+      if (pauseBegan(before, vad)) fired.push(t);
+    }
+    // The first 20 ms frame with PAUSE_PASS_MS of silence after the voice.
+    const at = Math.ceil(PAUSE_PASS_MS / 20) * 20;
+    expect(fired).toEqual([800 + at, 1500 + at]);
+  });
+});
+
+describe("the cursor across real scripts", () => {
+  // Speeches of 4 to 40 words from the parser benchmark's scripts (every tenth, to keep it quick;
+  // all of them pass too), heard word by word exactly as written: the cursor must never be ahead of
+  // the words said, nor the line end early.
+  const dir = new URL("../../../backend/bench/fixtures/", import.meta.url);
+  const speeches = readdirSync(dir).flatMap(
+    (d) => (JSON.parse(readFileSync(new URL(`${d}/golden.json`, dir), "utf8")) as { speeches: { text: string }[] }).speeches,
+  );
+
+  it("never runs ahead of what has been said", { timeout: 30_000 }, () => {
+    let states = 0;
+    const ahead: string[] = [];
+    for (const { text } of speeches.filter((_, i) => i % 10 === 0)) {
+      const { tokens } = segmentLine(text);
+      if (tokens.length < 4 || tokens.length > 40) continue;
+      let p = startProgress(tokens.length);
+      for (let said = 1; said <= tokens.length - 2; said++) {
+        p = applyPass(p, tokens, tokens.slice(0, said).join(" "));
+        states++;
+        if (p.cursor > said || p.ended) ahead.push(`${text} | said ${said}, cursor ${p.cursor}`);
+      }
+    }
+    expect(states).toBeGreaterThan(2_000);
+    expect(ahead.slice(0, 5)).toEqual([]);
   });
 });

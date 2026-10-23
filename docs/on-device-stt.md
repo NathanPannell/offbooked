@@ -369,7 +369,7 @@ A display word is highlighted if any normalized token from it is `sub` or `del`.
 - N ≤ 3 (for example "Yes, my lord."): at most one missing word is Complete, more is Incomplete.
 - The chip shows the verdict; tapping it shows the word-by-word diff. An Incomplete or Not attempted line gets a gentle hint under it ("Part of the line seems missing. Listen back or record again.").
 - `COMPLETE_COVERAGE` and `SHORT_LINE_WORDS` in `score.ts` are the knobs; check them against pilot takes.
-- Live auto-advance (`stt/live.ts`) doesn't judge the take either: after real speech a pause always ends it and moves on, and the live cursor only sets how long that pause is (0.7 s near the end of the line, 1.5 s when the words weren't heard but enough was said, 3 s clearly mid-line).
+- Live auto-advance (`stt/live.ts`) doesn't judge the take either: after real speech a pause always ends it and moves on, and the live cursor only sets how long that pause is (0.7 s once the end of the line is heard, 1 s a word from it, 4.5 s at a comma or full stop partway through, 3 s clearly mid-line, 2.5 s when the words weren't heard or the transcript lags; see `endPauseMs`).
 
 **5. Summaries**
 

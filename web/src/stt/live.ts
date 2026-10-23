@@ -2,6 +2,7 @@
 // Everything here is pure: the recording screen feeds it transcripts and mic levels.
 
 import { cleanTranscript, displayWords, FILLERS, isNearMatch, normalizeDisplayWord, normalizeWords } from "./score";
+import { soundsAlike, soundsLikeJoined } from "./sounds";
 
 /** A run of the line as written. Whitespace and [directions] are kept verbatim so the text renders unchanged. */
 export interface LinePiece {
@@ -48,6 +49,18 @@ export function segmentLine(text: string): LineWords {
   return { pieces, tokens };
 }
 
+/**
+ * Where the line pauses as written: token counts at which a clause or sentence ends (a word ending
+ * in , ; : . ! ? or a dash). A pause there, partway through the line, is a natural beat, not the end.
+ */
+export function clauseBreaks(text: string): Set<number> {
+  const breaks = new Set<number>();
+  for (const p of segmentLine(text).pieces) {
+    if (p.kind === "word" && p.tokenEnd > p.tokenStart && /[,;:.!?\u2014\u2013-]['"\u2019\u201d)]*$/.test(p.text)) breaks.add(p.tokenEnd);
+  }
+  return breaks;
+}
+
 export type PieceState = "lit" | "next" | "ahead" | "direction" | "space";
 
 /** How each piece shows for a "spoken up to token N" cursor. */
@@ -75,6 +88,8 @@ export function heardWords(transcript: string, expected: readonly string[]): str
 // skipped and misheard words, but one stray match can't jump it far ahead: skipping k words to reach
 // a match needs about 1.5 × k matched words to pay for it.
 const OK = 2;
+/** A word that only sounds like the one in the line ("due" for "dew"): nearly as good as a match. */
+const SOUND = 1.5;
 const SUB = -1;
 const DEL = -2;
 const INS = -1;
@@ -94,6 +109,13 @@ export interface LiveAlignment {
  * and may end anywhere (the rest of the line isn't spoken yet). Skips, misheard words, extra words,
  * repeats and compound splits ("to morrow" = "tomorrow") are tolerated.
  */
+/** How well a heard word stands for a word of the line: spelled alike, sounds alike, or not at all. */
+function wordMatch(expected: string | undefined, heard: string | undefined): number {
+  if (expected === undefined || heard === undefined) return 0;
+  if (isNearMatch(expected, heard)) return OK;
+  return soundsAlike(expected, heard) ? SOUND : 0;
+}
+
 export function alignPartial(expected: readonly string[], heard: readonly string[], anchor = 0, freeUntil = 0): LiveAlignment {
   const a = Math.max(0, Math.min(anchor, expected.length));
   const free = Math.max(a, Math.min(freeUntil, expected.length));
@@ -114,11 +136,22 @@ export function alignPartial(expected: readonly string[], heard: readonly string
         }
       };
       if (r > 0 && j > 0) {
-        const near = isNearMatch(expected[i - 1], heard[j - 1]);
-        offer(score[r - 1][j - 1] + (near ? OK : SUB), near ? "ok" : "sub");
+        const near = wordMatch(expected[i - 1], heard[j - 1]);
+        offer(score[r - 1][j - 1] + (near || SUB), near ? "ok" : "sub");
       }
-      if (r > 1 && j > 0 && expected[i - 2] + expected[i - 1] === heard[j - 1]) offer(score[r - 2][j - 1] + 2 * OK, "merge21");
-      if (r > 0 && j > 1 && heard[j - 2] + heard[j - 1] === expected[i - 1]) offer(score[r - 1][j - 2] + OK, "merge12");
+      // Two words of the line heard as one ("to morrow", or "lesson" for "less than"), and one heard as two.
+      if (r > 1 && j > 0) {
+        const joined = expected[i - 2] + expected[i - 1];
+        // Spelled as the two together, as much as two matches; only sounding like them, no more than one
+        // match, so a word heard exactly never lights the word after it too.
+        const near = joined === heard[j - 1] ? 2 * OK : soundsLikeJoined(expected[i - 2]!, expected[i - 1]!, heard[j - 1]!) ? SOUND : 0;
+        if (near) offer(score[r - 2][j - 1] + near, "merge21");
+      }
+      if (r > 0 && j > 1) {
+        const joined = heard[j - 2] + heard[j - 1];
+        const near = joined === expected[i - 1] ? OK : soundsLikeJoined(heard[j - 2]!, heard[j - 1]!, expected[i - 1]!) ? SOUND : 0;
+        if (near) offer(score[r - 1][j - 2] + near, "merge12");
+      }
       if (j > 0) offer(score[r][j - 1] + INS, "ins");
       if (r > 0) offer(score[r - 1][j] + DEL, "del");
       score[r][j] = best;
@@ -176,10 +209,42 @@ export interface LiveProgress {
   cursor: number;
   /** Tokens matched in any pass so far. */
   matched: boolean[];
+  /** The end of the line has been heard: every word, or its last words (`tailHeard`). */
+  ended: boolean;
 }
 
 export function startProgress(tokenCount: number): LiveProgress {
-  return { cursor: 0, matched: new Array<boolean>(tokenCount).fill(false) };
+  return { cursor: 0, matched: new Array<boolean>(tokenCount).fill(false), ended: false };
+}
+
+/** The line's last words looked for at the end of what was heard. */
+export const TAIL_WORDS = 3;
+/** The tail only counts once the cursor has followed this much of the line (a long line's tail can't be its start). */
+const TAIL_MIN_SHARE = 0.4;
+
+/**
+ * Whether the newest heard words are the end of the line: at least two of its last TAIL_WORDS
+ * words, in order, spelled or sounding alike, with the line's last word among the last two heard.
+ * So a missed or misheard word in the middle never holds the take open once the actor has said how
+ * the line ends. Only words found nowhere earlier in the line count, so the start of the line can't
+ * pass for its end ("more than kin" is not "less than kind"; "I know not seems" after "Seems, madam"
+ * never counts).
+ */
+export function tailHeard(tokens: readonly string[], heard: readonly string[]): boolean {
+  if (tokens.length < TAIL_WORDS || heard.length < 2) return false;
+  const start = tokens.length - TAIL_WORDS;
+  const unique = (i: number) => !tokens.slice(0, start).some((t) => wordMatch(t, tokens[i]) > 0) && !tokens.some((t, k) => k !== i && t === tokens[i]);
+  const last = tokens.length - 1;
+  if (!unique(last)) return false;
+  const recent = heard.slice(-(TAIL_WORDS + 1));
+  for (let j = recent.length - 1; j >= Math.max(1, recent.length - 2); j--) {
+    if (!wordMatch(tokens[last], recent[j])) continue;
+    // Another of the line's last words, unique to the tail, heard before it.
+    for (let i = last - 1; i >= start; i--) {
+      if (unique(i) && recent.slice(0, j).some((h) => wordMatch(tokens[i], h) > 0)) return true;
+    }
+  }
+  return false;
 }
 
 /** How far back from the cursor a windowed transcript (the last few seconds only) may start. */
@@ -194,11 +259,13 @@ export function applyPass(progress: LiveProgress, tokens: readonly string[], tra
   if (heard.length === 0 || tokens.length === 0) return progress;
   const anchor = windowed ? Math.max(0, progress.cursor - WINDOW_BACK_TOKENS) : 0;
   const { matched } = alignPartial(tokens, heard, anchor, progress.cursor);
-  if (matched.length === 0) return progress;
   const next = progress.matched.slice();
   for (const i of matched) next[i] = true;
-  const cursor = Math.max(progress.cursor, matched[matched.length - 1] + 1);
-  return { cursor, matched: next };
+  let cursor = Math.max(progress.cursor, matched.length ? matched[matched.length - 1] + 1 : 0);
+  // The line's last words, heard just now: the line is said, whatever was missed on the way.
+  if (cursor < tokens.length && cursor >= tokens.length * TAIL_MIN_SHARE && tailHeard(tokens, heard)) cursor = tokens.length;
+  if (cursor === progress.cursor && matched.length === 0) return progress;
+  return { cursor, matched: next, ended: progress.ended || cursor >= tokens.length };
 }
 
 export function matchedCount(progress: LiveProgress): number {
@@ -268,12 +335,23 @@ export function rmsDb(samples: Float32Array, start = 0, end = samples.length): n
 
 /** Words left after the cursor that still count as the end of the line (the last word is often missed). */
 export const END_WORDS = 1;
-/** Pause that ends a take once the cursor is at (or a word from) the end of the line. */
-export const END_SILENCE_MS = 1200;
+/** Pause that ends a take once the end of the line has been heard: every word, or its last words. */
+export const END_SILENCE_MS = 700;
+/** Pause that ends a take whose cursor is a word from the end (that word may just have been missed). */
+export const NEAR_END_SILENCE_MS = 1000;
+/**
+ * A transcript running behind (a slow phone) that has followed the line to within this many words
+ * of its end counts as at the end once the voice since its audio is what those words take.
+ */
+export const CATCH_UP_WORDS = 3;
+/** The share of those words' voiced time (at the actor's own pace) that must have been heard. */
+const CATCH_UP_SHARE = 0.9;
 /** Pause that ends a take whose words weren't heard, or whose transcript lags: long, rather than guessing. */
 export const LONG_SILENCE_MS = 2500;
 /** Pause that ends a take whose cursor is clearly mid-line: the actor may be pausing for effect. */
 export const MID_LINE_SILENCE_MS = 3000;
+/** Pause that ends a take whose cursor sits at a comma or full stop partway through the line: a natural beat. */
+export const BEAT_SILENCE_MS = 4500;
 /** Without a transcript: only a long pause after real speech ends the take. */
 export const ENERGY_SILENCE_MS = 2500;
 /** Voiced time per word in an average reading of a line (the VAD leaves out the gaps between words). */
@@ -288,10 +366,16 @@ export interface AdvanceInput {
   mode: "live" | "energy";
   totalTokens: number;
   cursor: number;
+  /** The end of the line has been heard (`LiveProgress.ended`). */
+  ended?: boolean;
+  /** Token counts where the written line has a clause or sentence break (`clauseBreaks`). */
+  breaks?: ReadonlySet<number>;
   speechMs: number;
   silenceMs: number;
   /** The newest finished transcription covers the audio up to the end of the last speech. */
   caughtUp: boolean;
+  /** Voiced time in the audio the newest finished transcription covered (the actor's pace, so far). */
+  coveredSpeechMs?: number;
 }
 
 /** wait: keep recording. advance: stop, keep the take, go to the next line. */
@@ -299,15 +383,25 @@ export type AdvanceDecision = "wait" | "advance";
 
 /** The pause that ends this take now, or null before any real speech. */
 export function endPauseMs(input: AdvanceInput): number | null {
-  const { mode, totalTokens, cursor, speechMs, caughtUp } = input;
+  const { mode, totalTokens, cursor, speechMs, caughtUp, ended = false, breaks, coveredSpeechMs } = input;
   if (mode === "energy") return speechMs < ENERGY_MIN_SPEECH_MS ? null : ENERGY_SILENCE_MS;
   if (speechMs < MIN_SPEECH_MS) return null;
-  if (totalTokens - cursor <= END_WORDS) return END_SILENCE_MS;
-  // Clearly mid-line: the transcript is current and the words heard explain the speech so far, so
-  // the actor is pausing inside the line. Otherwise the words were missed or the transcript lags:
-  // wait a long pause rather than guess from speech time.
-  const midLine = caughtUp && speechMs <= cursor * TRACKED_MS_PER_WORD;
-  return midLine ? MID_LINE_SILENCE_MS : LONG_SILENCE_MS;
+  if (ended || cursor >= totalTokens) return END_SILENCE_MS;
+  const left = totalTokens - cursor;
+  if (left <= END_WORDS) return NEAR_END_SILENCE_MS;
+  // The transcript runs behind, a few words from the end: if the voice since the audio it heard is
+  // what those words take at this actor's pace, they've been said. The words heard set the pace and
+  // how many are left, so speaking time alone never ends a take.
+  if (!caughtUp && coveredSpeechMs !== undefined && cursor > 0 && left <= CATCH_UP_WORDS) {
+    const pace = Math.min(600, Math.max(150, coveredSpeechMs / cursor));
+    if (speechMs - coveredSpeechMs >= left * pace * CATCH_UP_SHARE) return NEAR_END_SILENCE_MS;
+  }
+  // The transcript is current and has the actor at a comma or full stop partway through the line
+  // (or a word past it: the word after a comma is often heard, or guessed, early): a beat, so the
+  // longest wait. Elsewhere, clearly mid-line when the words heard explain the speech so far.
+  // Otherwise the words were missed or the transcript lags: wait a long pause rather than guess.
+  if (caughtUp && (breaks?.has(cursor) || breaks?.has(cursor - 1))) return BEAT_SILENCE_MS;
+  return caughtUp && speechMs <= cursor * TRACKED_MS_PER_WORD ? MID_LINE_SILENCE_MS : LONG_SILENCE_MS;
 }
 
 export function decideAdvance(input: AdvanceInput): AdvanceDecision {
@@ -315,10 +409,47 @@ export function decideAdvance(input: AdvanceInput): AdvanceDecision {
   return pause !== null && input.silenceMs >= pause ? "advance" : "wait";
 }
 
+/** What `decideAdvance` needs, from the live take's state: the hook and the replay both build it here. */
+export function advanceInput(take: {
+  mode: AdvanceInput["mode"];
+  tokens: number;
+  breaks: ReadonlySet<number>;
+  progress: LiveProgress;
+  vad: VadState;
+  /** The audio the newest finished pass covered, in ms of the take. */
+  coveredMs: number;
+  /** Voiced time in that audio. */
+  coveredSpeechMs?: number;
+}): AdvanceInput {
+  const { mode, tokens, breaks, progress, vad, coveredMs, coveredSpeechMs } = take;
+  return {
+    mode,
+    totalTokens: tokens,
+    cursor: progress.cursor,
+    ended: progress.ended,
+    breaks,
+    speechMs: vad.speechMs,
+    silenceMs: vad.silenceMs,
+    caughtUp: coveredMs >= vad.lastSpeechAtMs,
+    coveredSpeechMs,
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Pacing of transcription passes on slow devices.
 
 export const MIN_PASS_INTERVAL_MS = 350;
+/**
+ * Silence after speech this long starts a pass at once instead of at the next paced one, so the
+ * end of the line (or a beat) is transcribed as soon as the voice stops: on a slow phone, whose
+ * passes are seconds apart, that is when the transcript is needed most.
+ */
+export const PAUSE_PASS_MS = 250;
+
+/** Whether the voice has just paused (by PAUSE_PASS_MS) between two VAD states. */
+export function pauseBegan(before: VadState, after: VadState): boolean {
+  return after.speechMs > 0 && before.silenceMs < PAUSE_PASS_MS && after.silenceMs >= PAUSE_PASS_MS;
+}
 export const MAX_PASS_INTERVAL_MS = 2000;
 
 /** Waits longer between passes when a pass is slow, so the phone stays responsive. */
