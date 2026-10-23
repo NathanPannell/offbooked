@@ -50,7 +50,12 @@ export function Onboarding({
     {
       icon: <Mic size={30} strokeWidth={1.6} />,
       title: "Read your lines, hands-free",
-      body: <p>Pick your part and read your lines. No pressing start and stop: Offbooked hears when you've finished each one and moves on.</p>,
+      body: (
+        <p>
+          Pick your part, tap record once and read your lines. No pressing start and stop: Offbooked hears when you've finished each one and starts recording
+          the next.
+        </p>
+      ),
     },
   ];
   const last = index === slides.length - 1;
