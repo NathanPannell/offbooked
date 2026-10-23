@@ -99,6 +99,9 @@ describe("ends anchored on the voice", () => {
     // The same after a short silence, in a run of its own.
     const apart = speechBounds(levels([-70, 500], [-20, 500], [-70, 130], [-24, 300], [-70, 800]), 10, voicedIn([500, 1000]))!;
     assert.equal(apart.endMs, 1430 + TRIM.tailPadMs);
+    // And after a final "s" (closure, then the "s"), with a short silence before the fast word.
+    const afterS = speechBounds(levels([-70, 500], [-20, 500], [-70, 60], [-30, 120], [-70, 120], [-22, 300], [-70, 800]), 10, voicedIn([500, 1000]))!;
+    assert.equal(afterS.endMs, 1600 + TRIM.tailPadMs);
     const exhale = speechBounds(levels([-70, 500], [-20, 500], [-40, 600], [-70, 800]), 10, voicedIn([500, 1000]))!;
     assert.equal(exhale.endMs, 1000 + TRIM.releaseMs + TRIM.tailPadMs);
   });
@@ -114,6 +117,13 @@ describe("ends anchored on the voice", () => {
     const b = speechBounds(levels([-70, 400], [-20, 400], [-70, 300], [-35, 400], [-70, 300], [-20, 400], [-70, 600]), 10, voicedIn([400, 800], [1800, 2200]))!;
     assert.equal(b.startMs, 400 - TRIM.leadPadMs);
     assert.equal(b.endMs, 2200 + TRIM.tailPadMs);
+  });
+
+  test("minutes of sound with no voice in it fall back to the sound itself, without checking it all", () => {
+    let checked = 0;
+    const b = speechBounds(levels([-70, 40_000], [-30, TRIM.maxVoicingScanMs + 10_000], [-70, 40_000]), 10, () => (checked++, false))!;
+    assert.equal(b.startMs, 40_000 - TRIM.leadPadMs);
+    assert.ok(checked <= TRIM.maxVoicingScanMs / 10, `checked ${checked} frames`);
   });
 
   test("a whisper (nothing voiced) falls back to the sound itself", () => {

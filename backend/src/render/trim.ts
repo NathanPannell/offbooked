@@ -36,6 +36,7 @@ export const TRIM = {
   neighbourDb: 15, // sound across such a gap counts with the word when it is within this of the speech level (an "s" is; a breath isn't)
   loudDb: 12, // after the last voiced part, sound this close to the speech level is still the line (a word said too fast to show its pitch)
   loudGapMs: 300, // ...in the same run, or in one starting this soon after
+  maxVoicingScanMs: 120_000, // the pitch check looks at no more sound than this (from both ends together) before falling back to the sound itself
 } as const;
 
 export interface SpeechBounds {
@@ -100,12 +101,22 @@ function voicedSpan(
   speechDb: number,
 ): [number, number] | null {
   const closure = Math.round(TRIM.closureMs / frameMs);
-  const loud = ([a, b]: [number, number]) => Math.max(...levels.slice(a, b + 1)) >= speechDb - TRIM.neighbourDb;
+  const loud = ([a, b]: [number, number]) => {
+    for (let i = a; i <= b; i++) if (levels[i]! >= speechDb - TRIM.neighbourDb) return true;
+    return false;
+  };
   const need = Math.max(1, Math.round(TRIM.voicedRunMs / frameMs));
+  // The pitch check costs about 50 µs a frame: past this many frames looked at from the two ends without
+  // finding a voice (minutes of whisper, or rain on the mic), the sound-based ends are used instead.
+  let budget = Math.round(TRIM.maxVoicingScanMs / frameMs);
+  const isVoiced = (i: number) => {
+    if (--budget < 0) throw SCAN_SPENT;
+    return voiced(i);
+  };
   const firstIn = ([a, b]: [number, number]) => {
     let n = 0;
     for (let i = a; i <= b; i++) {
-      n = voiced(i) ? n + 1 : 0;
+      n = isVoiced(i) ? n + 1 : 0;
       if (n === need) return i - need + 1;
     }
     return -1;
@@ -113,11 +124,31 @@ function voicedSpan(
   const lastIn = ([a, b]: [number, number]) => {
     let n = 0;
     for (let i = b; i >= a; i--) {
-      n = voiced(i) ? n + 1 : 0;
+      n = isVoiced(i) ? n + 1 : 0;
       if (n === need) return i + need - 1;
     }
     return -1;
   };
+  try {
+    return spanOf(runs, firstIn, lastIn, loud, frameMs, levels, speechDb, closure);
+  } catch (err) {
+    if (err === SCAN_SPENT) return null;
+    throw err;
+  }
+}
+
+const SCAN_SPENT = new Error("voicing scan spent");
+
+function spanOf(
+  runs: [number, number][],
+  firstIn: (run: [number, number]) => number,
+  lastIn: (run: [number, number]) => number,
+  loud: (run: [number, number]) => boolean,
+  frameMs: number,
+  levels: number[],
+  speechDb: number,
+  closure: number,
+): [number, number] | null {
   let start: number | null = null;
   for (let r = 0; r < runs.length; r++) {
     const at = firstIn(runs[r]!);
@@ -139,18 +170,12 @@ function voicedSpan(
     // an exhale is quieter, and the breath for the next line comes much later.
     const loudGap = Math.round(TRIM.loudGapMs / frameMs);
     for (let k = r; k < runs.length && (k === r || runs[k]![0] - end - 1 <= loudGap); k++) {
-      let last = -1;
-      for (let i = runs[k]![1]; i >= Math.max(runs[k]![0], end + 1); i--) {
+      for (let i = runs[k]![1]; i > end && i >= runs[k]![0]; i--) {
         if (levels[i]! >= speechDb - TRIM.loudDb) {
-          last = i;
+          end = i;
           break;
         }
       }
-      if (last < 0) {
-        if (k === r) continue;
-        break;
-      }
-      end = last;
     }
     return [start, end];
   }
@@ -163,7 +188,7 @@ function voicedSpan(
  * falling at least TRIM.valley below it at shorter lags). Breath, hiss, clicks and bumps never
  * repeat like that, and rumble or pink room noise, which looks alike from one ms to the next, only
  * fades with the lag: it never dips and comes back. Worked out only for frames asked about, once
- * each, so a take costs a few ms however long it is.
+ * each: a take costs a few ms, and at most TRIM.maxVoicingScanMs of sound is ever checked.
  */
 export function voicing(pcm: Int16Array, rate: number = TRIM.analysisRate, frameMs: number = TRIM.frameMs): (frame: number) => boolean {
   // At 8 kHz: a voice's pitch and its first harmonics are all well below 4 kHz. (No pre-emphasis:
