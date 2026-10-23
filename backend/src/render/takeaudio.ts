@@ -4,10 +4,9 @@ import path from "node:path";
 import type { Ctx } from "../context.ts";
 import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { realignWordStarts } from "../realign.ts";
-import { flattenStretches } from "../taketiming.ts";
+import { flattenStretches, wordAnchors } from "../taketiming.ts";
 import { encodeCue, normalizeClipCut } from "./ffmpeg.ts";
-import { RENDER_SETTINGS } from "./plan.ts";
-import { TRIM, type Stretch } from "./trim.ts";
+import type { Stretch } from "./trim.ts";
 
 export interface TakeAudioRow {
   id: string;
@@ -32,8 +31,9 @@ export interface NormalizedTake {
 // an old FLAC is never mistaken for a current one. No migration or backfill job needed: the next
 // render or playback of each take redoes it once. t2: cut to the speech (trim.ts). t3: light noise
 // clean-up and two-pass loudness, so every take plays at the same level as the TTS. t4: the cut is
-// anchored on voiced sound, so breaths and bumps at the ends go too (trim.ts).
-export const NORMALIZE_VERSION = "t4";
+// anchored on voiced sound, so breaths and bumps at the ends go too (trim.ts). t5: cut by the line's
+// words when the app heard them (`wordBounds`), re-timed on the voice first.
+export const NORMALIZE_VERSION = "t5";
 export const isCurrentNormalized = (key: string | null): key is string => Boolean(key?.endsWith(`.${NORMALIZE_VERSION}.flac`));
 
 // Each take is normalized as soon as it is uploaded (normalizeSoon), so the recorder, the cues and
@@ -105,22 +105,9 @@ export async function normalizedTake(
   return done;
 }
 
-// The app's word starts for the take laid on its voice (realign.ts): the voice is the cut clip
-// without the trim's pads, its stretches moved back into ms of the upload. Null when the app sent
-// none, or they can't be re-timed.
-async function alignedStarts(ctx: Ctx, takeId: string, cutStartMs: number, samples: number, speech: Stretch[]): Promise<number[] | null> {
-  const [row] = await ctx.sql<{ wordStartsMs: number[] | null; text: string }[]>`
-    select t.word_starts_ms, l.text from takes t join lines l on l.id = t.line_id where t.id = ${takeId}`;
-  if (!row?.wordStartsMs?.length) return null;
-  // The trim's pads, unless the cut was held at the very start (the voice began within a pad of it).
-  const from = cutStartMs > 0 ? cutStartMs + TRIM.leadPadMs : 0;
-  const to = cutStartMs + (samples * 1000) / RENDER_SETTINGS.sampleRate - TRIM.tailPadMs;
-  const voice = speech.flatMap((s) => {
-    const startMs = Math.max(from, s.startMs + cutStartMs);
-    const endMs = Math.min(to, s.endMs + cutStartMs);
-    return endMs > startMs ? [{ startMs, endMs }] : [];
-  });
-  return realignWordStarts(row.wordStartsMs, row.text, voice);
+interface TakeWords {
+  wordStartsMs: number[] | null;
+  text: string;
 }
 
 async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { normalizedKey: string; samples: number } | null): Promise<NormalizedTake> {
@@ -141,8 +128,18 @@ async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { 
     }
     const source = path.join(dir, `source${path.extname(take.storageKey)}`);
     await writeFile(source, await storage.get(take.storageKey));
-    const { samples, cutStartMs, speech, cut } = await normalizeClipCut(source, flac, m4a, { clean: true });
-    const aligned = cut ? await alignedStarts(ctx, take.id, cutStartMs, samples, speech) : null;
+    // The app's word starts are re-timed on the take's voice (realign.ts), and the cut follows those
+    // words (trim.ts `wordBounds`): one analysis, the same voiced stretches, so they agree.
+    const [words] = await sql<TakeWords[]>`select t.word_starts_ms, l.text from takes t join lines l on l.id = t.line_id where t.id = ${take.id}`;
+    let aligned: number[] | null = null;
+    const onVoice = words?.wordStartsMs?.length
+      ? (voice: Stretch[]) => {
+          aligned = realignWordStarts(words.wordStartsMs, words.text, voice);
+          // Live starts that don't fit the voice aren't re-timed, and don't guide the cut either.
+          return aligned && wordAnchors(aligned, words.text);
+        }
+      : null;
+    const { samples, cutStartMs, speech } = await normalizeClipCut(source, flac, m4a, { clean: true, words: onVoice });
     const normalizedKey = `productions/${productionId}/normalized/${take.id}.${NORMALIZE_VERSION}.flac`;
     await Promise.all([storage.put(normalizedKey, await readFile(flac), "audio/flac"), storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
     if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();

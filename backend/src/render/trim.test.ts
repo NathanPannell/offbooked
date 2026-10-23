@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { promisify } from "node:util";
 import { normalizeClip } from "./ffmpeg.ts";
 import { RENDER_SETTINGS } from "./plan.ts";
-import { detectSpeech, frameLevels, speechBounds, TRIM, voicing } from "./trim.ts";
+import { detectSpeech, frameLevels, speechBounds, TRIM, voicing, wordBounds } from "./trim.ts";
 
 const exec = promisify(execFile);
 
@@ -130,6 +130,37 @@ describe("ends anchored on the voice", () => {
     const b = speechBounds(levels([-70, 400], [-30, 800], [-70, 600]), 10, () => false)!;
     assert.equal(b.startMs, 400 - TRIM.leadPadMs);
     assert.equal(b.endMs, 1200 + TRIM.tailPadMs);
+  });
+});
+
+describe("cut by the line's words", () => {
+  // A voiced "hmm" 2.6 s before the line, the line (with a 3 s beat before its last word), and an
+  // "okay" 1.3 s after it: all loud and voiced, so loudness alone keeps them all.
+  const take = levels([-70, 500], [-22, 300], [-70, 2600], [-20, 800], [-70, 3000], [-20, 400], [-70, 1300], [-24, 300], [-70, 800]);
+  const voice = voicedIn([500, 800], [3400, 4200], [7200, 7600], [8900, 9200]);
+
+  test("starts just before the first word and ends where the silence after the last word begins", () => {
+    const b = wordBounds(take, { firstMs: 3400, lastMs: 7250 }, 10, voice)!;
+    assert.equal(b.startMs, 3400 - TRIM.leadPadMs);
+    assert.equal(b.endMs, 7600 + TRIM.tailPadMs);
+    const loud = speechBounds(take, 10, voice)!;
+    assert.equal(loud.startMs, 500 - TRIM.leadPadMs, "loudness alone starts on the hmm");
+    assert.equal(loud.endMs, 9200 + TRIM.tailPadMs, "and ends after the okay");
+  });
+
+  test("anchors a little off still land on the voice: the words' own sound sets the edges", () => {
+    const b = wordBounds(take, { firstMs: 3600, lastMs: 7100 }, 10, voice)!;
+    assert.equal(b.startMs, 3400 - TRIM.leadPadMs);
+    assert.equal(b.endMs, 7600 + TRIM.tailPadMs);
+  });
+
+  test("never ends before the last word has had time to be said", () => {
+    const b = wordBounds(levels([-70, 500], [-20, 800], [-70, 1500]), { firstMs: 500, lastMs: 1250 }, 10, voicedIn([500, 1300]))!;
+    assert.ok(b.endMs >= 1250 + TRIM.minLastWordMs + TRIM.tailPadMs);
+  });
+
+  test("gives up (loudness decides) when there is no sound near the words", () => {
+    assert.equal(wordBounds(take, { firstMs: 12_000, lastMs: 13_000 }, 10, voice), null);
   });
 });
 
