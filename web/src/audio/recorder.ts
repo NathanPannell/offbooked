@@ -39,6 +39,12 @@ export interface RecordedTake {
 }
 
 export interface ActiveTake {
+  /**
+   * Resolves once the recorder is really taking audio (its start event), or after START_WAIT_MS on
+   * a browser that never says. A take handed on to the next one stops only then, so no audio falls
+   * between them.
+   */
+  started: Promise<void>;
   /** Stops recording and resolves with the take. */
   stop(): Promise<RecordedTake>;
   /** Stops and throws the audio away. */
@@ -46,6 +52,9 @@ export interface ActiveTake {
 }
 
 type AudioContextCtor = typeof AudioContext;
+
+/** Longest wait for a recorder's start event before treating it as started. */
+export const START_WAIT_MS = 400;
 
 /** What every take asks the mic for, on the chosen device (null for the browser's default). */
 export function micConstraints(deviceId: string | null): MediaTrackConstraints {
@@ -103,6 +112,10 @@ export class MicSession {
       if (e.data.size > 0) chunks.push(e.data);
     };
     const startedAt = performance.now();
+    const started = new Promise<void>((resolve) => {
+      recorder.onstart = () => resolve();
+      setTimeout(resolve, START_WAIT_MS);
+    });
     const stopped = new Promise<RecordedTake>((resolve, reject) => {
       recorder.onstop = () => {
         const type = recorder.mimeType || mimeType || chunks[0]?.type || "audio/webm";
@@ -120,6 +133,7 @@ export class MicSession {
     }, maxMs);
 
     return {
+      started,
       stop: () => {
         clearTimeout(limit);
         if (recorder.state !== "inactive") recorder.stop();

@@ -1,11 +1,11 @@
 import { Headphones, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { ActorApi } from "../../api/actor";
 import { errorMessage } from "../../api/client";
 import type { ActorLine, EmailState, Invite, SttResult } from "../../api/types";
 import { fetchOrGiveUp } from "../../audio/cue";
-import { useAccompaniment, usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
+import { useAccompaniment, usePlayback, useTakeRecorder, type FinishedTake } from "../../audio/useTakeRecorder";
 import { Brand } from "../../components/Brand";
 import { CharacterName } from "../../components/CharacterName";
 import { Dialog } from "../../components/Dialog";
@@ -113,6 +113,18 @@ export function RecordSession({
   const [profileOpen, setProfileOpen] = useState(false);
   /** The one hint on the device's first take, shown while it records. */
   const [firstTakeHint, setFirstTakeHint] = useState(false);
+  /** Lines whose take has ended and is still being kept, while the next line already records: shown as saving. */
+  const [finishing, setFinishing] = useState(new Set<string>());
+  /** After a take: show the next line with the take just kept, once that take's bar has rendered. */
+  const pendingReveal = useRef<{ from: string; to: string } | null>(null);
+  useLayoutEffect(() => {
+    const reveal = pendingReveal.current;
+    const card = reveal && cardRefs.current.get(reveal.to);
+    if (!reveal || !card) return;
+    pendingReveal.current = null;
+    // The next line in the middle, with the take just kept (and its buttons) still in view.
+    revealAfterTake(cardRefs.current.get(reveal.from) ?? null, card);
+  });
 
   const recorder = useTakeRecorder({
     onLimit: () => {
@@ -145,7 +157,10 @@ export function RecordSession({
     stt,
     text: actorLines.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
     autoAdvance,
-    onAdvance: (_lineId, mode) => void stopRecording({ recordNext: keepRecording && mode === "live" }),
+    onAdvance: (_lineId, mode) => {
+      const recordNext = keepRecording && mode === "live";
+      if (!(recordNext && handOff())) void stopRecording({ recordNext });
+    },
     timingRef,
   });
   const myItems = useMemo(() => items.filter((i) => i.token === token && (i.kind ?? "invite") === "invite"), [items, token]);
@@ -259,7 +274,8 @@ export function RecordSession({
   /** The next line to record: one nobody has recorded, else one someone else has. */
   const nextLine = (justRecorded: string): string | null =>
     nextToRecord(
-      actorLines.map((l) => ({ id: l.line.id, recorded: isRecorded(l.line.id), mine: hasOwn(l) })),
+      // A take still being kept counts as this actor's, so the chain never loops back to it.
+      actorLines.map((l) => ({ id: l.line.id, recorded: isRecorded(l.line.id) || finishing.has(l.line.id), mine: hasOwn(l) || finishing.has(l.line.id) })),
       justRecorded,
       new Set([justRecorded]),
     );
@@ -294,6 +310,11 @@ export function RecordSession({
     if (!(await recorder.start(lineId))) return;
     if (autoAdvance && claimFirstTakeHint()) setFirstTakeHint(true);
     setAnnouncement("Recording. Say your line, then tap stop.");
+    playAlong(item);
+  };
+
+  /** On a shared line, with "Hear my scene partners": the others' takes play along with this one. */
+  const playAlong = (item: ActorLine | undefined) => {
     const others = (item?.together ?? []).flatMap((t) => (t.audioUrl ? [t.audioUrl] : []));
     if (hearPartners && others.length) accompaniment.start(others);
   };
@@ -354,28 +375,35 @@ export function RecordSession({
 
   startRef.current = startRecording;
 
-  /** Stops and keeps the take, then moves to the next line; hands-free mode records the next line too. */
-  const stopRecording = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
-    const lineId = recorder.recording?.lineId;
-    accompaniment.stop();
-    setFirstTakeHint(false);
-    const recorded = await recorder.stop();
-    if (!recorded || !lineId) return;
+  /** Shows a line as saving while its finished take is kept. */
+  const markFinishing = (lineId: string, on: boolean) =>
+    setFinishing((set) => {
+      const next = new Set(set);
+      if (on) next.add(lineId);
+      else next.delete(lineId);
+      return next;
+    });
+
+  /**
+   * Keeps a finished take: queued on the device for upload, playable here at once, and scored. False
+   * when it was too short or couldn't be stored.
+   */
+  const keepTake = async (lineId: string, recorded: FinishedTake, timing: TakeTiming | null, announce = true): Promise<boolean> => {
     if (recorded.tooShort) {
       setAnnouncement("That was too short. Tap record and say your line.");
       toast("Too short. Tap record, say your line, then tap stop.");
-      return;
+      return false;
     }
     const url = URL.createObjectURL(recorded.blob);
     let clientTakeId: string;
     // When each word started, from following the take as it recorded (null when nothing was heard).
-    const wordStartsMs = takeWordStarts(timingRef.current, lineId, recorded.durationMs);
+    const wordStartsMs = takeWordStarts(timing, lineId, recorded.durationMs);
     try {
       clientTakeId = await uploader.add({ token, lineId, audio: recorded.blob, durationMs: recorded.durationMs, wordStartsMs });
     } catch {
       URL.revokeObjectURL(url);
       toast("Couldn't save that take on this device. Try again.");
-      return;
+      return false;
     }
     setLocalTakes((m) => {
       const next = new Map(m);
@@ -389,7 +417,7 @@ export function RecordSession({
       next.delete(lineId);
       return next;
     });
-    setAnnouncement("Take saved.");
+    if (announce) setAnnouncement("Take saved.");
 
     const text = actorLines.find((l) => l.line.id === lineId)?.line.text ?? "";
     void stt.score(lineId, recorded.blob, text).then((result) => {
@@ -398,26 +426,70 @@ export function RecordSession({
       setScores((s) => new Map(s).set(lineId, { takeKey: clientTakeId, result }));
       postStt(clientTakeId, result);
     });
+    return true;
+  };
 
-    goToNext(lineId, recordNext);
+  /**
+   * Hands-free: the next line starts recording at once, on the same mic, and the take just said is
+   * kept in the background, so nothing waits on it. False when there's no next line, or its cue
+   * plays first (then the take stops and the cue starts straight away instead).
+   */
+  const handOff = (): boolean => {
+    const lineId = recorder.recording?.lineId;
+    const next = lineId ? nextLine(lineId) : null;
+    const item = actorLines.find((l) => l.line.id === next);
+    if (!lineId || !next || !item || (hearPartners && item.cue)) return false;
+    // This take's word timing; the next take's live tracking replaces it in a moment.
+    const timing = timingRef.current;
+    accompaniment.stop();
+    const done = recorder.handoff(next);
+    if (!done) return false;
+    setFirstTakeHint(false);
+    markFinishing(lineId, true);
+    setCurrentId(next);
+    pendingReveal.current = { from: lineId, to: next };
+    setAnnouncement("Take saved. Recording the next line.");
+    playAlong(item);
+    void done
+      .then((recorded) => keepTake(lineId, recorded, timing, false))
+      .catch(() => toast("That take didn't record. Tap the line to record it again."))
+      .finally(() => markFinishing(lineId, false));
+    return true;
+  };
+
+  /** Stops and keeps the take, then moves to the next line; hands-free mode records the next line too. */
+  const stopRecording = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
+    const lineId = recorder.recording?.lineId;
+    const timing = timingRef.current;
+    accompaniment.stop();
+    setFirstTakeHint(false);
+    const recorded = await recorder.stop();
+    if (!recorded || !lineId) return;
+    if (recordNext && !recorded.tooShort) {
+      // Hands-free into a line whose cue plays first: the cue starts now, while this take is kept.
+      // The cue starts once the take is stored (a few ms), and the chain stops if it couldn't be.
+      markFinishing(lineId, true);
+      const kept = await keepTake(lineId, recorded, timing).finally(() => markFinishing(lineId, false));
+      if (kept) goToNext(lineId, true, 0);
+      return;
+    }
+    if (await keepTake(lineId, recorded, timing)) goToNext(lineId);
   };
   stopRef.current = () => void stopRecording();
 
-  const goToNext = (lineId: string, recordNext = false) => {
+  const goToNext = (lineId: string, recordNext = false, delayMs = ADVANCE_DELAY_MS) => {
     const next = nextLine(lineId);
     advanceTimer.current = setTimeout(() => {
       advanceTimer.current = null;
       if (next) {
         setCurrentId(next);
-        // The next line in the middle, with the take just kept (and its buttons) still in view.
-        const card = cardRefs.current.get(next);
-        if (card) revealAfterTake(cardRefs.current.get(lineId) ?? null, card);
+        pendingReveal.current = { from: lineId, to: next };
         if (recordNext) void startRef.current(next);
       } else {
         setView("wrapped");
         window.scrollTo({ top: 0 });
       }
-    }, ADVANCE_DELAY_MS);
+    }, delayMs);
   };
 
   /** After picking up parts: reload the lines and show the new part, at its first line that needs a voice. */
@@ -458,7 +530,8 @@ export function RecordSession({
       : (characterNames.get(l.line.characterId ?? "") ?? "");
   // Delete removes the take just recorded here (straight away, even while it uploads), else the
   // actor's own latest. Never someone else's.
-  const canDelete = (l: ActorLine) => localTakes.has(l.line.id) || !!ownTake(l);
+  // Not while a take is still being kept: Delete would hit the take before it.
+  const canDelete = (l: ActorLine) => !finishing.has(l.line.id) && (localTakes.has(l.line.id) || !!ownTake(l));
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
   const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
   const failed = unsaved.filter((i) => i.status === "failed");
@@ -633,6 +706,7 @@ export function RecordSession({
                       current={l.line.id === currentId}
                       recording={recorder.recording?.lineId === l.line.id}
                       localTake={localTakes.get(l.line.id) ?? null}
+                      finishing={finishing.has(l.line.id)}
                       upload={uploadFor(l.line.id)}
                       author={lineTake(l)?.author ?? null}
                       score={scores.get(l.line.id) ?? null}

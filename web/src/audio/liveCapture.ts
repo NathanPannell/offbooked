@@ -1,5 +1,7 @@
 // Raw 16 kHz mono samples from the open mic while a take records, for live word highlighting and
 // the silence detector. An AudioWorklet downsamples on the audio thread and posts 100 ms blocks.
+// Each take is a generation: when one take hands on to the next, the block the worklet flushes for
+// the old take is told apart from the new take's first samples, which start on the next frame.
 
 export const CAPTURE_RATE = 16_000;
 
@@ -15,11 +17,15 @@ class OffbookedCapture extends AudioWorkletProcessor {
     this.out = new Float32Array(${CAPTURE_RATE / 10});
     this.n = 0;
     this.on = false;
+    this.gen = 0;
     this.port.onmessage = (event) => {
-      if (event.data === "on") {
+      const { cmd, gen } = event.data;
+      if (cmd === "on") {
+        this.flush();
         this.on = true;
+        this.gen = gen;
         this.pos = 0; this.acc = 0; this.count = 0; this.n = 0;
-      } else if (event.data === "off") {
+      } else if (cmd === "off" && gen === this.gen) {
         this.flush();
         this.on = false;
       }
@@ -27,7 +33,7 @@ class OffbookedCapture extends AudioWorkletProcessor {
   }
   flush() {
     if (this.n > 0) {
-      this.port.postMessage(this.out.slice(0, this.n));
+      this.port.postMessage({ gen: this.gen, samples: this.out.slice(0, this.n) });
       this.n = 0;
     }
   }
@@ -66,10 +72,13 @@ export class LiveCapture {
   /** Samples at the start of the take no longer kept, so a take of any length stays small. */
   private dropped = 0;
   private kept = 0;
+  /** The take being captured; blocks from an earlier one are dropped. */
+  private gen = 0;
 
   private constructor(private readonly node: AudioWorkletNode) {
-    node.port.onmessage = (event: MessageEvent<Float32Array>) => {
-      const chunk = event.data;
+    node.port.onmessage = (event: MessageEvent<{ gen: number; samples: Float32Array }>) => {
+      if (event.data.gen !== this.gen) return;
+      const chunk = event.data.samples;
       this.chunks.push(chunk);
       this.length += chunk.length;
       this.kept += chunk.length;
@@ -103,17 +112,19 @@ export class LiveCapture {
     }
   }
 
-  /** Starts a fresh buffer. */
-  begin(): void {
+  /** Starts a fresh buffer for a new take, and returns the take for `end`. A take still capturing ends here, with no gap between them. */
+  begin(): number {
     this.chunks = [];
     this.length = 0;
     this.dropped = 0;
     this.kept = 0;
-    this.node.port.postMessage("on");
+    this.node.port.postMessage({ cmd: "on", gen: ++this.gen });
+    return this.gen;
   }
 
-  end(): void {
-    this.node.port.postMessage("off");
+  /** Stops capturing take `gen` (from `begin`); nothing when another take has begun since. */
+  end(gen: number): void {
+    this.node.port.postMessage({ cmd: "off", gen });
   }
 
   /** Copies samples [from, to) of the current take; samples older than KEEP_SAMPLES come back as silence. */

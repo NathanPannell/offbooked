@@ -12,6 +12,18 @@ export const MIN_TAKE_MS = 400;
 
 export type MicStatus = "idle" | "requesting" | "ready";
 
+export type FinishedTake = RecordedTake & { tooShort: boolean };
+
+const finished = (recorded: RecordedTake): FinishedTake => ({
+  ...recorded,
+  tooShort: recorded.durationMs < MIN_TAKE_MS || recorded.blob.size === 0,
+});
+
+/** Stops `current` once `next` is really recording, so the two overlap and no audio falls between them. */
+export function overlapTakes(current: ActiveTake, next: ActiveTake): Promise<RecordedTake> {
+  return next.started.then(() => current.stop());
+}
+
 /**
  * One take at a time from a shared mic: asks for the mic on the first tap, keeps the screen awake
  * while recording, stops itself at the time limit. Used by the actor's recorder and the director's
@@ -70,13 +82,34 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
   }, []);
 
   /** Stops the take. Resolves null when nothing was recording or the take was too short to keep. */
-  const stop = useCallback(async (): Promise<(RecordedTake & { tooShort: boolean }) | null> => {
+  const stop = useCallback(async (): Promise<FinishedTake | null> => {
     const take = takeRef.current;
     takeRef.current = null;
     setRecording(null);
     if (!take) return null;
-    const recorded = await take.stop();
-    return { ...recorded, tooShort: recorded.durationMs < MIN_TAKE_MS || recorded.blob.size === 0 };
+    return finished(await take.stop());
+  }, []);
+
+  /**
+   * Hands the mic straight on to the next line: its take starts now, on the same open mic, and the
+   * one recording stops only once the new one is really taking audio, so the two overlap by a few
+   * ms and nothing said between them is lost. Returns the finished take, still being wrapped up
+   * (null when nothing was recording or the next take couldn't start: then stop and start instead).
+   */
+  const handoff = useCallback((nextLineId: string): Promise<FinishedTake> | null => {
+    const take = takeRef.current;
+    const mic = micRef.current;
+    if (!take || !mic?.isOpen) return null;
+    let next: ActiveTake;
+    try {
+      next = mic.start(MAX_TAKE_MS, () => onLimitRef.current?.(nextLineId));
+    } catch {
+      return null;
+    }
+    takeRef.current = next;
+    setElapsed(0);
+    setRecording({ lineId: nextLineId, startedAt: performance.now() });
+    return overlapTakes(take, next).then(finished);
   }, []);
 
   /** Remembers the mic picked in mic settings; the next take opens it. */
@@ -98,6 +131,7 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     capture: micRef.current?.capture ?? null,
     start,
     stop,
+    handoff,
     setDevice,
   };
 }

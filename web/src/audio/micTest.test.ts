@@ -81,6 +81,7 @@ function fakeMic({ openError, blob = new Blob(["abc"], { type: "audio/webm" }) }
     start: (maxMs) => {
       log.push(`start ${maxMs}`);
       return {
+        started: Promise.resolve(),
         stop: async () => {
           log.push("stop");
           return { blob, durationMs: 3000 };
