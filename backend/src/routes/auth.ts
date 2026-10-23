@@ -7,6 +7,7 @@ import { signInEmail } from "../email/templates.ts";
 import { body, optionalString, requiredEmail, requiredString } from "../input.ts";
 import { safeNext } from "../names.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
+import { deleteAccount } from "../retention.ts";
 
 const LOGIN_TOKEN_MINUTES = 15;
 
@@ -58,6 +59,15 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     if (name === undefined) return { user: director };
     const [user] = await ctx.sql`update users set name = ${name} where id = ${director.id} returning id, email, name`;
     return { user };
+  });
+
+  // Deletes the account and everything in it, for good (App Store guideline 5.1.1(v)). The body must
+  // say { confirm: true }, so a stray request can't do it.
+  app.delete("/api/me", async (req, reply) => {
+    const director = await requireDirector(ctx, req);
+    if (body(req.body).confirm !== true) throw new HttpError(400, "confirm_required", "Confirm that you want to delete your account.");
+    await deleteAccount(ctx, director.id);
+    return reply.code(204).send();
   });
 
   app.post("/api/auth/logout", async (req, reply) => {

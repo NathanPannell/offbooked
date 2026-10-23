@@ -44,14 +44,44 @@ export async function dueContent(sql: Sql): Promise<{ dueIds: string[]; nextMs: 
 // date just moved. Writers that finish after the last sweep (an upload, normalization, mix, render
 // or parse) call sweepIfDeleted after their own writes, so nothing written late survives.
 export async function deleteProductionContent(ctx: Ctx, productionId: string): Promise<{ objects: number } | null> {
-  const { sql, storage } = ctx;
   // Archiving first turns the cast's invite and join links away (410) before anything goes.
-  const [p] = await sql`
+  const [p] = await ctx.sql`
     update productions p set archived_at = coalesce(archived_at, now())
     where p.id = ${productionId} and p.content_deleted_at is null and p.performance_ends_on is not null
       and (((p.performance_ends_on + ${RETENTION_DAYS}::int) + time '12:00') at time zone 'UTC') <= now()
     returning p.id`;
   if (!p) return null;
+  const objects = await purgeProduction(ctx, productionId, "retention");
+  return { objects };
+}
+
+// Deletes everything a director's account holds, for good, when they delete it (DELETE /api/me):
+// each of their productions is archived and purged like a production past its retention date, and
+// more besides, since nobody is left to want it: the title and every cast member's details go,
+// verified emails included. The users row stays as a tombstone with no email or name (productions
+// keep their owner_id), its sessions and sign-in links are deleted, and signing in again with the
+// same address makes a new, empty account. A failure part-way leaves the account signed in, so the
+// director can simply ask again: every step is safe to repeat.
+export async function deleteAccount(ctx: Ctx, userId: string): Promise<{ productions: number; objects: number }> {
+  const owned = await ctx.sql<{ id: string }[]>`
+    update productions set archived_at = coalesce(archived_at, now()) where owner_id = ${userId} returning id`;
+  let objects = 0;
+  for (const { id } of owned) objects += await purgeProduction(ctx, id, "account");
+  await ctx.sql.begin(async (tx) => {
+    const [user] = await tx<{ email: string }[]>`select email from users where id = ${userId} for update`;
+    if (user) await tx`delete from login_tokens where email = ${user.email}`;
+    await tx`delete from sessions where user_id = ${userId}`;
+    await tx`update users set email = 'deleted-' || id || '@deleted.invalid', name = null, deleted_at = coalesce(deleted_at, now()) where id = ${userId}`;
+  });
+  ctx.log.info({ userId, productions: owned.length, objects }, "account deleted");
+  return { productions: owned.length, objects };
+}
+
+// The deletion itself, for a production already archived. `retention` keeps the cast details tied
+// to a verified email (and a director's own cast row, tied to their account) and the title;
+// `account` clears those too. Returns how many storage objects went.
+async function purgeProduction(ctx: Ctx, productionId: string, reason: "retention" | "account"): Promise<number> {
+  const { sql, storage } = ctx;
   const prefix = `productions/${productionId}/`;
   let objects = await storage.deletePrefix(prefix);
   await sql.begin(async (tx) => {
@@ -66,21 +96,29 @@ export async function deleteProductionContent(ctx: Ctx, productionId: string): P
     await tx`delete from characters where production_id = ${productionId}`;
     await tx`delete from sections where production_id = ${productionId}`;
     await tx`delete from scripts where production_id = ${productionId}`;
-    // Cast details go too unless they're tied to a verified email: someone who verified an email (to
-    // hear when the play is ready) keeps their name with it; everyone else's name, phone and any
-    // unverified address are cleared. Addresses still waiting for their link go for everyone. The
-    // rows stay so their invite links still answer 410. A director's own cast row is tied to their
-    // account's email and is kept.
-    await tx`
-      update actors set name = '', first_name = null, phone = null, email = null, email_verified_at = null
-      where production_id = ${productionId} and director_user_id is null
-        and (email_verified_at is null or coalesce(btrim(email), '') = '')`;
+    if (reason === "retention") {
+      // Cast details go too unless they're tied to a verified email: someone who verified an email (to
+      // hear when the play is ready) keeps their name with it; everyone else's name, phone and any
+      // unverified address are cleared. Addresses still waiting for their link go for everyone. The
+      // rows stay so their invite links still answer 410. A director's own cast row is tied to their
+      // account's email and is kept.
+      await tx`
+        update actors set name = '', first_name = null, phone = null, email = null, email_verified_at = null
+        where production_id = ${productionId} and director_user_id is null
+          and (email_verified_at is null or coalesce(btrim(email), '') = '')`;
+    } else {
+      await tx`
+        update actors set name = '', first_name = null, phone = null, email = null, email_verified_at = null, director_user_id = null
+        where production_id = ${productionId}`;
+      await tx`update notifications set recipient = null where production_id = ${productionId}`;
+      await tx`update productions set title = '' where id = ${productionId}`;
+    }
     await tx`update actors set pending_email = null, pending_email_sent_at = null where production_id = ${productionId} and pending_email is not null`;
-    await tx`update productions set content_deleted_at = now(), script_status = 'none', script_error = null where id = ${productionId}`;
+    await tx`update productions set content_deleted_at = coalesce(content_deleted_at, now()), script_status = 'none', script_error = null where id = ${productionId}`;
   });
   objects += await storage.deletePrefix(prefix);
-  ctx.log.info({ productionId, objects }, "production content deleted (retention)");
-  return { objects };
+  ctx.log.info({ productionId, objects }, `production content deleted (${reason})`);
+  return objects;
 }
 
 // Writers call this after putting objects under productions/<id>/ and before recording them. If the

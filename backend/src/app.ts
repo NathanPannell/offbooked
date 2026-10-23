@@ -35,6 +35,11 @@ export function originMatcher(patterns: string[]): (origin: string) => boolean {
   return (origin) => regexes.some((re) => re.test(origin));
 }
 
+// The iOS app (Capacitor) serves its bundled web app from this origin and always calls the
+// production API, so it is allowed whatever CORS_ORIGINS says. Auth is a bearer or invite header,
+// never a cookie, so allowing an origin grants nothing by itself.
+export const NATIVE_APP_ORIGINS = ["capacitor://localhost"];
+
 const STATUS_CODES: Record<number, string> = {
   400: "bad_request",
   401: "unauthorized",
@@ -73,7 +78,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
   const ctx = opts.ctx;
   if (!ctx) return app;
 
-  const allowed = originMatcher(ctx.config.corsOrigins);
+  const allowed = originMatcher([...ctx.config.corsOrigins, ...NATIVE_APP_ORIGINS]);
   app.register(cors, {
     origin: (origin, cb) => cb(null, !origin || allowed(origin)),
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

@@ -95,6 +95,8 @@ describe("director auth", { skip: dbSkip }, () => {
     assert.equal((await preflight("https://app.test")).headers["access-control-allow-origin"], "https://app.test");
     assert.equal((await preflight("https://evil.example")).headers["access-control-allow-origin"], undefined);
     assert.equal((await preflight("https://a.b.vercel.app")).headers["access-control-allow-origin"], undefined);
+    // The iOS app's bundled pages, whatever CORS_ORIGINS says.
+    assert.equal((await preflight("capacitor://localhost")).headers["access-control-allow-origin"], "capacitor://localhost");
   });
 
   test("health still reports ffmpeg", async () => {

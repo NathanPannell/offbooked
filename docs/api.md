@@ -71,6 +71,7 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 | POST | `/api/auth/verify` | `{ token }` | `{ sessionToken, user: { id, email, name } }` (session lasts 30 days) |
 | GET | `/api/me` | | `{ user }` |
 | PATCH | `/api/me` | `{ name }` | `{ user }`. The director's name shows on invites ("Sam invited you"). Until it is set, the cast sees the part of the email before the @, capitalised (`sam.ortiz@…` is "Sam Ortiz"); the cast never sees the email address. |
+| DELETE | `/api/me` | `{ confirm: true }` | `204`. Deletes the account for good (App Store guideline 5.1.1(v)): every production it owns is archived and its script, recordings, renders, title and cast details (verified emails included) are deleted now, as retention would, and more; sessions and sign-in links go; the user row stays as a tombstone with no email or name. Signing in again with the same address makes a new, empty account. Without `confirm: true` it is 400 `confirm_required`. |
 | POST | `/api/auth/logout` | | `204` |
 
 ## Productions and script (director)

@@ -321,6 +321,66 @@ describe("content retention", { skip: dbSkip }, () => {
     assert.ok(row!.lines > 0, "rows are only deleted after the storage objects");
     assert.ok((await deleteProductionContent(t.ctx, id))?.objects, "a later pass finishes the job");
   });
+
+  test("deleting an account deletes its productions, recordings and cast details now, and only its own", { timeout: 60_000 }, async () => {
+    const root = (t.ctx.storage as LocalStorage).root;
+    const leaving = await signIn(t, "leaving@example.test");
+    await send("PATCH", "/api/me", { name: "Lee" }, leaving);
+    const { id, script } = await productionWithScript(t, leaving, SCENE, "Leaving show");
+    const other = await productionWithScript(t, director, SCENE, "Someone else's show");
+    const { joinUrl } = (await get(`/api/productions/${id}/join-link`, leaving)).json();
+    const hamlet = script.characters.find((c: { name: string }) => c.name === "HAMLET");
+    const claim = (await send("POST", `/api/join/${joinUrl.split("/join/")[1]}/claim`, { firstName: "Riz", characterIds: [hamlet.id] }, leaving)).json();
+    const inviteHeaders = invite(`https://app.test/i/${claim.inviteToken}`);
+    const line = script.lines.find((l: { kind: string; characterId: string }) => l.kind === "dialogue" && l.characterId === hamlet.id);
+    const take = await t.app.inject({
+      method: "PUT",
+      url: `/api/invite/lines/${line.id}/take`,
+      headers: { ...inviteHeaders, "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "700" },
+      payload: toneWav(0.7, 440),
+    });
+    assert.equal(take.statusCode, 200);
+    // Even a cast member who verified an email loses their details: the show is gone, not wrapped.
+    await t.ctx.sql`update actors set email = 'riz@example.test', email_verified_at = now(), phone = '555' where production_id = ${id}`;
+    await t.ctx.jobs.idle();
+    assert.ok(await exists(path.join(root, "productions", id)));
+
+    const unconfirmed = await t.app.inject({ method: "DELETE", url: "/api/me", headers: bearer(leaving), payload: {} });
+    assert.equal(unconfirmed.statusCode, 400);
+    assert.equal((await get("/api/me", leaving)).statusCode, 200, "nothing happens without confirm");
+
+    const deleted = await t.app.inject({ method: "DELETE", url: "/api/me", headers: bearer(leaving), payload: { confirm: true } });
+    assert.equal(deleted.statusCode, 204);
+    assert.equal((await get("/api/me", leaving)).statusCode, 401, "signed out everywhere");
+
+    const count = async (table: string, productionId: string) =>
+      (await t.ctx.sql<{ n: number }[]>`select count(*)::int as n from ${t.ctx.sql(table)} where production_id = ${productionId}`)[0]!.n;
+    for (const table of ["sections", "characters", "lines", "takes", "renders", "scripts"]) assert.equal(await count(table, id), 0, `${table} deleted`);
+    for (const table of ["sections", "characters", "lines", "scripts"]) assert.ok((await count(table, other.id)) > 0, `other ${table} kept`);
+    assert.equal(await exists(path.join(root, "productions", id)), false, "storage folder gone");
+    assert.ok(await exists(path.join(root, "productions", other.id)), "the other director's folder stays");
+    const [tomb] = await t.ctx.sql<{ title: string; contentDeletedAt: Date | null }[]>`select title, content_deleted_at from productions where id = ${id}`;
+    assert.equal(tomb!.title, "");
+    assert.ok(tomb!.contentDeletedAt);
+    const cast = await t.ctx.sql<{ name: string; email: string | null; phone: string | null; directorUserId: string | null }[]>`
+      select name, email, phone, director_user_id from actors where production_id = ${id}`;
+    assert.ok(cast.length > 0);
+    for (const a of cast) assert.deepEqual(a, { name: "", email: null, phone: null, directorUserId: null });
+    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: inviteHeaders })).statusCode, 410);
+
+    const users = await t.ctx.sql<{ email: string; name: string | null; deletedAt: Date | null }[]>`
+      select email, name, deleted_at from users where email = 'leaving@example.test' or email like 'deleted-%'`;
+    assert.equal(users.length, 1);
+    assert.match(users[0]!.email, /^deleted-[0-9a-f-]+@deleted\.invalid$/);
+    assert.equal(users[0]!.name, null);
+    assert.ok(users[0]!.deletedAt);
+    assert.equal((await t.ctx.sql`select 1 from login_tokens where email = 'leaving@example.test'`).length, 0);
+
+    // The same address can sign up again, into a new, empty account.
+    const again = await signIn(t, "leaving@example.test");
+    assert.deepEqual((await get("/api/productions", again)).json().productions, []);
+    assert.equal((await get(`/api/productions/${other.id}`)).statusCode, 200);
+  });
 });
 
 describe("retention worker", { skip: dbSkip }, () => {
