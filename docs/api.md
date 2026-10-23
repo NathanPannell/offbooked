@@ -70,10 +70,11 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
-| POST | `/api/auth/request` | `{ email, next? }` | `204`. Sends a sign-in link `${APP_URL}/auth/verify?token=…&next=…` (single use, 15 min). `next` is where the app goes after signing in; only a path inside the director app (`/app`, `/app/…`, `/app?…`) is kept, anything else is dropped without an error. When `EMAIL_DRIVER=log`, the response is `200 { devLink }` instead so local testing works. |
+| POST | `/api/auth/request` | `{ email, next?, app? }` | `204`. Sends a sign-in link `${APP_URL}/auth/verify?token=…&next=…` (single use, 15 min). `app: true` (the iOS app) adds `&app=1`, which makes the link a universal link that opens the app (`web/public/.well-known/apple-app-site-association`); without it a sign-in started in Safari stays in Safari. `next` is where the app goes after signing in; only a path inside the director app (`/app`, `/app/…`, `/app?…`) is kept, anything else is dropped without an error. When `EMAIL_DRIVER=log`, the response is `200 { devLink }` instead so local testing works. |
 | POST | `/api/auth/verify` | `{ token }` | `{ sessionToken, user: { id, email, name } }` (session lasts 30 days) |
 | GET | `/api/me` | | `{ user }` |
 | PATCH | `/api/me` | `{ name }` | `{ user }`. The director's name shows on invites ("Sam invited you"). Until it is set, the cast sees the part of the email before the @, capitalised (`sam.ortiz@…` is "Sam Ortiz"); the cast never sees the email address. |
+| DELETE | `/api/me` | `{ confirm: true }` | `204`. Deletes the account for good (App Store guideline 5.1.1(v)): at once, in one transaction, the account is signed out everywhere, its sign-in links go, the user row becomes a tombstone with no email or name, and every production it owns is archived with its title and all cast details (verified emails included) cleared; then each production's script, recordings and renders are deleted as retention deletes them. Those are due immediately, so anything a storage failure leaves is finished by the retention worker. Synthesized speech (`tts_clips`, shared across productions by hash) stays. Signing in again with the same address makes a new, empty account. Without `confirm: true` it is 400 `confirm_required`. |
 | POST | `/api/auth/logout` | | `204` |
 
 ## Productions and script (director)

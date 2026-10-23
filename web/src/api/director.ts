@@ -47,12 +47,15 @@ const none: Auth = { kind: "none" };
 
 export const auth = {
   /** Returns a dev sign-in link when the backend logs emails instead of sending them. */
-  request: (email: string, next?: string | null) =>
-    request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: next ? { email, next } : { email } }),
+  /** `app`: asked for from the iOS app, so the emailed link opens the app (a universal link). */
+  request: (email: string, next?: string | null, app = false) =>
+    request<{ devLink?: string } | undefined>("/auth/request", { auth: none, json: { email, ...(next ? { next } : {}), ...(app ? { app } : {}) } }),
   verify: (token: string) => request<{ sessionToken: string; user: User }>("/auth/verify", { auth: none, json: { token } }),
   me: () => request<{ user: User }>("/me", { auth: director }),
   updateMe: (name: string) => request<{ user: User }>("/me", { method: "PATCH", auth: director, json: { name } }),
   logout: () => request<void>("/auth/logout", { method: "POST", auth: director }),
+  /** Deletes the account and every production in it, for good. */
+  deleteAccount: () => request<void>("/me", { method: "DELETE", auth: director, json: { confirm: true } }),
 };
 
 /** YYYY-MM-DD. A new production without a final date gets one a year out; an update can't clear it. */

@@ -6,8 +6,9 @@ Remote line recording and run-through playback for theatre casts. A director upl
 
 - `backend/`: Node 24 + Fastify API and, later, the ffmpeg render worker. TypeScript runs through Node's type stripping, so there is no build step. `tsc` is for typechecking only.
 - `web/`: the Vite + React app at offbooked.com (landing, director app, actor recording, run-through player, on-device accuracy check). See "Web" below.
+- `web/ios/`: the iOS app, Capacitor 8 around the bundled web app (Swift Package Manager, bundle id `com.offbooked.app`), with native lock-screen playback, on-device take files and universal links. Built only on GitHub's macOS runners. See `docs/mobile.md`.
 - `railway.json`: Railway build and health check config for the backend.
-- `.github/workflows/`: `ci.yml` (the CI gate, see "Delivery"), `deploy-backend.yml` (deploys `main` to Railway).
+- `.github/workflows/`: `ci.yml` (the CI gate, see "Delivery"), `deploy-backend.yml` (deploys `main` to Railway), `ios.yml` (iOS simulator build, launch and screenshots on every PR touching `web/`; a TestFlight upload by hand or on `main`, skipped without the App Store Connect secrets).
 
 ## Delivery
 

@@ -2,6 +2,8 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { Loading } from "./components/Loading";
 import { ToastProvider } from "./components/Toast";
+import { NativeLinks } from "./native/NativeLinks";
+import { isNativeApp } from "./native/platform";
 import { Landing } from "./routes/Landing";
 import { NotFound } from "./routes/NotFound";
 
@@ -16,14 +18,16 @@ const InvitePlay = lazy(() => import("./routes/actor/InvitePlay"));
 const JoinPage = lazy(() => import("./routes/actor/JoinPage"));
 const SceneRecorder = lazy(() => import("./routes/director/SceneRecorder"));
 const Account = lazy(() => import("./routes/director/Account"));
+const NativeHome = lazy(() => import("./native/NativeHome"));
 
 export function App() {
   return (
     <ToastProvider>
       <BrowserRouter>
+        <NativeLinks />
         <Suspense fallback={<Loading />}>
           <Routes>
-            <Route path="/" element={<Landing />} />
+            <Route path="/" element={isNativeApp() ? <NativeHome /> : <Landing />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/auth/verify" element={<Verify />} />
             <Route path="/app" element={<DirectorLayout />}>

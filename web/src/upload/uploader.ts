@@ -3,6 +3,8 @@ import { ApiError, errorMessage } from "../api/client";
 import { standins } from "../api/director";
 import { uuid } from "../lib/uuid";
 import { backoffMs, enqueue, nextDue, nextWakeAt, transition, type QueueEvent, type TakeKind, type UploadItem } from "./queue";
+import { isNativeApp } from "../native/platform";
+import { connectNativeUploads, nativeBusyChange, openNativeTakeStore } from "../native/uploads";
 import { MemoryTakeStore, openTakeStore, type TakeStore } from "./store";
 
 export interface NewTake {
@@ -74,6 +76,8 @@ export interface UploaderOptions {
   send?: SendTake;
   stallTimeoutMs?: (bytes: number) => number;
   random?: () => number;
+  /** Told when an upload starts (true) and when nothing is left to send right now (false). */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /**
@@ -102,12 +106,15 @@ export class Uploader {
   private send: SendTake;
   private stallMs: (bytes: number) => number;
   private random: () => number;
+  private onBusyChange: (busy: boolean) => void;
+  private working = false;
   persistent = true;
 
   constructor(opts: UploaderOptions = {}) {
     this.send = opts.send ?? sendTake;
     this.stallMs = opts.stallTimeoutMs ?? stallTimeoutMs;
     this.random = opts.random ?? Math.random;
+    this.onBusyChange = opts.onBusyChange ?? (() => {});
     this.ready = (opts.openStore ?? openTakeStore)().then(async ({ store, persistent }) => {
       this.persistent = persistent;
       const now = Date.now();
@@ -226,6 +233,17 @@ export class Uploader {
     return updated;
   }
 
+  /** The connection is back (or the app is in front again): try every waiting take now. */
+  retryNow(): void {
+    this.onOnline();
+  }
+
+  private setWorking(working: boolean) {
+    if (working === this.working) return;
+    this.working = working;
+    this.onBusyChange(working);
+  }
+
   private onOnline = () => {
     const now = Date.now();
     this.holdUntil = 0;
@@ -249,10 +267,12 @@ export class Uploader {
     if (!item) {
       const wake = nextWakeAt(this.items);
       if (wake !== null) this.schedule(Math.max(wake, this.holdUntil));
+      this.setWorking(false);
       return;
     }
 
     this.busy = true;
+    this.setWorking(true);
     let elsewhere = false;
     try {
       this.apply(item.takeId, { type: "begin" });
@@ -389,8 +409,14 @@ export async function withUploadLock<T>(
 
 let shared: Uploader | null = null;
 
-/** One uploader per tab, shared by every screen. */
+/** One uploader per tab, shared by every screen. In the iOS app its takes are files (native/uploads.ts). */
 export function getUploader(): Uploader {
-  shared ??= new Uploader();
+  if (shared) return shared;
+  if (isNativeApp()) {
+    shared = new Uploader({ openStore: () => openNativeTakeStore(), onBusyChange: nativeBusyChange });
+    connectNativeUploads(shared);
+  } else {
+    shared = new Uploader();
+  }
   return shared;
 }

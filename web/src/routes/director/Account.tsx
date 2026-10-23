@@ -1,9 +1,10 @@
-import { ArrowLeft, LogOut } from "lucide-react";
+import { ArrowLeft, LogOut, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { errorMessage, session } from "../../api/client";
 import { auth } from "../../api/director";
 import { Avatar } from "../../components/Avatar";
+import { Dialog } from "../../components/Dialog";
 import { castFacingName } from "../../lib/names";
 import { useDirector } from "./DirectorLayout";
 
@@ -15,6 +16,9 @@ export default function Account() {
   const [error, setError] = useState<string | null>(null);
   const shown = castFacingName(name, user.email);
   const changed = name.trim() !== (user.name ?? "").trim();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -33,6 +37,19 @@ export default function Account() {
     await auth.logout().catch(() => {});
     session.clear();
     navigate("/", { replace: true });
+  };
+
+  const deleteAccount = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await auth.deleteAccount();
+      session.clear();
+      navigate("/", { replace: true });
+    } catch (err) {
+      setDeleteError(errorMessage(err));
+      setDeleting(false);
+    }
   };
 
   return (
@@ -83,6 +100,32 @@ export default function Account() {
       <button type="button" className="btn btn-secondary account-signout" onClick={signOut}>
         <LogOut size={18} aria-hidden="true" /> Sign out
       </button>
+
+      <button type="button" className="link-btn account-delete" onClick={() => setConfirmDelete(true)}>
+        <Trash2 size={16} aria-hidden="true" /> Delete my account
+      </button>
+
+      <Dialog open={confirmDelete} onClose={() => !deleting && setConfirmDelete(false)} title="Delete your account?" variant="confirm">
+        <div className="stack">
+          <p>
+            Every production you set up goes now, for good: its script, every recording your cast and you made, and your cast&rsquo;s names and emails. Their
+            links stop working. This can&rsquo;t be undone.
+          </p>
+          {deleteError && (
+            <p className="field-error" role="alert">
+              {deleteError}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button type="button" className="btn btn-danger" onClick={() => void deleteAccount()} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete everything"}
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setConfirmDelete(false)} disabled={deleting} autoFocus>
+              Keep my account
+            </button>
+          </div>
+        </div>
+      </Dialog>
     </main>
   );
 }

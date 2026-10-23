@@ -52,6 +52,14 @@ describe("director auth", { skip: dbSkip }, () => {
     for (const bad of ["https://evil.test/app", "//evil.test", "/i/abc", 7]) assert.equal((await linkFor(bad)).searchParams.has("next"), false);
   });
 
+  test("a sign-in asked for from the iOS app gets a link that opens the app", async () => {
+    const linkFor = async (payload: object) =>
+      new URL((await t.app.inject({ method: "POST", url: "/api/auth/request", payload: { email: "app@example.test", ...payload } })).json().devLink);
+    assert.equal((await linkFor({ app: true })).searchParams.get("app"), "1");
+    assert.equal((await linkFor({})).searchParams.has("app"), false);
+    assert.equal((await linkFor({ app: "yes" })).searchParams.has("app"), false);
+  });
+
   test("missing or bad credentials get the error shape", async () => {
     const res = await t.app.inject({ method: "GET", url: "/api/productions" });
     assert.equal(res.statusCode, 401);
@@ -95,6 +103,8 @@ describe("director auth", { skip: dbSkip }, () => {
     assert.equal((await preflight("https://app.test")).headers["access-control-allow-origin"], "https://app.test");
     assert.equal((await preflight("https://evil.example")).headers["access-control-allow-origin"], undefined);
     assert.equal((await preflight("https://a.b.vercel.app")).headers["access-control-allow-origin"], undefined);
+    // The iOS app's bundled pages, whatever CORS_ORIGINS says.
+    assert.equal((await preflight("capacitor://localhost")).headers["access-control-allow-origin"], "capacitor://localhost");
   });
 
   test("health still reports ffmpeg", async () => {

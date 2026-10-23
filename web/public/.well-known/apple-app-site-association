@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.offbooked.app"],
+        "components": [
+          { "/": "/join/*", "comment": "The cast link" },
+          { "/": "/i/*", "comment": "A cast member's own link and their listen-through" },
+          { "/": "/auth/verify", "?": { "app": "1" }, "comment": "Sign-in links asked for from the app (web sign-ins stay in Safari)" }
+        ]
+      }
+    ]
+  }
+}

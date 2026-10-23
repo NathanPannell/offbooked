@@ -27,7 +27,7 @@ export async function requireDirector(ctx: Ctx, req: FastifyRequest): Promise<Di
   if (!token) throw unauthorized("Sign in to continue.");
   const [user] = await ctx.sql<Director[]>`
     select u.id, u.email, u.name from sessions s join users u on u.id = s.user_id
-    where s.token_hash = ${sha256(token)} and s.expires_at > now()`;
+    where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.deleted_at is null`;
   if (!user) throw unauthorized("Your session has ended. Sign in again.");
   return user;
 }

@@ -9,6 +9,7 @@ import { Loading } from "../components/Loading";
 import { SectionNav } from "../components/SectionNav";
 import { sceneLabel } from "./sceneLabel";
 import { useResource } from "../lib/useResource";
+import { nowPlaying } from "../native/nowPlaying";
 import { saysLine, speakerLabel, voicesOf } from "../lib/voices";
 import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
@@ -229,30 +230,25 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     };
   }, []);
 
-  // Lock screen and headphone controls.
+  // Lock screen, Control Center and headphone controls: the Media Session API on the website; in
+  // the iOS app a native Now Playing, which also keeps the play going with the screen locked.
+  const lockScreen = useMemo(() => nowPlaying(), []);
   useEffect(() => {
-    if (!("mediaSession" in navigator) || !engine) return;
-    const ms = navigator.mediaSession;
-    ms.setActionHandler("play", () => engine.play());
-    ms.setActionHandler("pause", () => engine.pause());
-    ms.setActionHandler("nexttrack", () => engine.next());
-    ms.setActionHandler("previoustrack", () => engine.previous());
-    return () => {
-      for (const action of ["play", "pause", "nexttrack", "previoustrack"] as const) ms.setActionHandler(action, null);
-    };
-  }, [engine]);
+    if (!engine) return;
+    return lockScreen.connect(engine);
+  }, [engine, lockScreen]);
 
   useEffect(() => {
-    if (!("mediaSession" in navigator) || !data) return;
+    if (!data) return;
     const who = currentLine?.characterId ? characterName.get(currentLine.characterId) : undefined;
     const section = data.sections.find((s) => s.id === currentLine?.sectionId);
-    navigator.mediaSession.metadata = new MediaMetadata({
+    lockScreen.show({
       title: currentLine ? `${who ? who + ": " : ""}${currentLine.text}`.slice(0, 120) : data.production.title,
       artist: data.production.title,
       album: section?.title ?? "Listen",
+      playing: state.playing,
     });
-    navigator.mediaSession.playbackState = state.playing ? "playing" : "paused";
-  }, [currentLine, characterName, data, state.playing]);
+  }, [currentLine, characterName, data, state.playing, lockScreen]);
 
   if (rt.loading) return <Loading />;
   if (rt.error || !data) {
