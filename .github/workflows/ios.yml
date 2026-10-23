@@ -83,7 +83,22 @@ jobs:
           xcrun simctl spawn "$UDID" log stream --style compact --level debug --predicate 'process == "App"' > "$RUNNER_TEMP/out/app.log" 2>&1 &
           # Capacitor prints to stdout: the page it loads, and the web app's console in debug builds.
           # On a pty, so each line is written as it comes (into a file, stdout would sit in a buffer).
-          xcrun simctl launch --console-pty "$UDID" com.offbooked.app > "$RUNNER_TEMP/out/console.log" 2>&1 &
+          # bootstatus can report "booted" while SpringBoard is still settling on a slow runner, and a
+          # launch then fails without a word. So wait until the app's process is really there, and
+          # launch again if it never appears.
+          running() { xcrun simctl spawn "$UDID" launchctl list | grep -q com.offbooked.app; }
+          for attempt in 1 2 3; do
+            xcrun simctl launch --console-pty "$UDID" com.offbooked.app > "$RUNNER_TEMP/out/console.log" 2>&1 &
+            launcher=$!
+            for _ in $(seq 1 30); do running && break; sleep 2; done
+            running && break
+            echo "::warning::the app didn't start on launch $attempt; the simulator may still be settling"
+            cat "$RUNNER_TEMP/out/console.log"
+            kill "$launcher" 2>/dev/null || true
+            sleep 10
+          done
+          running || { echo "::error::the app never started"; exit 1; }
+          echo "The app is running (launch $attempt)."
       - name: Screenshot the landing screen
         env:
           UDID: ${{ steps.sim.outputs.udid }}
