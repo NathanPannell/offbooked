@@ -383,4 +383,23 @@ describe("re-timing a take as soon as it is uploaded", { skip: dbSkip }, () => {
     assert.deepEqual(row!.alignedWordStartsMs, [500, 770, 1500]);
     assert.deepEqual(row!.wordStartsMs, [520, 800, 1900], "what the app sent is kept");
   });
+
+  test("cuts by the line's words: a voiced sound 2.6 s before the line doesn't start the cut", async () => {
+    const [line] = await t.ctx.sql<{ id: string }[]>`select id from lines where text = 'And you.'`;
+    // A "hmm" at 0.2–0.5 s, then the line: "And" at 3.1 s, "you." at 4.1 s.
+    const res = await t.app.inject({
+      method: "PUT",
+      url: `/api/lines/${line!.id}/take`,
+      headers: { ...bearer(alice), "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "5100", "x-word-starts": "3100,4100" },
+      payload: wav([false, 200], [true, 300], [false, 2600], [true, 600], [false, 400], [true, 500], [false, 500]),
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await t.ctx.jobs.idle();
+    const [row] = await t.ctx.sql<
+      { trimStartMs: number; normalizedSamples: number }[]
+    >`select trim_start_ms, normalized_samples from takes where line_id = ${line!.id}`;
+    assert.equal(row!.trimStartMs, 3100 - L, "cut just before the first word, not before the hmm");
+    const lengthMs = (row!.normalizedSamples * 1000) / 48_000;
+    assert.ok(Math.abs(lengthMs - (4600 + TRIM.tailPadMs - (3100 - L))) <= 40, `kept ${lengthMs} ms`);
+  });
 });
