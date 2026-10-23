@@ -17,12 +17,14 @@ concurrency:
 permissions:
   contents: read
 
-# ffmpeg for the backend tests and the e2e run: a pinned static build, checked against its hash.
-# Ubuntu's apt mirror for the runners can crawl at a few kB/s (it once held a job past its 20-minute
-# limit), and a static build also keeps CI on one known version.
+# ffmpeg for the backend tests and the e2e run: pinned static builds (ffmpeg 7.0.2, the
+# ffmpeg-static package's GitHub release, served from GitHub), checked against their hashes and
+# cached, so most runs never download them (see .github/scripts/install-ffmpeg.sh). Ubuntu's apt
+# mirror for the runners can crawl at a few kB/s (it once held a job past its 20-minute limit).
 env:
-  FFMPEG_URL: https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-6.0.1-amd64-static.tar.xz
-  FFMPEG_SHA256: 28268bf402f1083833ea269331587f60a242848880073be8016501d864bd07a5
+  FFMPEG_RELEASE: https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1
+  FFMPEG_SHA256: bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa
+  FFPROBE_SHA256: 25d9b6ccb05e3d9de9e04e31e2506d8dd7f9f0418981965ac6df12e8d3afd067
 
 jobs:
   backend:
@@ -54,13 +56,14 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
+      - name: Cache ffmpeg
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-${{ env.FFMPEG_SHA256 }}-${{ env.FFPROBE_SHA256 }}
       - name: Install ffmpeg
-        timeout-minutes: 5
-        run: |
-          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/ffmpeg.tar.xz" "$FFMPEG_URL"
-          echo "$FFMPEG_SHA256  $RUNNER_TEMP/ffmpeg.tar.xz" | sha256sum -c -
-          sudo tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C /usr/local/bin --strip-components=1 --wildcards '*/ffmpeg' '*/ffprobe'
-          ffmpeg -hide_banner -version | head -1
+        timeout-minutes: 8
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/install-ffmpeg.sh"
       - run: npm ci
       - run: npm run format:check
       - run: npm run lint
@@ -126,13 +129,14 @@ jobs:
           cache-dependency-path: |
             backend/package-lock.json
             web/package-lock.json
+      - name: Cache ffmpeg
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-${{ env.FFMPEG_SHA256 }}-${{ env.FFPROBE_SHA256 }}
       - name: Install ffmpeg
-        timeout-minutes: 5
-        run: |
-          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/ffmpeg.tar.xz" "$FFMPEG_URL"
-          echo "$FFMPEG_SHA256  $RUNNER_TEMP/ffmpeg.tar.xz" | sha256sum -c -
-          sudo tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C /usr/local/bin --strip-components=1 --wildcards '*/ffmpeg' '*/ffprobe'
-          ffmpeg -hide_banner -version | head -1
+        timeout-minutes: 8
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/install-ffmpeg.sh"
       - run: npm ci
         working-directory: backend
       - run: npm ci
