@@ -16,8 +16,9 @@ export const REALIGN = {
   pauseMs: 250, // a quiet gap this long between two stretches of voice is a pause: a word starts after it
   minStretchMs: 80, // voice shorter than this is a click or a breath's edge, not a word
   skipCost: 3000, // what leaving a stretch without a word costs, in ms of distance from the live starts (a cough, a laugh)
-  maxWords: 120, // longer speeches keep the live starts (the search grows with words² × stretches)
+  maxWords: 120, // longer speeches keep the live starts
   maxStretches: 60,
+  maxPerStretch: 30, // words one stretch of voice may hold (without a pause): keeps the search to words × stretches × this²
   share: 0.9, // the words in a stretch start within its first 90%
 } as const;
 
@@ -65,7 +66,7 @@ export function layOnVoice(live: readonly number[], weights: readonly number[], 
     for (let j = 0; j <= n; j++) {
       let b = best[k - 1]![j]! + REALIGN.skipCost;
       let h = -1;
-      for (let i = 0; i < j; i++) {
+      for (let i = Math.max(0, j - REALIGN.maxPerStretch); i < j; i++) {
         if (best[k - 1]![i] === Infinity) continue;
         const c = best[k - 1]![i]! + cost(i, j, voice[k - 1]!);
         if (c < b) {

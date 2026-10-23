@@ -48,11 +48,16 @@ export function normalizeSoon(ctx: Ctx, productionId: string, take: TakeAudioRow
   let q = queues.get(ctx);
   if (!q) queues.set(ctx, (q = { waiting: [], draining: false }));
   if (q.waiting.length >= MAX_WAITING) return;
-  q.waiting.push(() =>
-    normalizedTake(ctx, productionId, take, { stream: true }).catch((err) => {
+  q.waiting.push(async () => {
+    try {
+      // As it is now: a listener or the render may have normalized it while it waited.
+      const [row] = await ctx.sql<TakeAudioRow[]>`
+        select id, storage_key, normalized_key, normalized_samples, stream_key from takes where id = ${take.id} and deleted_at is null`;
+      if (row) await normalizedTake(ctx, productionId, row, { stream: true });
+    } catch (err) {
       if (!(err instanceof ContentDeletedError)) ctx.log.error({ err, takeId: take.id }, "take normalization failed");
-    }),
-  );
+    }
+  });
   if (q.draining) return;
   q.draining = true;
   const queue = q;
@@ -63,6 +68,12 @@ export function normalizeSoon(ctx: Ctx, productionId: string, take: TakeAudioRow
       queue.draining = false;
     }
   });
+}
+
+/** Drops the takes still waiting (shutting down): each is normalized on first use instead. */
+export function stopNormalizing(ctx: Ctx): void {
+  const q = queues.get(ctx);
+  if (q) q.waiting.length = 0;
 }
 
 // Concurrent requests for the same take (a render and a listener) share one ffmpeg run.
@@ -101,7 +112,8 @@ async function alignedStarts(ctx: Ctx, takeId: string, cutStartMs: number, sampl
   const [row] = await ctx.sql<{ wordStartsMs: number[] | null; text: string }[]>`
     select t.word_starts_ms, l.text from takes t join lines l on l.id = t.line_id where t.id = ${takeId}`;
   if (!row?.wordStartsMs?.length) return null;
-  const from = cutStartMs + TRIM.leadPadMs;
+  // The trim's pads, unless the cut was held at the very start (the voice began within a pad of it).
+  const from = cutStartMs > 0 ? cutStartMs + TRIM.leadPadMs : 0;
   const to = cutStartMs + (samples * 1000) / RENDER_SETTINGS.sampleRate - TRIM.tailPadMs;
   const voice = speech.flatMap((s) => {
     const startMs = Math.max(from, s.startMs + cutStartMs);
