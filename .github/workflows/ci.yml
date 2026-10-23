@@ -17,7 +17,7 @@ concurrency:
 permissions:
   contents: read
 
-# ffmpeg for the backend tests and the e2e run: pinned static builds (ffmpeg 6.1.1, the
+# ffmpeg for the backend tests and the e2e run: pinned static builds (ffmpeg 7.0.2, the
 # ffmpeg-static package's GitHub release, served from GitHub), checked against their hashes and
 # cached, so most runs never download them (see .github/scripts/install-ffmpeg.sh). Ubuntu's apt
 # mirror for the runners can crawl at a few kB/s (it once held a job past its 20-minute limit).
