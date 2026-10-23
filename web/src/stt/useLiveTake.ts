@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { CAPTURE_RATE, type LiveCapture } from "../audio/liveCapture";
 import {
+  advanceInput,
   applyPass,
+  clauseBreaks,
   decideAdvance,
   nextPassInterval,
   passWindowSeconds,
+  pauseBegan,
   rmsDb,
   segmentLine,
   SPEECH_MS_PER_WORD,
@@ -82,9 +85,11 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
       return;
     }
     const { tokens } = segmentLine(textRef.current);
+    const breaks = clauseBreaks(textRef.current);
     let progress = startProgress(tokens.length);
     let vad = startVad();
     let covered = 0; // samples the newest finished pass covered
+    let coveredSpeechMs = 0; // voiced time in them
     let decided = false;
     let stopped = false;
     let mode: LiveTakeView["mode"] = capture && stt.getState().status === "ready" ? "live" : "energy";
@@ -113,18 +118,18 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
 
     const evaluate = () => {
       if (decided || stopped || !autoRef.current) return;
-      const decision = decideAdvance({
-        mode,
-        totalTokens: tokens.length,
-        cursor: progress.cursor,
-        speechMs: vad.speechMs,
-        silenceMs: vad.silenceMs,
-        caughtUp: covered >= (vad.lastSpeechAtMs / 1000) * CAPTURE_RATE,
-      });
+      const decision = decideAdvance(
+        advanceInput({ mode, tokens: tokens.length, breaks, progress, vad, coveredMs: (covered / CAPTURE_RATE) * 1000, coveredSpeechMs }),
+      );
       if (decision === "wait") return;
       decided = true;
       advanceRef.current(lineId, mode);
     };
+
+    // Transcription passes sleep between them; a pause in the voice wakes the loop (see PAUSE_PASS_MS).
+    let wake: (() => void) | null = null;
+    /** Capture length when the voice last paused. */
+    let pauseAt = -1;
 
     // Mic level: from the captured samples, or by polling the level meter where AudioWorklet is missing.
     if (capture) {
@@ -134,7 +139,12 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
         capture.onChunk((chunk) => {
           for (let start = 0; start < chunk.length; start += FRAME_SAMPLES) {
             const end = Math.min(chunk.length, start + FRAME_SAMPLES);
+            const before = vad;
             vad = vadStep(vad, rmsDb(chunk, start, end), ((end - start) / CAPTURE_RATE) * 1000);
+            if (pauseBegan(before, vad)) {
+              pauseAt = capture.length;
+              wake?.();
+            }
             if (vad.runMs >= VAD_MIN_RUN_MS) addVoiced(timing.stretches, vad.elapsedMs - vad.runMs, vad.elapsedMs);
           }
           if (mode === "energy") publish();
@@ -156,7 +166,6 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
     }
 
     // Transcription passes, one at a time, paced by how long the last one took.
-    let wake: (() => void) | null = null;
     const sleep = (ms: number) =>
       new Promise<void>((resolve) => {
         const id = setTimeout(resolve, ms);
@@ -182,11 +191,14 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
           const windowed = total > full * CAPTURE_RATE;
           const from = windowed ? total - window * CAPTURE_RATE : 0;
           const prepared = prepareForAsr(capture.slice(from, total));
+          // The VAD has heard the same audio by now: its voiced time is the pace this pass will show.
+          const speechThen = vad.speechMs;
           if (!prepared.noSpeech) {
             const passStart = performance.now();
             const heard = await stt.transcribeLive(prepared.audio, controller.signal);
             if (stopped) return;
             if (heard !== null) {
+              coveredSpeechMs = speechThen;
               latency = performance.now() - passStart;
               latencies.push(latency);
               const before = progress.cursor;
@@ -199,7 +211,8 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
           publish();
           evaluate();
         }
-        await sleep(Math.max(0, nextPassInterval(latency) - (performance.now() - began)));
+        // A pause began after the audio this pass heard: hear it now rather than after the wait.
+        await sleep(pauseAt > total ? 0 : Math.max(0, nextPassInterval(latency) - (performance.now() - began)));
       }
     };
     void loop();
