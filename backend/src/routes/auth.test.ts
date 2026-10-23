@@ -53,7 +53,8 @@ describe("director auth", { skip: dbSkip }, () => {
   });
 
   test("a sign-in asked for from the iOS app gets a link that opens the app", async () => {
-    const linkFor = async (payload: object) => new URL((await t.app.inject({ method: "POST", url: "/api/auth/request", payload: { email: "app@example.test", ...payload } })).json().devLink);
+    const linkFor = async (payload: object) =>
+      new URL((await t.app.inject({ method: "POST", url: "/api/auth/request", payload: { email: "app@example.test", ...payload } })).json().devLink);
     assert.equal((await linkFor({ app: true })).searchParams.get("app"), "1");
     assert.equal((await linkFor({})).searchParams.has("app"), false);
     assert.equal((await linkFor({ app: "yes" })).searchParams.has("app"), false);
