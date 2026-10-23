@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { lineTokens, wordAt, wordTimes } from "../player/words";
 import { applyPass, segmentLine, startProgress, startVad, VAD_MIN_RUN_MS, vadStep } from "./live";
-import { addVoiced, notePass, pieceCount, pieceStarts, startWordClock, takeWordStarts, tokenStarts, type Stretch, type TakeTiming } from "./wordTiming";
+import {
+  addVoiced,
+  LISTEN_TAIL_MS,
+  listenEndMs,
+  notePass,
+  pieceCount,
+  pieceStarts,
+  startWordClock,
+  takeWordStarts,
+  tokenStarts,
+  type Stretch,
+  type TakeTiming,
+} from "./wordTiming";
 
 /** Stretches from a list of [start, end] pairs. */
 const voiced = (...pairs: [number, number][]): Stretch[] => pairs.map(([startMs, endMs]) => ({ startMs, endMs }));
@@ -182,5 +194,28 @@ describe("what the run-through does with them", () => {
     expect(times.map((t) => Math.round(t.startMs))).toEqual(starts);
     // At 950 ms "Was" is being said, not the direction that starts with it.
     expect(text.slice(tokens[wordAt(times, 950)]!.start).startsWith("Was")).toBe(true);
+  });
+});
+
+describe("listenEndMs", () => {
+  const text = "Get thee to a nunnery.";
+  const timing = (): TakeTiming => {
+    const { tokens } = segmentLine(text);
+    let clock = startWordClock();
+    clock = notePass(clock, 0, 2, 0, 800);
+    clock = notePass(clock, 2, tokens.length, 0, 2000);
+    // The line at 0.3–0.8 s and 1.0–1.8 s, then a breath for the next line at 2.6–3.0 s.
+    return { lineId: "l1", text, offsetMs: 40, clock, stretches: voiced([300, 800], [1000, 1800], [2600, 3000]) };
+  };
+
+  it("stops Listen back after the last word's voice, before the pause that ended the take", () => {
+    expect(listenEndMs(timing(), "l1", 4000)).toBe(1800 + 40 + LISTEN_TAIL_MS);
+  });
+
+  it("plays it all when nothing was heard, it's another line, or there's nothing to leave out", () => {
+    expect(listenEndMs({ ...timing(), clock: startWordClock() }, "l1", 4000)).toBeNull();
+    expect(listenEndMs(timing(), "l2", 4000)).toBeNull();
+    expect(listenEndMs(null, "l1", 4000)).toBeNull();
+    expect(listenEndMs(timing(), "l1", 2200)).toBeNull();
   });
 });

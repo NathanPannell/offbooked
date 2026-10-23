@@ -139,7 +139,8 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
 /**
  * One shared player for previews (takes and cues), so only one thing plays at a time. `playTogether`
  * plays several clips at once (a shared line: your take with the others'). `progress` is how far the
- * playing clip has got, 0 to 1.
+ * playing clip has got, 0 to 1. With `endMs`, playback ends there, as if the clip did (a take just
+ * recorded, which still has the pause that ended it).
  */
 export function usePlayback(onError?: () => void) {
   const players = useRef<HTMLAudioElement[]>([]);
@@ -147,9 +148,13 @@ export function usePlayback(onError?: () => void) {
   const [progress, setProgress] = useState(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopAll = useCallback(() => {
+    if (endTimer.current) clearTimeout(endTimer.current);
+    endTimer.current = null;
     for (const a of players.current) {
+      a.onplaying = null;
       a.onpause = null;
       a.onended = null;
       a.ontimeupdate = null;
@@ -160,7 +165,7 @@ export function usePlayback(onError?: () => void) {
   useEffect(() => () => stopAll(), [stopAll]);
 
   const playTogether = useCallback(
-    (key: string, urls: string[]) => {
+    (key: string, urls: string[], endMs: number | null = null) => {
       stopAll();
       if (playing === key || urls.length === 0) {
         setPlaying(null);
@@ -184,9 +189,25 @@ export function usePlayback(onError?: () => void) {
         };
         // The longest clip drives the progress.
         audio.ontimeupdate = () => {
+          if (endMs !== null) {
+            if (i === 0) setProgress(Math.min(1, (audio.currentTime * 1000) / endMs));
+            return;
+          }
           const longest = used.reduce((a, b) => ((b.duration || 0) > (a.duration || 0) ? b : a));
-          if (audio === longest && longest.duration) setProgress(Math.min(1, audio.currentTime / longest.duration));
+          if (audio === longest && Number.isFinite(longest.duration) && longest.duration) setProgress(Math.min(1, audio.currentTime / longest.duration));
         };
+        if (endMs !== null && i === 0) {
+          audio.onplaying = () => {
+            if (endTimer.current) clearTimeout(endTimer.current);
+            endTimer.current = setTimeout(
+              () => {
+                stopAll();
+                setPlaying((p) => (p === key ? null : p));
+              },
+              Math.max(0, endMs - audio.currentTime * 1000) / (audio.playbackRate || 1),
+            );
+          };
+        }
       });
       Promise.all(used.map((a) => a.play())).then(
         () => setPlaying(key),
@@ -200,7 +221,7 @@ export function usePlayback(onError?: () => void) {
     [playing, stopAll],
   );
 
-  const play = useCallback((key: string, url: string) => playTogether(key, [url]), [playTogether]);
+  const play = useCallback((key: string, url: string, endMs: number | null = null) => playTogether(key, [url], endMs), [playTogether]);
 
   const pause = useCallback(() => {
     stopAll();

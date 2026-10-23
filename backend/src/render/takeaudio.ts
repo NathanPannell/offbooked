@@ -26,8 +26,9 @@ export interface NormalizedTake {
 // Takes normalized by an older pipeline are made again on first use: the key names the version, so
 // an old FLAC is never mistaken for a current one. No migration or backfill job needed: the next
 // render or playback of each take redoes it once. t2: cut to the speech (trim.ts). t3: light noise
-// clean-up and two-pass loudness, so every take plays at the same level as the TTS.
-export const NORMALIZE_VERSION = "t3";
+// clean-up and two-pass loudness, so every take plays at the same level as the TTS. t4: the cut is
+// anchored on voiced sound, so breaths and bumps at the ends go too (trim.ts).
+export const NORMALIZE_VERSION = "t4";
 export const isCurrentNormalized = (key: string | null): key is string => Boolean(key?.endsWith(`.${NORMALIZE_VERSION}.flac`));
 
 // Concurrent requests for the same take (a render and a listener) share one ffmpeg run.

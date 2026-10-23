@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { promisify } from "node:util";
 import { normalizeClip } from "./ffmpeg.ts";
 import { RENDER_SETTINGS } from "./plan.ts";
-import { detectSpeech, speechBounds, TRIM } from "./trim.ts";
+import { detectSpeech, frameLevels, speechBounds, TRIM, voicing } from "./trim.ts";
 
 const exec = promisify(execFile);
 
@@ -49,6 +49,92 @@ test("never cuts into speech at the edges, and keeps clips it can't read whole",
   assert.equal(speechBounds([]), null);
 });
 
+// Whether a frame is voiced, from frame ranges in ms: [from, to).
+const voicedIn =
+  (...spans: [number, number][]) =>
+  (frame: number) =>
+    spans.some(([from, to]) => frame * 10 >= from && frame * 10 < to);
+
+describe("ends anchored on the voice", () => {
+  // A hands-free take: a breath in, the line, the exhale, and the breath for the next line.
+  const take = levels([-70, 300], [-35, 300], [-70, 150], [-20, 800], [-70, 200], [-38, 400], [-70, 600], [-34, 300], [-70, 200]);
+
+  test("breaths before and after the line are cut", () => {
+    const b = speechBounds(take, 10, voicedIn([750, 1550]))!;
+    assert.equal(b.startMs, 750 - TRIM.leadPadMs);
+    assert.equal(b.endMs, 1550 + TRIM.tailPadMs);
+  });
+
+  test("without voicing the breaths still count as sound", () => {
+    const b = speechBounds(take, 10)!;
+    assert.equal(b.startMs, 300 - TRIM.leadPadMs);
+    assert.equal(b.endMs, 3050 + TRIM.tailPadMs);
+  });
+
+  test("an unvoiced start of the first word is kept, up to TRIM.onsetMs", () => {
+    // "s" (unvoiced, 150 ms) straight into the vowel: all kept.
+    const s = speechBounds(levels([-70, 500], [-30, 150], [-20, 600], [-70, 500]), 10, voicedIn([650, 1250]))!;
+    assert.equal(s.startMs, 500 - TRIM.leadPadMs);
+    // A breath running straight into the vowel: only TRIM.onsetMs of it.
+    const breath = speechBounds(levels([-70, 300], [-32, 700], [-20, 600], [-70, 500]), 10, voicedIn([1000, 1600]))!;
+    assert.equal(breath.startMs, 1000 - TRIM.onsetMs - TRIM.leadPadMs);
+  });
+
+  test("a final unvoiced sound is kept, up to TRIM.releaseMs", () => {
+    const t = speechBounds(levels([-70, 500], [-20, 600], [-30, 120], [-70, 800]), 10, voicedIn([500, 1100]))!;
+    assert.equal(t.endMs, 1220 + TRIM.tailPadMs);
+    const long = speechBounds(levels([-70, 500], [-20, 600], [-32, 900], [-70, 500]), 10, voicedIn([500, 1100]))!;
+    assert.equal(long.endMs, 1100 + TRIM.releaseMs + TRIM.tailPadMs);
+  });
+
+  test("a pause inside the line is kept whatever is in it", () => {
+    const b = speechBounds(levels([-70, 400], [-20, 400], [-70, 300], [-35, 400], [-70, 300], [-20, 400], [-70, 600]), 10, voicedIn([400, 800], [1800, 2200]))!;
+    assert.equal(b.startMs, 400 - TRIM.leadPadMs);
+    assert.equal(b.endMs, 2200 + TRIM.tailPadMs);
+  });
+
+  test("a whisper (nothing voiced) falls back to the sound itself", () => {
+    const b = speechBounds(levels([-70, 400], [-30, 800], [-70, 600]), 10, () => false)!;
+    assert.equal(b.startMs, 400 - TRIM.leadPadMs);
+    assert.equal(b.endMs, 1200 + TRIM.tailPadMs);
+  });
+});
+
+describe("voicing", () => {
+  const rate = 16_000;
+  const pcm = (seconds: number, sample: (t: number) => number) =>
+    Int16Array.from({ length: Math.round(seconds * rate) }, (_, i) => Math.round(32767 * Math.max(-1, Math.min(1, sample(i / rate)))));
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1;
+
+  test("a voice repeats at its pitch; noise doesn't", () => {
+    const voice = pcm(0.5, (t) => 0.3 * (Math.sin(2 * Math.PI * 140 * t) + 0.5 * Math.sin(2 * Math.PI * 280 * t) + 0.3 * Math.sin(2 * Math.PI * 420 * t)));
+    const noise = pcm(0.5, () => 0.3 * random());
+    const v = voicing(voice);
+    const n = voicing(noise);
+    const frames = Array.from({ length: 40 }, (_, i) => i + 5);
+    assert.ok(
+      frames.every((f) => v(f)),
+      "voice frames are voiced",
+    );
+    assert.ok(frames.filter((f) => n(f)).length <= 2, "noise frames aren't");
+    assert.equal(frameLevels(voice).length, 50);
+  });
+
+  test("low rumbling noise (a bump, a fan, a handled phone) isn't a voice either", () => {
+    let level = 0;
+    const rumble = pcm(0.5, () => (level = 0.97 * level + 0.03 * random()) * 4);
+    const r = voicing(rumble);
+    assert.ok(Array.from({ length: 40 }, (_, i) => i + 5).filter((f) => r(f)).length <= 2);
+  });
+
+  test("frames off the ends of the clip aren't voiced", () => {
+    const v = voicing(pcm(0.2, (t) => 0.3 * Math.sin(2 * Math.PI * 150 * t)));
+    assert.equal(v(0), false);
+    assert.equal(v(1000), false);
+  });
+});
+
 describe("on real audio", { skip: false }, () => {
   let dir = "";
   before(async () => {
@@ -83,6 +169,29 @@ describe("on real audio", { skip: false }, () => {
     const b = (await detectSpeech(take))!;
     assert.ok(Math.abs(b.startMs - (800 - TRIM.leadPadMs)) <= 20, `start ${b.startMs}`);
     assert.ok(Math.abs(b.endMs - (1800 + TRIM.tailPadMs)) <= 20, `end ${b.endMs}`);
+  });
+
+  test("breaths, an exhale and the next line's breath are cut from a hands-free take", async () => {
+    // Room noise; a breath in at 0.4–0.8 s, a voice at 1.0–2.2 s, an exhale at 2.4–2.9 s and the
+    // breath for the next line at 3.6–4.0 s.
+    const take = path.join(dir, "take-breaths.wav");
+    const voice = "between(t,1.0,2.2)*0.25*(sin(2*PI*140*t)+0.5*sin(2*PI*280*t)+0.3*sin(2*PI*420*t))*(0.7+0.3*sin(2*PI*4*t))";
+    const breaths = "(between(t,0.4,0.8)+0.7*between(t,2.4,2.9)+between(t,3.6,4.0))*0.05*(2*random(1)-1)";
+    await exec("ffmpeg", [
+      "-hide_banner",
+      "-nostdin",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      `aevalsrc='${voice}+${breaths}+0.002*(2*random(0)-1)':s=48000:d=4.4`,
+      "-c:a",
+      "pcm_s16le",
+      take,
+    ]);
+    const b = (await detectSpeech(take))!;
+    assert.ok(Math.abs(b.startMs - (1000 - TRIM.leadPadMs)) <= 20, `start ${b.startMs}`);
+    assert.ok(Math.abs(b.endMs - (2200 + TRIM.tailPadMs)) <= 20, `end ${b.endMs}`);
   });
 
   test("the normalized take is cut to the voice plus its pads", async () => {

@@ -200,6 +200,27 @@ export interface TakeTiming {
   stretches: Stretch[];
 }
 
+/** Voice kept after the last word's stretch when a take just recorded plays back on the phone. */
+export const LISTEN_TAIL_MS = 300;
+
+/**
+ * Where Listen back of a take just recorded stops, in ms of the recording: just after the stretch
+ * of voice the line's last word starts in, so it doesn't play the pause that ended the take (the
+ * server cuts its own copy to the voice; this is the raw recording, still on the phone). Null when
+ * no word was heard or there's nothing to leave out: then it plays to the end.
+ */
+export function listenEndMs(timing: TakeTiming | null, lineId: string, durationMs: number): number | null {
+  if (!timing || timing.lineId !== lineId) return null;
+  const { tokens } = segmentLine(timing.text);
+  const starts = tokenStarts(timing.clock, timing.stretches, tokens, durationMs - timing.offsetMs);
+  if (!starts) return null;
+  const last = starts[starts.length - 1]!;
+  const stretch = timing.stretches.find((s) => s.endMs > last);
+  if (!stretch) return null;
+  const end = Math.round(stretch.endMs + timing.offsetMs + LISTEN_TAIL_MS);
+  return end < durationMs - 100 ? end : null;
+}
+
 /** The word starts to send with a take, in ms of the recording, or null when none were heard. */
 export function takeWordStarts(timing: TakeTiming | null, lineId: string, durationMs: number): number[] | null {
   if (!timing || timing.lineId !== lineId) return null;

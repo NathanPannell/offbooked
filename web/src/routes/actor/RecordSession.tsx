@@ -22,7 +22,7 @@ import { useResource } from "../../lib/useResource";
 import { recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
-import { takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
+import { listenEndMs, takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine, uploadState } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
@@ -409,7 +409,7 @@ export function RecordSession({
       const next = new Map(m);
       const old = next.get(lineId);
       if (old) URL.revokeObjectURL(old.url);
-      next.set(lineId, { clientTakeId, url, durationMs: recorded.durationMs });
+      next.set(lineId, { clientTakeId, url, durationMs: recorded.durationMs, endMs: listenEndMs(timing, lineId, recorded.durationMs) });
       return next;
     });
     setScores((s) => {
