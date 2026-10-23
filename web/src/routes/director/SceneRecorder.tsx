@@ -320,7 +320,10 @@ function SceneLines({
     markFinishing(lineId, true);
     setCurrentId(next.line.id);
     pendingReveal.current = { from: lineId, to: next.line.id };
-    void done.then((take) => keepTake(lineId, take, timing)).finally(() => markFinishing(lineId, false));
+    void done
+      .then((take) => keepTake(lineId, take, timing))
+      .catch(() => onError("That take didn't record. Tap the line to record it again."))
+      .finally(() => markFinishing(lineId, false));
     return true;
   };
   handOffRef.current = handOff;
@@ -470,7 +473,7 @@ function SceneLines({
                   progress={playback.progress}
                   onPlay={playback.play}
                   onPlayTogether={playback.playTogether}
-                  onDelete={l.take || localTakes.has(l.line.id) ? () => void remove(l.line.id) : undefined}
+                  onDelete={!finishing.has(l.line.id) && (l.take || localTakes.has(l.line.id)) ? () => void remove(l.line.id) : undefined}
                   onSelect={() => !recorder.recording && setCurrentId(l.line.id)}
                   onRerecord={() => void start(l.line.id)}
                   onRetry={(takeId) => uploader.retry(takeId)}

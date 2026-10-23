@@ -274,7 +274,8 @@ export function RecordSession({
   /** The next line to record: one nobody has recorded, else one someone else has. */
   const nextLine = (justRecorded: string): string | null =>
     nextToRecord(
-      actorLines.map((l) => ({ id: l.line.id, recorded: isRecorded(l.line.id), mine: hasOwn(l) })),
+      // A take still being kept counts as this actor's, so the chain never loops back to it.
+      actorLines.map((l) => ({ id: l.line.id, recorded: isRecorded(l.line.id) || finishing.has(l.line.id), mine: hasOwn(l) || finishing.has(l.line.id) })),
       justRecorded,
       new Set([justRecorded]),
     );
@@ -449,7 +450,10 @@ export function RecordSession({
     pendingReveal.current = { from: lineId, to: next };
     setAnnouncement("Take saved. Recording the next line.");
     playAlong(item);
-    void done.then((recorded) => keepTake(lineId, recorded, timing, false)).finally(() => markFinishing(lineId, false));
+    void done
+      .then((recorded) => keepTake(lineId, recorded, timing, false))
+      .catch(() => toast("That take didn't record. Tap the line to record it again."))
+      .finally(() => markFinishing(lineId, false));
     return true;
   };
 
@@ -463,9 +467,10 @@ export function RecordSession({
     if (!recorded || !lineId) return;
     if (recordNext && !recorded.tooShort) {
       // Hands-free into a line whose cue plays first: the cue starts now, while this take is kept.
+      // The cue starts once the take is stored (a few ms), and the chain stops if it couldn't be.
       markFinishing(lineId, true);
-      void keepTake(lineId, recorded, timing).finally(() => markFinishing(lineId, false));
-      goToNext(lineId, true, 0);
+      const kept = await keepTake(lineId, recorded, timing).finally(() => markFinishing(lineId, false));
+      if (kept) goToNext(lineId, true, 0);
       return;
     }
     if (await keepTake(lineId, recorded, timing)) goToNext(lineId);
@@ -525,7 +530,8 @@ export function RecordSession({
       : (characterNames.get(l.line.characterId ?? "") ?? "");
   // Delete removes the take just recorded here (straight away, even while it uploads), else the
   // actor's own latest. Never someone else's.
-  const canDelete = (l: ActorLine) => localTakes.has(l.line.id) || !!ownTake(l);
+  // Not while a take is still being kept: Delete would hit the take before it.
+  const canDelete = (l: ActorLine) => !finishing.has(l.line.id) && (localTakes.has(l.line.id) || !!ownTake(l));
   const current = actorLines.find((l) => l.line.id === currentId) ?? null;
   const partName = (activePart ? parts.find((p) => p.id === activePart) : parts.length === 1 ? parts[0] : null)?.name ?? null;
   const failed = unsaved.filter((i) => i.status === "failed");
