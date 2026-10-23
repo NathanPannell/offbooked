@@ -28,8 +28,11 @@ test("the line's first and last said words, for cutting by them", () => {
   assert.equal(wordAnchors([500, 800], "Hello there, friend."), null, "they don't fit the line");
   // "Um, I… [2.4 s] I shall in all": the lone short first word was something else.
   assert.deepEqual(wordAnchors([400, 3200, 3530, 3760], "I shall in all"), { firstMs: 3200, lastMs: 3760 });
-  // With a comma after it, a pause after the first word is the actor's.
+  // When the script marks a pause after the first word, it is the actor's.
   assert.deepEqual(wordAnchors([400, 3200, 3530], "Ay, madam, common."), { firstMs: 400, lastMs: 3530 });
+  assert.equal(wordAnchors([0, 2000, 2300, 2600], "Well… I suppose so.")?.firstMs, 0, "an ellipsis");
+  assert.equal(wordAnchors([0, 2000, 2300, 2600, 2900], "Well – I suppose so.")?.firstMs, 0, "a spaced dash");
+  assert.equal(wordAnchors([0, 2000, 2000, 2300], "Well [pause] I suppose")?.firstMs, 0, "a direction");
 });
 
 test("counts the words a character says as the web player does", () => {

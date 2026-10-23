@@ -143,7 +143,7 @@ export function wordBounds(levels: number[], words: WordAnchors, frameMs: number
   for (let k = from; k < runs.length; k++) {
     const r = runs[k]!;
     // A run starting just after the last word's anchor is still the line (the anchor may be early).
-    if (r[0] > last + near && r[0] - line[line.length - 1]![1] - 1 > gap) break;
+    if (line.length && r[0] > last + near && r[0] - line[line.length - 1]![1] - 1 > gap) break;
     line.push(r);
   }
   const span = (voiced && voicedSpan(line, voiced, frameMs, levels, l.speechDb)) ?? [line[0]![0], line[line.length - 1]![1]];

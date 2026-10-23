@@ -38,13 +38,17 @@ export const LONE_FIRST_WORD_MS = 1500;
 export function wordAnchors(starts: readonly number[] | null, text: string): { firstMs: number; lastMs: number } | null {
   const pieces = linePieces(text);
   if (!starts?.length || starts.length !== pieces.length) return null;
-  const said = pieces.flatMap((p, i) => (p.narrator ? [] : [{ ms: starts[i]!, text: p.text }]));
+  const said = pieces.flatMap((p, i) => (p.narrator ? [] : [{ ms: starts[i]!, text: p.text, at: i }]));
   if (!said.length) return null;
+  // Only when nothing in the script marks a pause there: no punctuation after the word (an ellipsis
+  // or a dash included), and no direction or lone dash between it and the next word.
   const lone =
     said.length >= 3 &&
+    said[1]!.at === said[0]!.at + 1 &&
+    /[\p{L}\p{N}]/u.test(said[1]!.text) &&
     said[1]!.ms - said[0]!.ms > LONE_FIRST_WORD_MS &&
     said[0]!.text.replace(/[^\p{L}\p{N}]/gu, "").length <= 4 &&
-    !/[,;:.!?\u2014-]['"\u2019\u201d)]*$/.test(said[0]!.text);
+    !/[,;:.!?\u2014\u2013\u2026-]['"\u2019\u201d)]*$/.test(said[0]!.text);
   return { firstMs: said[lone ? 1 : 0]!.ms, lastMs: said[said.length - 1]!.ms };
 }
 
