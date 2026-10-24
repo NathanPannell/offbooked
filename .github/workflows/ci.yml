@@ -1,15 +1,15 @@
 name: CI
 
-# The gate for every PR into staging (and the staging → main release PR), and a re-run on each
-# push to staging and main. Nothing here deploys: production deploys only from main (deploy-backend.yml
+# The gate for the staging → main release PR, and a re-run on each push to main. CI runs only for
+# main (owner's decision, 2026-10-24); PRs into staging are gated by running these checks locally. Nothing here deploys: production deploys only from main (deploy-backend.yml
 # and Vercel's Git integration).
 on:
   pull_request:
-    branches: [staging, main]
+    branches: [main]
   push:
-    branches: [staging, main]
+    branches: [main]
 
-# A new push to a PR cancels its older run; runs for merge commits on staging and main always finish.
+# A new push to a PR cancels its older run; runs for merge commits on main always finish.
 concurrency:
   group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

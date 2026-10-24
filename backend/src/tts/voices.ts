@@ -95,8 +95,8 @@ export function assignVoices(characters: { id: string; name: string }[], voices:
   return result;
 }
 
-// Keeps the printed line breaks (each one becomes a pause, see TTS_SETTINGS.lineBreakMs), tidies
-// the spaces within each line and drops lines with no words left (a line that is only "—").
+// Keeps the printed line breaks (spokenSentences joins them before synthesis), tidies the spaces
+// within each line and drops lines with no words left (a line that is only "—").
 const printedLines = (text: string): string =>
   text
     .split("\n")
@@ -152,12 +152,46 @@ export function spokenParts(text: string): SpokenPart[] {
   return parts;
 }
 
+// Abbreviations whose full stop doesn't end a sentence ("Mr. Smith").
+const ABBREVIATIONS = new Set(["mr", "mrs", "ms", "dr", "st", "mt", "jr", "sr", "messrs", "prof", "rev", "capt", "col", "gen", "lt", "sgt", "vs", "etc"]);
+
+// A speech as Piper should say it: one sentence per utterance, whatever the printed lines. The
+// script's line breaks (verse, a DOCX soft break, a narrow column) are joined with spaces, so a
+// sentence that runs over several printed lines is said in one breath; a word hyphenated across a
+// break ("some-" / "thing") is joined back, as the parser does. A sentence ends at . ! ? or an
+// ellipsis followed by a new word that starts with a capital, a digit or a quote: "Ay! my lord"
+// stays one sentence and so does "Mr. Smith". Commas, semicolons, colons and dashes stay inside the
+// sentence, where Piper pauses on its own.
+export function spokenSentences(text: string): string[] {
+  const joined = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .reduce((acc, l) => (!acc ? l : /\p{Ll}-$/u.test(acc) && /^\p{Ll}/u.test(l) ? acc.slice(0, -1) + l : `${acc} ${l}`), "");
+  const sentences: string[] = [];
+  let start = 0;
+  for (const m of joined.matchAll(/([.!?…]+)["'”’)\]]*\s+(?=["'“‘(]?[\p{Lu}\p{N}])/gu)) {
+    const end = m.index + m[0].length;
+    const before = joined.slice(start, m.index);
+    // Nothing to say yet ("... And yet"): the punctuation goes with the words after it.
+    if (!/[\p{L}\p{N}]/u.test(before)) continue;
+    const word = /([\p{L}]+)$/u.exec(before)?.[1]?.toLowerCase();
+    if (m[1] === "." && word && ABBREVIATIONS.has(word)) continue;
+    sentences.push(joined.slice(start, end).trim());
+    start = end;
+  }
+  const rest = joined.slice(start).trim();
+  if (rest) sentences.push(rest);
+  return sentences;
+}
+
 // lengthScale: Piper speaks about 2.8–3 words a second; 1.1 brings it nearer a stage pace (about
-// 2.5). lineBreakMs: added at the end of each printed line, on top of the ~0.2 s Piper leaves after
-// each utterance (about 0.6 s in all, measured), as well as after punctuation, so
-// verse isn't run together.
-// version 3: two-pass loudness, so clips match recorded takes.
-export const TTS_SETTINGS = { version: 3, lengthScale: 1.1, lineBreakMs: 150 } as const;
+// 2.5). sentenceGapMs: added after each sentence, on top of the ~0.2 s Piper leaves after each
+// utterance (about 0.35 s in all), so sentences have room between them.
+// version 3: two-pass loudness, so clips match recorded takes. Speaking by sentence instead of by
+// printed line needed no new version: the key's text joins the printed lines (service.ts,
+// request), so only a line that ran over several printed lines gets a new clip.
+export const TTS_SETTINGS = { version: 3, lengthScale: 1.1, sentenceGapMs: 150 } as const;
 
 // Cache key for a synthesized clip: engine, voice, spoken text and everything that shapes the
 // normalized audio. Same inputs, same clip, so re-renders only synthesize changed lines.
@@ -167,7 +201,7 @@ export function clipHash(engine: string, voice: Voice, text: string): string {
       JSON.stringify({
         v: TTS_SETTINGS.version,
         lengthScale: TTS_SETTINGS.lengthScale,
-        lineBreakMs: TTS_SETTINGS.lineBreakMs,
+        lineBreakMs: TTS_SETTINGS.sentenceGapMs, // its old name, so existing keys stay the same
         engine,
         model: voice.model,
         speaker: voice.speaker,

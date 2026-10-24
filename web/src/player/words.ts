@@ -2,7 +2,7 @@ import type { SpokenSegment } from "../api/types";
 
 // Word-by-word timing for the run-through: which word of a line is being said at a moment of its
 // clip. A recorded take can say when each word starts (`wordStartsMs`), or at least where its speech
-// is (`speech`); a synthesized clip says when each printed line (and each narrated [direction]) is
+// is (`speech`); a synthesized clip says when each sentence (and each narrated [direction]) is
 // spoken. Whatever isn't known is spread over the words by weight.
 
 /** A word as printed: its place in the line's text and what of it is said. */
@@ -127,9 +127,13 @@ function spread(pieces: Piece[], fromMs: number, toMs: number, out: Span[]) {
   }
 }
 
-/** Lead-in and tail around the words of a recorded take (already trimmed to the speech). */
-export const LEAD_MS = 120;
-export const TAIL_MS = 220;
+/**
+ * Lead-in and tail around the words of a recorded take (already trimmed to the speech): about the
+ * trim's pads (TRIM in backend/src/render/trim.ts, 250 ms each side), less the soft start of the
+ * first word and plus the voice dying away after the last.
+ */
+export const LEAD_MS = 220;
+export const TAIL_MS = 290;
 /** Piper leaves about this much quiet after each utterance, inside its segment. */
 export const SEGMENT_TAIL_MS = 180;
 
@@ -142,7 +146,7 @@ export interface Span {
 /** What is known about when a clip's words are said. */
 export interface ClipTimings {
   durationMs: number;
-  /** A synthesized clip: when each printed line (and narrated [direction]) is said. */
+  /** A synthesized clip: when each sentence (and narrated [direction]) is said. */
   segments?: SpokenSegment[];
   /** A take: when each spoken piece starts. Used only with exactly one per piece. */
   wordStartsMs?: number[];

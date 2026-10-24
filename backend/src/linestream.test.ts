@@ -10,7 +10,10 @@ import { SEED_SCENE } from "./seed-scene.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "./test/helpers.ts";
 import { FakeSynthesizer } from "./test/tts.ts";
 import { PriorityPool, TTS_PRIORITY } from "./tts/service.ts";
-import { NARRATOR_VOICE_ID, speakable, spokenParts, type Voice } from "./tts/voices.ts";
+import { NARRATOR_VOICE_ID, speakable, spokenParts, spokenSentences, type Voice } from "./tts/voices.ts";
+
+// How many utterances a line is synthesized in: one per sentence of each part (service.ts, make).
+const utterancesOf = (text: string) => spokenParts(text).reduce((n, part) => n + spokenSentences(part.text).length, 0);
 
 interface Line {
   id: string;
@@ -235,6 +238,24 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
       [false, true, false],
       "the direction is in the narrator's voice, the words either side in the character's",
     );
+
+    // Verse: a sentence over three printed lines is said in one utterance, and the next one after it.
+    const verse = dialogue()[21]!;
+    await t.ctx
+      .sql`update lines set text = ${"I'll speak to it, though hell itself should gape\nAnd bid me hold my peace.\nI pray you all"} where id = ${verse.id}`;
+    const v = synth.calls.length;
+    const verseAudio = (await audio(verse.id)).json();
+    await t.ctx.sql`update lines set text = ${verse.text} where id = ${verse.id}`;
+    const sentences = ["I'll speak to it, though hell itself should gape And bid me hold my peace.", "I pray you all"];
+    assert.deepEqual(
+      synth.calls.slice(v).map((c) => c.text),
+      sentences,
+    );
+    assert.deepEqual(
+      (verseAudio.segments as { text: string }[]).map((s) => s.text),
+      sentences,
+      "the clip's timings are its sentences",
+    );
     const sources = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json().sources;
     assert.equal(sources[direction.id], "tts", "the run-through lists directions with their source");
     extraCalls += synth.calls.length - before;
@@ -244,7 +265,7 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     const line = dialogue()[3]!;
     const before = synth.calls.length;
     const [a, b] = await Promise.all([audio(line.id), audio(line.id)]);
-    assert.equal(synth.calls.length, before + 1, "two listeners at once share one synthesis");
+    assert.equal(synth.calls.length, before + utterancesOf(line.text), "two listeners at once share one synthesis");
     for (const res of [a, b]) {
       assert.equal(res.statusCode, 200, res.body);
       const body = res.json();
@@ -256,14 +277,18 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
       assert.equal(file.headers["content-type"], "audio/mp4");
     }
     await audio(line.id);
-    assert.equal(synth.calls.length, before + 1, "cached afterwards");
+    assert.equal(synth.calls.length, before + utterancesOf(line.text), "cached afterwards");
     const sources = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json().sources;
     assert.equal(sources[line.id], "tts");
   });
 
   test("a listener's line jumps ahead of prefetching and the background render", async () => {
     synth.open = false;
-    const [r1, r2, r3, p1, p2, now] = dialogue().slice(10, 16);
+    // Lines said in one utterance, so each released utterance is one whole clip.
+    const [r1, r2, r3, p1, p2, now] = dialogue()
+      .slice(10)
+      .filter((l) => utterancesOf(l.text) === 1)
+      .slice(0, 6);
     // The render's queue, at the lowest priority (grouped by model, so order within it varies).
     const render = t.ctx.tts!.ensure(
       [r1!, r2!, r3!].map((l) => t.ctx.tts!.request("fake 1", { id: "test-voice", model: "m", speaker: null, gender: "m" } as unknown as Voice, l.text)!),
@@ -288,7 +313,7 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     }
     assert.deepEqual(
       order.slice(1, 4),
-      [now!, p1!, p2!].map((l) => speakable(l.text)),
+      [now!, p1!, p2!].map((l) => spokenSentences(speakable(l.text))[0]),
       "the listener's line, then the prefetches, then the render",
     );
     const res = await listening;
@@ -305,9 +330,9 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     await processDueRenders(t.ctx);
     const rt = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json();
     assert.equal(rt.render.status, "ready", JSON.stringify(rt.render.status));
-    // One utterance per printed line (and narrated direction) of each distinct line.
+    // One utterance per sentence (and narrated direction) of each distinct line.
     const unique = [...new Map(dialogue().map((l) => [`${l.characterId}|${l.text}`, l.text])).values()];
-    const utterances = unique.reduce((n, text) => n + spokenParts(text).reduce((m, part) => m + part.text.split("\n").length, 0), 0);
+    const utterances = unique.reduce((n, text) => n + utterancesOf(text), 0);
     // The test above synthesized three render lines with a stand-in voice; everything else once.
     assert.equal(synth.calls.length, utterances + 3 + extraCalls);
     const before = synth.calls.length;

@@ -1,7 +1,7 @@
 name: iOS
 
 # The iOS app (web/ios, Capacitor) on GitHub's macOS runners, so nobody needs a Mac to build it.
-# - simulator: every PR that touches web/ builds the app for the iOS Simulator, boots a simulator,
+# - simulator: every PR into main that touches web/ builds the app for the iOS Simulator, boots a simulator,
 #   launches the app, checks it stays up and uploads screenshots and the app's log.
 # - testflight: archives, signs (automatic signing with an App Store Connect API key, so no
 #   certificates live anywhere) and uploads to TestFlight. Run by hand (Actions → iOS → Run
@@ -10,7 +10,7 @@ name: iOS
 # See docs/mobile.md.
 on:
   pull_request:
-    branches: [staging, main]
+    branches: [main]
     paths: ["web/**", ".github/workflows/ios.yml"]
   push:
     branches: [main]
