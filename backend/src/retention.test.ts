@@ -17,6 +17,7 @@ import {
   sweepIfDeleted,
   type RetentionWorker,
 } from "./retention.ts";
+import { notifyActorsDone, notifyCastComplete } from "./email/notify.ts";
 import { performanceDates } from "./routes/productions.ts";
 import { SEED_SCENE } from "./seed-scene.ts";
 import type { LocalStorage } from "./storage/local.ts";
@@ -215,9 +216,11 @@ describe("content retention", { skip: dbSkip }, () => {
         before.some((f) => f.startsWith(kind)),
         `${kind} stored`,
       );
-    const ttsBefore = await readdir(path.join(root, "tts"));
-    const [{ clips }] = await t.ctx.sql<{ clips: number }[]>`select count(*)::int as clips from tts_clips`;
-    assert.ok(clips > 0 && ttsBefore.length > 0, "TTS clips exist");
+    // Both shows have the same lines: synthesized speech is shared by hash, and each records what it uses.
+    const usesOf = async (id: string) => (await t.ctx.sql<{ hash: string }[]>`select hash from tts_clip_uses where production_id = ${id}`).map((r) => r.hash);
+    const keptClips = await usesOf(kept.id);
+    const doomedOnly = (await usesOf(doomed.id)).filter((h) => !keptClips.includes(h));
+    assert.ok(keptClips.length > 0 && (await usesOf(doomed.id)).length > 0, "both shows recorded the clips they use");
 
     // Something written while the rows go (an in-flight upload) is caught by the second sweep.
     const storage = t.ctx.storage;
@@ -275,9 +278,14 @@ describe("content retention", { skip: dbSkip }, () => {
       "the other production's cast is untouched",
     );
 
-    // TTS clips are shared by hash and stay; the other production is untouched.
-    assert.equal((await t.ctx.sql<{ n: number }[]>`select count(*)::int as n from tts_clips`)[0]!.n, clips);
-    assert.deepEqual(await readdir(path.join(root, "tts")), ttsBefore);
+    // Its synthesized speech goes, files and rows, except what the other show uses; that show is untouched.
+    const clipsLeft = async (hashes: string[]) =>
+      (await t.ctx.sql<{ hash: string }[]>`select hash from tts_clips where hash = any(${hashes}::text[])`).map((r) => r.hash);
+    assert.deepEqual(await clipsLeft(doomedOnly), [], "clips only the deleted show used are gone");
+    for (const h of doomedOnly) assert.equal(await exists(path.join(root, "tts", `${h}.flac`)), false);
+    assert.deepEqual((await clipsLeft(keptClips)).sort(), [...keptClips].sort(), "the other show's clips stay");
+    for (const h of keptClips) assert.ok(await exists(path.join(root, "tts", `${h}.flac`)));
+    assert.deepEqual(await usesOf(doomed.id), []);
     for (const table of ["sections", "characters", "lines", "takes", "renders", "scripts"]) assert.ok((await count(table, kept.id)) > 0, `kept ${table}`);
     assert.ok(await exists(path.join(root, "productions", kept.id)));
 
@@ -367,7 +375,18 @@ describe("content retention", { skip: dbSkip }, () => {
       select name, email, phone, director_user_id from actors where production_id = ${id}`;
     assert.ok(cast.length > 0);
     for (const a of cast) assert.deepEqual(a, { name: "", email: null, phone: null, directorUserId: null });
-    assert.equal((await t.app.inject({ method: "GET", url: "/api/invite", headers: inviteHeaders })).statusCode, 410);
+    // The cast's links say the show was taken down, naming neither the show nor a "Deleted" director.
+    for (const res of [
+      await t.app.inject({ method: "GET", url: "/api/invite", headers: inviteHeaders }),
+      await t.app.inject({ method: "GET", url: `/api/join/${joinUrl.split("/join/")[1]}` }),
+    ]) {
+      assert.equal(res.statusCode, 410);
+      const body = res.json();
+      assert.equal(body.error.code, "production_deleted");
+      assert.equal(body.directorName, undefined);
+      assert.equal(body.productionTitle, undefined);
+      assert.doesNotMatch(res.body, /Deleted|deleted\.invalid/);
+    }
 
     const users = await t.ctx.sql<{ email: string; name: string | null; deletedAt: Date | null }[]>`
       select email, name, deleted_at from users where email = 'leaving@example.test' or email like 'deleted-%'`;
@@ -406,6 +425,90 @@ describe("content retention", { skip: dbSkip }, () => {
     assert.ok((await dueContent(t.ctx.sql)).dueIds.includes(id), "and is due now");
     assert.ok((await deleteProductionContent(t.ctx, id))?.objects, "the next pass deletes it");
     assert.ok(!(await dueContent(t.ctx.sql)).dueIds.includes(id));
+  });
+
+  test("a deleted show's lines don't survive as synthesized speech, old or new; another show's do", { timeout: 60_000 }, async () => {
+    const root = (t.ctx.storage as LocalStorage).root;
+    const TEMPEST = "PROSPERO: Our revels now are ended.\nARIEL: Was it well done?\nPROSPERO: Bravely, my diligence.\n";
+    const leaving = await signIn(t, "tempest@example.test");
+    const [{ id: userId }] = await t.ctx.sql<{ id: string }[]>`select id from users where email = 'tempest@example.test'`;
+    const { id, script } = await productionWithScript(t, leaving, TEMPEST, "The Tempest");
+    const other = await productionWithScript(t, director, TEMPEST, "Another Tempest");
+    for (const l of script.lines.filter((x: { kind: string }) => x.kind === "dialogue"))
+      assert.equal((await get(`/api/productions/${id}/lines/${l.id}/audio`, leaving)).statusCode, 200);
+    const own = (await t.ctx.sql<{ hash: string }[]>`select hash from tts_clip_uses where production_id = ${id}`).map((r) => r.hash);
+    assert.ok(own.length >= 2, "playing its lines synthesized them and recorded the use");
+
+    const clip = async (hash: string, timings: object[] | null, useBy?: string) => {
+      await t.ctx.storage.put(`tts/${hash}.flac`, Buffer.from("x"), "audio/flac");
+      await t.ctx.sql`insert into tts_clips (hash, voice, storage_key, samples, timings)
+                      values (${hash}, 'x', ${`tts/${hash}.flac`}, 100, ${timings ? t.ctx.sql.json(timings as never) : null})`;
+      if (useBy) await t.ctx.sql`insert into tts_clip_uses (hash, production_id) values (${hash}, ${useBy})`;
+    };
+    const said = (text: string) => [{ startMs: 0, endMs: 900, text, narrator: false }];
+    await clip("old-settings-clip", said("Our revels now are ended."));
+    await clip("before-timings-clip", null);
+    await clip("other-shows-clip", said("Our revels now are ended."), other.id);
+
+    await deleteAccount(t.ctx, userId!);
+
+    const left = (
+      await t.ctx.sql<{ hash: string }[]>`select hash from tts_clips where hash = any(${[...own, "old-settings-clip", "before-timings-clip"]}::text[])`
+    ).map((r) => r.hash);
+    assert.deepEqual(left, [], "its current clips, an older clip of its lines and a clip from before clips kept text all go");
+    for (const h of [...own, "old-settings-clip", "before-timings-clip"]) assert.equal(await exists(path.join(root, "tts", `${h}.flac`)), false, h);
+    const withItsWords = await t.ctx.sql<{ hash: string }[]>`select hash from tts_clips where timings::text like '%revels%'`;
+    assert.deepEqual(
+      withItsWords.map((r) => r.hash).filter((h) => !own.includes(h)),
+      ["other-shows-clip"],
+      "only the other show's own clip still says its words",
+    );
+    assert.ok(await exists(path.join(root, "tts", "other-shows-clip.flac")));
+
+    // A synthesis for it that was already running when it went is deleted as soon as it lands.
+    await clip("late-clip", said("Bravely, my diligence."));
+    await t.ctx.tts!.cached(["late-clip"], id);
+    assert.equal((await t.ctx.sql`select 1 from tts_clips where hash = 'late-clip'`).length, 0);
+    assert.equal(await exists(path.join(root, "tts", "late-clip.flac")), false);
+  });
+
+  test("a take that lands while an account is deleted emails nobody", { timeout: 60_000 }, async () => {
+    const leaving = await signIn(t, "mid-deletion@example.test");
+    const [{ id: userId }] = await t.ctx.sql<{ id: string }[]>`select id from users where email = 'mid-deletion@example.test'`;
+    const { id, script } = await productionWithScript(t, leaving, SCENE, "Mid-deletion");
+    const { joinUrl } = (await get(`/api/productions/${id}/join-link`, leaving)).json();
+    const parts = script.characters.map((c: { id: string }) => c.id);
+    const claim = (await send("POST", `/api/join/${joinUrl.split("/join/")[1]}/claim`, { firstName: "Riz", characterIds: parts }, leaving)).json();
+    const inviteHeaders = invite(`https://app.test/i/${claim.inviteToken}`);
+    for (const l of script.lines.filter((x: { kind: string }) => x.kind === "dialogue")) {
+      const res = await t.app.inject({
+        method: "PUT",
+        url: `/api/invite/lines/${l.id}/take`,
+        headers: { ...inviteHeaders, "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "700" },
+        payload: toneWav(0.7, 440),
+      });
+      assert.equal(res.statusCode, 200);
+    }
+    await t.ctx.jobs.idle();
+    // As if the completion emails were still to go when the account went: every line is in.
+    await t.ctx.sql`delete from notifications where production_id = ${id}`;
+    await t.ctx.sql`update actors set email = 'riz@example.test', email_verified_at = now() where production_id = ${id}`;
+    // Storage is down, so the recordings are still there when the jobs run.
+    const ctx: Ctx = {
+      ...t.ctx,
+      storage: Object.assign(Object.create(Object.getPrototypeOf(t.ctx.storage)), t.ctx.storage, {
+        deletePrefix: async () => {
+          throw new Error("bucket unavailable");
+        },
+      }),
+    };
+    await deleteAccount(ctx, userId!);
+    const before = t.mailer.sent.length;
+    await notifyActorsDone(t.ctx, id);
+    await notifyCastComplete(t.ctx, id);
+    assert.equal(t.mailer.sent.length, before, "no email to the director's old address, its placeholder or the cast");
+    assert.equal((await t.ctx.sql`select 1 from notifications where production_id = ${id}`).length, 0);
+    assert.ok(!t.mailer.sent.some((m) => /deleted\.invalid/.test(m.to)));
   });
 });
 

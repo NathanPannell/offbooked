@@ -54,6 +54,17 @@ export class S3Storage implements Storage {
     }
   }
 
+  // In requests of up to 1000 keys, the most one DeleteObjects takes.
+  async deleteKeys(keys: string[]): Promise<number> {
+    keys.forEach(assertSafeKey);
+    for (let i = 0; i < keys.length; i += 1000) {
+      const Objects = keys.slice(i, i + 1000).map((Key) => ({ Key }));
+      const res = await this.client.send(new DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects, Quiet: true } }));
+      if (res.Errors?.length) throw new Error(`Deleting ${res.Errors.length} objects failed: ${res.Errors[0]?.Message ?? "unknown error"}`);
+    }
+    return keys.length;
+  }
+
   signedUrl(key: string, ttlSeconds = AUDIO_URL_TTL_SECONDS): Promise<string> {
     assertSafeKey(key);
     return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: ttlSeconds });

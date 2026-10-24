@@ -18,3 +18,6 @@ export const notFound = (what = "Not found") => new HttpError(404, "not_found", 
 export const badRequest = (message: string) => new HttpError(400, "bad_request", message);
 export const conflict = (code: string, message: string) => new HttpError(409, code, message);
 export const unauthorized = (message = "Sign in again.") => new HttpError(401, "unauthorized", message);
+// A cast or join link to a production whose director deleted their account. Unlike a wrapped show
+// (invite_expired), it names neither the show nor the director: both went with the account.
+export const productionDeleted = () => new HttpError(410, "production_deleted", "This show was taken down by its director, so this link no longer works.");

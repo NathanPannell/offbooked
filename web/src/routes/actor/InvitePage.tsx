@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useParams } from "react-router";
 import { actorApi } from "../../api/actor";
-import { ApiError, errorMessage } from "../../api/client";
+import { ApiError, errorMessage, PRODUCTION_DELETED } from "../../api/client";
 import type { Invite } from "../../api/types";
 import { Brand } from "../../components/Brand";
 import { CharacterName } from "../../components/CharacterName";
@@ -172,6 +172,17 @@ function LinkBroken({ token }: { token: string }) {
 }
 
 function LinkGone({ body, token }: { body: Record<string, unknown> | null; token: string }) {
+  if ((body?.error as { code?: string } | undefined)?.code === PRODUCTION_DELETED) {
+    return (
+      <main className="page page-narrow center-page">
+        <Brand to={null} />
+        <div className="raised message-card stack">
+          <h1 className="display">This show is no longer on Offbooked</h1>
+          <p>Its director took it down, with its recordings, so this link no longer works.</p>
+        </div>
+      </main>
+    );
+  }
   const director = typeof body?.directorName === "string" ? body.directorName : null;
   const title = typeof body?.productionTitle === "string" ? body.productionTitle : null;
   // Came here through the cast link on this device? Offer to pick a part again.

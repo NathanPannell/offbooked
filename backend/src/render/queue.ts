@@ -205,7 +205,7 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
           for (const [key, value] of await prepareMixes(ctx, job.productionId, lines, workDir)) samples.set(key, value);
           return samples;
         }),
-        prepareTts(ctx, requests, workDir).then((samples) => {
+        prepareTts(ctx, requests, workDir, job.productionId).then((samples) => {
           if (requests.length) log.info({ renderId: job.id, lines: requests.length, ready: samples.size, ms: Date.now() - started }, "render tts ready");
           return samples;
         }),
@@ -248,10 +248,10 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
 
 // Synthesizes (or reuses) a clip for each line without a take and downloads them. Lines whose
 // clip failed are left out and render as silence. Returns measured lengths in samples by hash.
-async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string): Promise<Map<string, number>> {
+async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string, productionId: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!ctx.tts || !requests.length) return result;
-  const clips = [...(await ctx.tts.ensure(requests, { priority: TTS_PRIORITY.render })).values()];
+  const clips = [...(await ctx.tts.ensure(requests, { priority: TTS_PRIORITY.render, productionId })).values()];
   await eachLimit(clips, 8, async (clip) => {
     try {
       await writeFile(path.join(workDir, `tts-${clip.hash}.flac`), await ctx.storage.get(clip.storageKey));

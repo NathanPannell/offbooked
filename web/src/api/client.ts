@@ -122,3 +122,6 @@ export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return "Something went wrong.";
 }
+
+/** The error code of a cast or join link whose production went with its director's account. */
+export const PRODUCTION_DELETED = "production_deleted";

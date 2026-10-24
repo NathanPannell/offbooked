@@ -16,7 +16,8 @@ async function sendOnce(
   build: (to: string) => Email,
 ): Promise<void> {
   const { sql, log } = ctx;
-  if (!n.to) return;
+  // A deleted account's placeholder address (retention.ts deleteAccount) is never written to.
+  if (!n.to || /@deleted\.invalid$/i.test(n.to)) return;
   try {
     if (n.kind === "runthrough_ready") {
       const [unsubscribed] = await sql`select 1 from email_unsubscribes where email = ${n.to.toLowerCase()}`;
@@ -49,9 +50,13 @@ interface ProductionInfo {
   ownerName: string | null;
 }
 
+// Only a production that is still there: none once its content is deleted (after its final
+// performance) or its director deleted their account, so a take that lands while either happens
+// sends nothing to anyone, the director or the cast.
 async function productionInfo(ctx: Ctx, productionId: string): Promise<ProductionInfo | undefined> {
   const [p] = await ctx.sql<ProductionInfo[]>`
-    select p.title, u.email as owner_email, u.name as owner_name from productions p join users u on u.id = p.owner_id where p.id = ${productionId}`;
+    select p.title, u.email as owner_email, u.name as owner_name from productions p join users u on u.id = p.owner_id
+    where p.id = ${productionId} and p.content_deleted_at is null and u.deleted_at is null`;
   return p;
 }
 

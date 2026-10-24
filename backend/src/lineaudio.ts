@@ -58,17 +58,23 @@ async function ttsCueUrls(ctx: Ctx, productionId: string, lines: LineRow[], wait
     }),
   );
   const requests = [...byLine.values()];
-  let clips = await tts.cached(requests.map((r) => r.hash));
+  let clips = await tts.cached(
+    requests.map((r) => r.hash),
+    productionId,
+  );
   const missing = requests.filter((r) => !clips.get(r.hash)?.cueKey);
   if (missing.length) {
     // An actor waiting on the lines page outranks a warm-up started when they opened their link.
-    const pending = tts.ensure(missing, { cue: true, priority: waitMs > 0 ? TTS_PRIORITY.prefetch : TTS_PRIORITY.cue });
+    const pending = tts.ensure(missing, { cue: true, priority: waitMs > 0 ? TTS_PRIORITY.prefetch : TTS_PRIORITY.cue, productionId });
     ctx.jobs.run("tts cue warm-up", () => pending.then(() => undefined));
     if (waitMs > 0) {
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([pending, new Promise((resolve) => (timer = setTimeout(resolve, waitMs)))]);
       clearTimeout(timer);
-      clips = await tts.cached(requests.map((r) => r.hash));
+      clips = await tts.cached(
+        requests.map((r) => r.hash),
+        productionId,
+      );
     }
   }
   for (const [lineId, r] of byLine) {
