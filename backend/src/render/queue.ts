@@ -263,10 +263,14 @@ async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string, pro
       await fetch(clip);
     } catch (err) {
       // Its file went with another show's deletion (they shared the words): made again, once,
-      // rather than leaving this render silent on that line for good.
+      // rather than leaving this render silent on that line for good. Not for a show that is itself
+      // being deleted: its speech is meant to go.
       try {
         const request = byHash.get(clip.hash);
-        if (!request || (await ctx.storage.exists(clip.storageKey))) throw err;
+        if (!request) throw err;
+        if (await ctx.storage.exists(clip.storageKey)) return await fetch(clip); // made again meanwhile
+        const [gone] = await ctx.sql`select 1 from productions where id = ${productionId} and content_deleted_at is not null`;
+        if (gone) throw err;
         await tts.forget(clip.hash);
         const again = (await tts.ensure([request], { priority: TTS_PRIORITY.render, productionId })).get(clip.hash);
         if (!again) throw err;
