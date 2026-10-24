@@ -1,6 +1,6 @@
 # On-device speech-to-text for take scoring
 
-Status: research and recommendation, 2026-10-13, now implemented in `web/src/stt/`. Changed 2026-10-15 for load time: the model is self-hosted, uses an fp16 encoder, and starts loading when an actor page opens (see "Load time"). Changed 2026-10-17: takes are judged Complete, Partial or Not attempted instead of by percentage (see "Accuracy and verdict"), and live auto-advance always moves on after a pause (see the "Web" section of `AGENTS.md`). Changed 2026-10-20: the app shows Partial as "Incomplete" (the code key stays `partial`), and Wrapped lists the lines to review under their scenes.
+Status: research and recommendation, 2026-10-13, now implemented in `web/src/stt/`. Changed 2026-10-15 for load time: the model is self-hosted, uses an fp16 encoder, and starts loading when an actor page opens (see "Load time"). Changed 2026-10-17: takes are judged Complete, Partial or Not attempted instead of by percentage (see "Accuracy and verdict"), and live auto-advance always moves on after a pause (see the "Web" section of `AGENTS.md`). Changed 2026-10-20: the app shows Partial as "Incomplete" (the code key stays `partial`), and Wrapped lists the lines to review under their scenes. Changed 2026-10-24: a teacher-forced Whisper end-of-line check was measured against Moonshine and not adopted (see "End-of-line check with Whisper").
 
 ## Goal
 
@@ -425,6 +425,29 @@ If profiling later shows we need threads (for example to move to Moonshine Base)
 3. Ship behind a feature flag. Log (anonymously): capability check result, load time, per-take latency, how often each verdict occurs, and how often "Accuracy unavailable" happens.
 4. Calibrate the thresholds on pilot data (above), then enable by default.
 
+## End-of-line check with Whisper (measured 2026-10-24, not adopted)
+
+The question: would scoring the line teacher-forced with Whisper tiny.en ("did they say these next words?") end hands-free takes sooner or more safely than Moonshine and the live tracker's fuzzy matching (`stt/live.ts`)? Teacher-forced means one decoder pass with the line itself as the decoder's input. That gives the log-probability of "the first k words of the line, then end of text" for every k, and the most likely k says how far the speaker has got. Checking against the expected line is fine here. It would only decide when a take ends; the accuracy verdict still comes from free transcription (see "Known pitfalls").
+
+The bench is `web/bench/live/whisper-endcheck.mjs` (README there). It uses the 19 live fixture takes (beats up to 4 s, mumbled and misheard words, fast and slow reads, room noise) and asks at 67 moments. 29 are mid-line (halfway through the speech, and the middle of the longest beat when it is 1 s or more), where saying "over" would be a false end. 38 are after the line (300 and 700 ms past the last word), where "over" is right. Moonshine's answer is the live tracker's state from the passes recorded in `live-takes.json` that had come back by then (desktop speed). Whisper alone takes the most likely k over the whole line. Whisper guided takes it only from Moonshine's cursor on, so it just confirms the rest. Both models run on the page's main thread with one WASM thread each, so the CPU throttle slows both alike. The app runs Moonshine in a worker, which the DevTools throttle doesn't reach. Throttle 4 stands in for a mid-range phone.
+
+| | False ends mid-line | End heard after the line | at +300 ms |
+| --- | --- | --- | --- |
+| Moonshine + live tracker (today) | 0/29 | 23/38 | 8/19 |
+| Whisper alone | 0/29 | 8/38 | 4/19 |
+| Whisper guided by Moonshine's cursor | 0/29 | 31/38 | 13/19 |
+| Moonshine, or Whisper guided | 0/29 | 31/38 | 13/19 |
+
+| One check (same audio) | Desktop | CPU throttle 4 |
+| --- | --- | --- |
+| Moonshine live pass | median 256 ms, p90 662, max 1,227 | median 1,254 ms, p90 3,348, max 9,458 |
+| Whisper teacher-forced | median 1,446 ms, p90 1,706, max 3,266 | median 7,369 ms, p90 8,215, max 32,195 |
+| Model load | 1.5 s (Moonshine) / 14.2 s (Whisper) | 9.9 s / 15.8 s |
+
+Download: Whisper tiny.en q8 is about 44 MB (encoder 10.1 MB, merged decoder 30.7 MB, tokenizer and config about 3.7 MB). That would come on top of Moonshine's 40 MB, which the live words and the verdict still need. Holding both models at once is also what "Known pitfalls" warns against on iOS.
+
+Decision: keep Moonshine and the live tracker, and don't add Whisper, even for the end check alone. Guided, Whisper hears the end of the line more often (31 against 23 of 38 moments, with no false ends either way). But it would answer too late to help. A check takes about 1.4 s on a desktop and about 7 s at phone speed, because Whisper always encodes a padded 30 s window. Today's end pause is 0.7 s once the end is heard, and the replay ends takes a median 736 ms after the last word at desktop speed and 1,594 ms at 5×. When the tracker has heard the end (23 of 38), a Whisper check lands after the take has already ended. Where it hasn't (15), the take waits 1–3 s, so on a desktop a check could sometimes come first. On a phone, at about 7 s, it would still come after the take ended. That is too little gain for twice the download. Whisper alone is worse than today (8/38): without the cursor its most likely truncation often stops at a pause inside the line. Revisit if a phone-class check gets under about 300 ms, for example with WebGPU on most phones or a Whisper encoder that takes short windows.
+
 ## Known pitfalls
 
 - **Moonshine `max_new_tokens`**: the pipeline default is `floor(seconds) × 6`. That gives zero tokens, and an empty transcript, for takes under 1 s, and it truncates fast speech. Always pass `max_new_tokens` (see the worker code). Moonshine can also loop on repeated tokens near the cap. Collapse three or more immediate repeats of the same n-gram at the end of the transcript before scoring.
@@ -432,7 +455,7 @@ If profiling later shows we need threads (for example to move to Moonshine Base)
 - **The first take must never wait**: the model loads in the background from the actor pages and takes queue for it. Watch for accidental static imports of `@huggingface/transformers` in main-thread code, because that would pull the library into the first bundle.
 - **iOS memory**: one Moonshine Tiny session plus the runtime uses about 200–300 MB. That is fine, but dispose of it when leaving the recording screens. Never load two models at once.
 - **Version pinning**: transformers.js 4.3.1 is a week old and depends on an ORT dev build. Pin exactly. The WASM comes from the installed `onnxruntime-web` through Vite, so it always matches. Never mix versions.
-- **Do not bias toward the expected line** (no Whisper prompt containing the line, no grammar restricted to it). It hides the drift we're trying to catch.
+- **Do not bias toward the expected line** (no Whisper prompt containing the line, no grammar restricted to it). It hides the drift we're trying to catch. This holds for the verdict; a check that only decides when a take ends may use the line (see "End-of-line check with Whisper").
 - **Echo in practice mode**: playback bleeding into the microphone shows up as extra words. Use echo cancellation, cut to the gap windows and suggest headphones.
 - **Safari 7-day storage eviction** means occasional re-downloads on iOS. Data-saver users get an opt-in instead of an automatic download.
 
