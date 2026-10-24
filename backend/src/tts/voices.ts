@@ -173,6 +173,8 @@ export function spokenSentences(text: string): string[] {
   for (const m of joined.matchAll(/([.!?…]+)["'”’)\]]*\s+(?=["'“‘(]?[\p{Lu}\p{N}])/gu)) {
     const end = m.index + m[0].length;
     const before = joined.slice(start, m.index);
+    // Nothing to say yet ("... And yet"): the punctuation goes with the words after it.
+    if (!/[\p{L}\p{N}]/u.test(before)) continue;
     const word = /([\p{L}]+)$/u.exec(before)?.[1]?.toLowerCase();
     if (m[1] === "." && word && ABBREVIATIONS.has(word)) continue;
     sentences.push(joined.slice(start, end).trim());

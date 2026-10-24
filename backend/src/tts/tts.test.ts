@@ -215,6 +215,9 @@ test("speech goes by sentence, not by printed line", () => {
   assert.deepEqual(spokenSentences("this too too sul-\nlied flesh"), ["this too too sullied flesh"]);
   assert.deepEqual(spokenSentences("a well-\nKnown face"), ["a well- Known face"]);
   assert.deepEqual(spokenSentences(""), []);
+  // An utterance always has words: punctuation before any goes with the sentence after it.
+  assert.deepEqual(spokenSentences("... And yet I go."), ["... And yet I go."]);
+  assert.deepEqual(spokenSentences("Go! — Who's there?"), ["Go!", "— Who's there?"]);
 });
 
 test("a line printed on one line keeps its clip; one over several printed lines gets a new one", () => {
