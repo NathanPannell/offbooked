@@ -6,7 +6,7 @@ import { badRequest, notFound } from "../errors.ts";
 import { requestVerification } from "../email/verify.ts";
 import { body, idOf, idParam, optionalEmail, requiredString, uuidList } from "../input.ts";
 import { cueViews, previousCue, saysLine, warmCues } from "../lineaudio.ts";
-import { notifyIfCastComplete } from "../render/queue.ts";
+import { checkCastComplete } from "../render/queue.ts";
 import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
 import { takeRecorder, type RecordedBy } from "../recorders.ts";
 import { runThrough } from "../runthrough.ts";
@@ -182,10 +182,8 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
     });
     if (!created) return result;
     await sql`update actors set last_active_at = now(), opened_at = coalesce(opened_at, now()) where id = ${s.actor.id}`;
-    ctx.jobs.run("notify actors done", async () => {
-      await notifyActorsDone(ctx, s.production.id);
-      await notifyIfCastComplete(ctx, s.production.id);
-    });
+    ctx.jobs.run("notify actors done", () => notifyActorsDone(ctx, s.production.id));
+    checkCastComplete(ctx, s.production.id);
     return result;
   });
 

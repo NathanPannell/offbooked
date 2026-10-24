@@ -172,11 +172,11 @@ interface RunThrough {
 
 ## Render pipeline (server)
 
-- Triggered automatically, debounced by about 15 seconds after takes land, and on demand. One job per production at a time, run in-process on Railway, with ffmpeg on `PATH`.
+- Built only on demand (`POST /api/productions/:id/render`, the seed). One job per production at a time, run in-process on Railway, with ffmpeg on `PATH`.
 - Per current take: decode, trim leading and trailing silence, apply `loudnorm` (I=-16), resample to 48 kHz mono. Cache each normalized take by take ID so only new takes are processed again.
 - Concatenate dialogue lines in `seq` order. Gaps are 350 ms between lines in a section and 1200 ms at a section change. An unrecorded line becomes silence of `clamp(words × 380 ms, 1200, 8000)` with `recorded: false` in timing.
 - Output AAC in `.m4a` plus the `timing` array, stored with a content hash of (take IDs + line order + settings). Renders are kept until the production's content is deleted.
-- Built only when asked for (`POST /api/productions/:id/render`); takes and opening the run-through don't queue it. The notifications below don't wait for it.
+- Takes and opening the run-through don't queue it. The notifications below don't wait for it: they are checked after every take, restored take and change to the script's lines or parts.
 
 ## Notifications (Resend, completion only)
 

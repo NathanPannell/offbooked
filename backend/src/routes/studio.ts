@@ -7,7 +7,7 @@ import { idOf } from "../input.ts";
 import { cueViews, previousCue, saysLine } from "../lineaudio.ts";
 import { togetherViews } from "./actor.ts";
 import type { AudioSource } from "../render/plan.ts";
-import { notifyIfCastComplete } from "../render/queue.ts";
+import { checkCastComplete } from "../render/queue.ts";
 import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
 import { linesOf, lineView, productionRows, sectionsOf, sectionView, takeColumns, takeView, type LineRow, type SectionRow, type TakeRow } from "../views.ts";
 
@@ -48,10 +48,8 @@ export function studioRoutes(app: FastifyInstance, ctx: Ctx) {
       },
     });
     if (created) {
-      ctx.jobs.run("notify actors done", async () => {
-        await notifyActorsDone(ctx, line.productionId);
-        await notifyIfCastComplete(ctx, line.productionId);
-      });
+      ctx.jobs.run("notify actors done", () => notifyActorsDone(ctx, line.productionId));
+      checkCastComplete(ctx, line.productionId);
     }
     return body;
   });

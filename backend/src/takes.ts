@@ -7,6 +7,7 @@ import { isUuid } from "./crypto.ts";
 import { HttpError, badRequest, conflict, notFound } from "./errors.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
 import { probeDurationSeconds } from "./render/ffmpeg.ts";
+import { checkCastComplete } from "./render/queue.ts";
 import { normalizeSoon } from "./render/takeaudio.ts";
 import { ContentDeletedError, sweepIfDeleted } from "./retention.ts";
 import { parseWordStarts } from "./taketiming.ts";
@@ -147,7 +148,7 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
 // Deletes a take (or puts it back): the line's current take becomes its newest remaining one, so
 // the run-through falls back to the previous take, then TTS. Nothing is removed from storage.
 export async function setTakeDeleted(ctx: Ctx, takeId: string, deleted: boolean): Promise<void> {
-  await ctx.sql.begin(async (tx) => {
+  const [take] = await ctx.sql.begin(async (tx) => {
     const rows = await tx<{ lineId: string; productionId: string }[]>`
       update takes set deleted_at = ${deleted ? new Date() : null} where id = ${takeId} returning line_id, production_id`;
     if (rows[0]) {
@@ -156,7 +157,10 @@ export async function setTakeDeleted(ctx: Ctx, takeId: string, deleted: boolean)
           select id from takes where line_id = ${rows[0].lineId} and deleted_at is null order by created_at desc limit 1), updated_at = now()
         where id = ${rows[0].lineId}`;
     }
+    return rows;
   });
+  // Putting a take back can complete the cast.
+  if (take && !deleted) checkCastComplete(ctx, take.productionId);
 }
 
 const PARTS_DIR = path.join(tmpdir(), "offbooked-take-parts");

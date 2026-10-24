@@ -67,12 +67,10 @@ export async function planInputs(ctx: Ctx, productionId: string): Promise<{ line
   return { lines, requests };
 }
 
-// Debounced: each new take pushes the queued job back, up to two minutes after it was first queued.
-// Wakes the worker so it can sleep until the job is due.
 /**
- * After a take lands: once every part someone picked is recorded (by anyone; TTS never counts),
- * the completion emails go out (once each, `sendOnce`). They no longer wait for a stitched render:
- * the run-through plays line by line, so it is ready to listen through as soon as the last take is in.
+ * Once every part someone picked is recorded (by anyone; TTS never counts), the completion emails
+ * go out (once each, `sendOnce`). They no longer wait for a stitched render: the run-through plays
+ * line by line, so it is ready to listen through as soon as the cast is.
  */
 export async function notifyIfCastComplete(ctx: Ctx, productionId: string): Promise<void> {
   const lines = await renderInputs(ctx.sql, productionId);
@@ -80,9 +78,20 @@ export async function notifyIfCastComplete(ctx: Ctx, productionId: string): Prom
 }
 
 /**
+ * Checks for a complete cast in the background after anything that can complete it: a take, a
+ * restored take, and any change to the script's lines or parts (a stray line deleted or joined, a
+ * duplicate part merged). Request-driven only.
+ */
+export function checkCastComplete(ctx: Ctx, productionId: string): void {
+  ctx.jobs.run("check the cast is complete", () => notifyIfCastComplete(ctx, productionId));
+}
+
+/**
  * Queues the stitched render: only when it is asked for (POST /render, the seed). The run-through
  * plays line by line and nothing in the app needs the one long file, so takes, deletes and opening
- * the run-through no longer build it.
+ * the run-through no longer build it. Debounced unless forced: each new request pushes the queued
+ * job back, up to two minutes after it was first queued. Wakes the worker so it can sleep until
+ * the job is due.
  */
 export async function scheduleRender(ctx: Ctx, productionId: string, opts: { force?: boolean } = {}): Promise<void> {
   const delay = opts.force ? 0 : ctx.config.renderDebounceMs;
