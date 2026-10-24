@@ -144,7 +144,8 @@ export function RecordSession({
   // lines left the one in view, and its wrapped screen showed that part instead. Not remembered on
   // the device: the next visit opens on whichever part still needs a voice.
   useEffect(() => {
-    if (!chosenPart && activePart && lines.data) setChosenPart(activePart);
+    // Also when the part remembered on the device has gone (merged into another).
+    if (activePart && activePart !== chosenPart && lines.data) setChosenPart(activePart);
   }, [chosenPart, activePart, lines.data]);
   const actorLines: ActorLine[] = useMemo(() => (activePart ? allLines.filter((l) => saysPart(l, activePart)) : allLines), [allLines, activePart]);
   /** Parts other than the one in view that still have lines needing a voice. */
