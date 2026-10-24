@@ -45,7 +45,7 @@ The web app's microphone request is granted inside the app by Capacitor; iOS ask
 
 `.github/workflows/ios.yml` runs on GitHub's standard macOS runners (`macos-latest`, free for this public repo; never a larger runner). It is not part of `ci.yml`: the full gate there (lint, types, tests with coverage, build, e2e, audit, secrets) already covers the web and backend code this app uses.
 
-### simulator (every PR touching `web/`)
+### simulator (every PR into `main` touching `web/`)
 
 1. `npm ci`, `npm run build` (the production build, with the speech model), `npx cap sync ios`.
 2. Picks an iPhone on the newest iOS runtime (`.github/scripts/pick-simulator.mjs`) and builds the Debug app for the simulator with `CODE_SIGNING_ALLOWED=NO`.
