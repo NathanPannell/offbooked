@@ -31,6 +31,9 @@ interface Line {
 type FlagCode = "speaker" | "missed_cue" | "direction" | "text" | "heading" | "backup";
 interface Take {
   id: string; lineId: string; audioUrl: string; durationMs: number; createdAt: string;
+  // audioUrl (here, in `current`, `together` and a cue voiced by a take): the take's stream .m4a once
+  // it has been normalized (cut to the voice, levelled), else the upload as recorded. durationMs is
+  // always the recording's length.
   stt: { transcript: string; accuracy: number; ops: WordOp[] } | null;   // accuracy 0..1, from on-device STT
 }
 interface WordOp { op: "ok" | "sub" | "del" | "ins"; expected?: string; heard?: string }
@@ -67,10 +70,11 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
-| POST | `/api/auth/request` | `{ email, next? }` | `204`. Sends a sign-in link `${APP_URL}/auth/verify?token=…&next=…` (single use, 15 min). `next` is where the app goes after signing in; only a path inside the director app (`/app`, `/app/…`, `/app?…`) is kept, anything else is dropped without an error. When `EMAIL_DRIVER=log`, the response is `200 { devLink }` instead so local testing works. |
+| POST | `/api/auth/request` | `{ email, next?, app? }` | `204`. Sends a sign-in link `${APP_URL}/auth/verify?token=…&next=…` (single use, 15 min). `app: true` (the iOS app) adds `&app=1`, which makes the link a universal link that opens the app (`web/public/.well-known/apple-app-site-association`); without it a sign-in started in Safari stays in Safari. `next` is where the app goes after signing in; only a path inside the director app (`/app`, `/app/…`, `/app?…`) is kept, anything else is dropped without an error. When `EMAIL_DRIVER=log`, the response is `200 { devLink }` instead so local testing works. |
 | POST | `/api/auth/verify` | `{ token }` | `{ sessionToken, user: { id, email, name } }` (session lasts 30 days) |
 | GET | `/api/me` | | `{ user }` |
 | PATCH | `/api/me` | `{ name }` | `{ user }`. The director's name shows on invites ("Sam invited you"). Until it is set, the cast sees the part of the email before the @, capitalised (`sam.ortiz@…` is "Sam Ortiz"); the cast never sees the email address. |
+| DELETE | `/api/me` | `{ confirm: true }` | `204`. Deletes the account for good (App Store guideline 5.1.1(v)): at once, in one transaction, the account is signed out everywhere, its sign-in links go, the user row becomes a tombstone with no email or name, and every production it owns is archived with its title and all cast details (verified emails included) cleared; then each production's script, recordings and renders are deleted as retention deletes them. Those are due immediately, so anything a storage failure leaves is finished by the retention worker. Its synthesized speech goes too, unless another production uses it (as for retention, below), and it sends no more completion emails. Its cast and join links answer 410 `production_deleted` with no title or director name. Signing in again with the same address makes a new, empty account. Without `confirm: true` it is 400 `confirm_required`. |
 | POST | `/api/auth/logout` | | `204` |
 
 ## Productions and script (director)
@@ -105,7 +109,8 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 - Storage: everything under `productions/<id>/`: takes as uploaded, normalized FLACs and stream `.m4a`s, shared-line mixes, the uploaded script file and renders.
 - Rows: scripts (with their raw text), sections, characters, lines, takes, renders, take mixes, practice runs and part assignments.
 - Cast details: a cast member's name, first name and phone are cleared unless they verified an email (`POST /api/invite/contact`, then the link sent to it); details tied to a verified email are kept, and so is a director's own cast row. Unverified addresses (`pending_email`) are cleared for everyone.
-- Kept: the production row as an archived tombstone (title kept, `content_deleted_at` set), the actor rows (so their links answer 410 "This production has wrapped" instead of looking forged), notification records, and TTS clips, which are shared across productions by hash.
+- Kept: the production row as an archived tombstone (title kept, `content_deleted_at` set), the actor rows (so their links answer 410 "This production has wrapped" instead of looking forged), and notification records.
+- Synthesized speech (`tts_clips`, shared across productions by hash): every clip the production used (`tts_clip_uses`), its lines' current clips, any clip that speaks one of its printed lines and any clip from before clips kept their text, files and rows, unless another production whose content is still there uses it.
 
 Cast and join links return 410 `invite_expired` afterwards, and the production drops out of `GET /api/productions`. The job is idempotent: a failure leaves `content_deleted_at` unset and the next pass finishes it. A take upload, normalization, mix, render or script upload that finishes after the deletion sweeps the folder again and fails (a take or script upload with 410 `content_deleted`).
 
@@ -168,15 +173,15 @@ interface RunThrough {
 
 ## Render pipeline (server)
 
-- Triggered automatically, debounced by about 15 seconds after takes land, and on demand. One job per production at a time, run in-process on Railway, with ffmpeg on `PATH`.
+- Built only on demand (`POST /api/productions/:id/render`, the seed). One job per production at a time, run in-process on Railway, with ffmpeg on `PATH`.
 - Per current take: decode, trim leading and trailing silence, apply `loudnorm` (I=-16), resample to 48 kHz mono. Cache each normalized take by take ID so only new takes are processed again.
 - Concatenate dialogue lines in `seq` order. Gaps are 350 ms between lines in a section and 1200 ms at a section change. An unrecorded line becomes silence of `clamp(words × 380 ms, 1200, 8000)` with `recorded: false` in timing.
 - Output AAC in `.m4a` plus the `timing` array, stored with a content hash of (take IDs + line order + settings). Renders are kept until the production's content is deleted.
-- When a render finishes with every cast line recorded, the notifications below fire.
+- Takes and opening the run-through don't queue it. The notifications below don't wait for it: they are checked after every take, restored take and change to the script's lines or parts.
 
 ## Notifications (Resend, completion only)
 
-- To the director: "{firstName or name} finished all {n} lines" when an actor's last line lands, and "Cast complete — run-through ready" when the full-cast render finishes.
+- To the director: "{firstName or name} finished all {n} lines" when an actor's last line lands, and "Cast complete — run-through ready" when the take that completes the cast lands (every part someone picked is recorded).
 - To actors with a verified email: "{title} is ready to listen through", linking to `${APP_URL}/i/{token}/play`.
 - The one other email: the verification link a cast member asks for in their profile (`POST /api/invite/contact`), "Confirm your email for Offbooked".
 - Each sends once (unique on kind + production + actor). With `EMAIL_DRIVER=log` emails are logged, not sent. Nothing ever emails invites or reminders.
@@ -261,7 +266,7 @@ Until 2026-10-20 a director's take was a "stand-in" that never counted. Since th
 - The director's upload response's `linesRecorded`/`linesTotal` are production progress, counting every take.
 - `ActorLine.take` is the actor's own latest take, never someone else's (that is `current`).
 - A cue whose TTS clip is still being synthesized comes back with `audioUrl: null, audioSource: "none"` (the lines endpoints wait up to `TTS_CUE_WAIT_MS`, default 2.5 s); it fills in on the next fetch.
-- `GET` run-through may queue a render (first open, or when stale with nothing queued).
+- `GET` run-through reports the stitched render's state but never queues one.
 - The director's takes count as recordings for the "script can't be replaced once recorded" rule.
 - `/health` reports `tts: "piper <version>" | null` and never fails because of it; without Piper, unrecorded lines render as silence (`source: "none"`).
 
@@ -312,7 +317,7 @@ interface RunThrough {
 So the run-through can light up a take's words as they are really said, instead of spreading them evenly over the clip, `LineAudio` for a take (one take playing alone, not a mix of a shared line's voices) carries two optional fields. Both are in ms of the clip as served (the normalized, trimmed `.m4a`), and both are absent for TTS and silent lines.
 
 - `speech?: { startMs, endMs }[]`: the stretches of the clip with voice in them, in order. Worked out on the server from the clip's own 10 ms frame levels when the take is normalized, judged like the trim (`render/trim.ts`: the clip's own noise floor and speech level, sound under 40 ms isn't speech) and split wherever the voice stops for 150 ms or more, so the short gaps between words don't split it and a pause does. Stored with the take (`takes.speech_ms`, migration `016_take_timing.sql`), so it is never worked out per request; takes normalized before this get it once, in the background, on their next playback (that answer comes without it). Absent when the clip has no clear speech.
-- `wordStartsMs?: number[]`: when each word of the line starts, one per piece of the line's text as the web player tokenizes it (`lineTokens` in `web/src/player/words.ts`, in order: each printed word, and each word of a `[bracketed]` direction; `{notes}`, markup-only words and printed lines with no letter or digit have none). A take doesn't say its directions, so a direction's pieces take no time: they start with the next word the character says, or at the end of the clip when nothing follows. The app works these out while the take records (from the live word tracker, then refined against the take's voiced stretches) and sends them with the upload; the server moves them by where the trim cut the recording (`takes.trim_start_ms`) and keeps them inside the clip. Absent when the app didn't hear the words (no speech model on the device, nothing recognised), when the take was normalized before the cut was known, or when the line's text has changed since so the count no longer matches.
+- `wordStartsMs?: number[]`: when each word of the line starts, one per piece of the line's text as the web player tokenizes it (`lineTokens` in `web/src/player/words.ts`, in order: each printed word, and each word of a `[bracketed]` direction; `{notes}`, markup-only words and printed lines with no letter or digit have none). A take doesn't say its directions, so a direction's pieces take no time: they start with the next word the character says, or at the end of the clip when nothing follows. The app works these out while the take records (from the live word tracker, then refined against the take's voiced stretches) and sends them with the upload; when the take is normalized (straight after upload) the server lays them on the take's voice (`src/realign.ts`: every stretch of voice after a pause starts a word, stored in `takes.aligned_word_starts_ms`), then moves them by where the trim cut the recording (`takes.trim_start_ms`) and keeps them inside the clip. Absent when the app didn't hear the words (no speech model on the device, nothing recognised), when the take was normalized before the cut was known, or when the line's text has changed since so the count no longer matches.
 
 Take uploads (`PUT /api/invite/lines/:lineId/take`, `PUT /api/lines/:lineId/take`) accept an optional header `X-Word-Starts`: comma-separated whole ms of the recording as uploaded, one per piece as above, never going back. A header that is malformed, has the wrong count for the line, goes back, or runs more than a second past the recording's end is dropped; the take is saved either way. On a take sent in parts, the part that completes it carries it (the web app sends it on every part). The web app leaves it out past 2,000 starts or 8 KB, so the header can never get a take refused. CORS now allows `X-Word-Starts`, `X-Take-Parts` and `X-Take-Part`.
 

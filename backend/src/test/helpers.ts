@@ -54,6 +54,8 @@ export async function createTestApp(
     STORAGE_DRIVER: "local",
     STORAGE_DIR: dir,
     RENDER_DEBOUNCE_MS: "0",
+    // Tests that upload takes don't need ffmpeg behind each one; the ones about it turn it on.
+    NORMALIZE_ON_UPLOAD: "0",
     ...opts.env,
   });
   const mailer = new LogMailer(silentLog);

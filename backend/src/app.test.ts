@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildApp } from "./app.ts";
+import { buildApp, NATIVE_APP_ORIGINS, originMatcher } from "./app.ts";
 
 process.env.NODE_ENV = "test";
 
@@ -16,4 +16,11 @@ test("health fails when ffmpeg is missing", async () => {
   const res = await app.inject({ method: "GET", url: "/health" });
   assert.equal(res.statusCode, 503);
   assert.equal(res.json().ok, false);
+});
+
+test("the iOS app's origin is allowed exactly", () => {
+  const allowed = originMatcher(NATIVE_APP_ORIGINS);
+  assert.equal(allowed("capacitor://localhost"), true);
+  assert.equal(allowed("capacitor://localhost.evil.test"), false);
+  assert.equal(allowed("https://localhost"), false);
 });

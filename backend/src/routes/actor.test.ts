@@ -244,8 +244,8 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     await t.ctx.jobs.idle();
 
     const before = (await t.app.inject({ method: "GET", url: `/api/productions/${pid}/runthrough`, headers: bearer(director) })).json();
-    assert.equal(before.render.status, "queued");
-    await t.ctx.sql`update renders set run_after = now()`;
+    assert.equal(before.render.status, "none", "takes and opening the run-through don't build the stitched render");
+    assert.equal((await t.app.inject({ method: "POST", url: `/api/productions/${pid}/render`, headers: bearer(director) })).statusCode, 202);
     assert.equal(await processDueRenders(t.ctx), 1);
     const rt = (await t.app.inject({ method: "GET", url: `/api/productions/${pid}/runthrough`, headers: bearer(director) })).json();
     assert.equal(rt.render.status, "ready", JSON.stringify(rt.render));
@@ -263,17 +263,13 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     assert.deepEqual(actorView.myCharacterIds.sort(), [chars.get("HORATIO"), chars.get("MARCELLUS")].sort());
     assert.equal(actorView.lines.length, lines.length);
 
-    // Hamlet finishes: actor-done email, then the full-cast render sends the completion emails once.
+    // Hamlet finishes: the actor-done email, and the cast is complete, so the completion emails go
+    // straight away (the run-through plays line by line; no render needed).
     for (const l of linesOf("HAMLET").slice(1)) assert.equal((await upload(hamlet, l.id)).statusCode, 200);
     await t.ctx.jobs.idle();
     const stale = (await t.app.inject({ method: "GET", url: `/api/productions/${pid}/runthrough`, headers: bearer(director) })).json();
     assert.equal(stale.render.stale, true);
     assert.ok(t.mailer.sent.some((m) => m.subject === `Riz finished all ${linesOf("HAMLET").length} lines` && m.to === "director@example.test"));
-
-    const forced = await t.app.inject({ method: "POST", url: `/api/productions/${pid}/render`, headers: bearer(director) });
-    assert.equal(forced.statusCode, 202);
-    assert.equal(forced.json().render.status, "queued");
-    await processDueRenders(t.ctx);
     const subjects = t.mailer.sent.map((m) => `${m.to}: ${m.subject}`);
     assert.ok(subjects.includes("director@example.test: Cast complete — ready to listen through"), subjects.join("\n"));
     assert.ok(subjects.includes("jo@example.test: Hamlet is ready to listen through"));
@@ -282,8 +278,12 @@ describe("actor invites, takes and the run-through", { skip: dbSkip }, () => {
     assert.ok(actorEmail.headers?.["List-Unsubscribe"]);
 
     const count = t.mailer.sent.length;
-    await t.app.inject({ method: "POST", url: `/api/productions/${pid}/render`, headers: bearer(director) });
+    const forced = await t.app.inject({ method: "POST", url: `/api/productions/${pid}/render`, headers: bearer(director) });
+    assert.equal(forced.statusCode, 202);
+    assert.equal(forced.json().render.status, "queued");
     await processDueRenders(t.ctx);
+    await upload(hamlet, linesOf("HAMLET")[1]!.id);
+    await t.ctx.jobs.idle();
     assert.equal(t.mailer.sent.length, count, "completion emails send once");
     const progress = (await t.app.inject({ method: "GET", url: `/api/productions/${pid}`, headers: bearer(director) })).json().production.progress;
     assert.equal(progress.actorsDone, 2);

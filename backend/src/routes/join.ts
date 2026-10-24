@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
-import { HttpError, badRequest } from "../errors.ts";
+import { HttpError, badRequest, productionDeleted } from "../errors.ts";
 import { body, optionalString, requiredString, uuidList } from "../input.ts";
 import { inviteToken, inviteUrl, joinUrl, parseJoinToken } from "../invite.ts";
 import { castFacingName } from "../names.ts";
@@ -52,10 +52,12 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     const parsed = parseJoinToken(config.inviteSecret, token);
     const invalid = () => new HttpError(404, "not_found", "This link isn't valid. Ask your director for the cast link.");
     if (!parsed) throw invalid();
-    const [row] = await sql<(Omit<JoinProduction, "directorName"> & { directorName: string | null; directorEmail: string })[]>`
-      select p.id, p.title, p.join_version, p.archived_at, p.script_status, u.name as director_name, u.email as director_email
+    const [row] = await sql<(Omit<JoinProduction, "directorName"> & { directorName: string | null; directorEmail: string; ownerDeleted: boolean })[]>`
+      select p.id, p.title, p.join_version, p.archived_at, p.script_status, u.name as director_name, u.email as director_email,
+        u.deleted_at is not null as owner_deleted
       from productions p join users u on u.id = p.owner_id where p.id = ${parsed.productionId}`;
     if (!row || row.joinVersion !== parsed.version) throw invalid();
+    if (row.ownerDeleted) throw productionDeleted();
     const { directorEmail, ...rest } = row;
     const directorName = castFacingName(row.directorName, directorEmail);
     const p = { ...rest, directorName };

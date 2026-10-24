@@ -8,6 +8,8 @@ export interface Storage {
   // Deletes every object whose key starts with prefix (which must end in "/"). Returns how many
   // objects went. Deleting nothing is not an error, so it is safe to run again.
   deletePrefix(prefix: string): Promise<number>;
+  // Deletes these objects (any that are already gone are skipped). Returns how many keys it was given.
+  deleteKeys(keys: string[]): Promise<number>;
 }
 
 export const AUDIO_URL_TTL_SECONDS = 3600;

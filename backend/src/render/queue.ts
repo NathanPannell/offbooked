@@ -67,8 +67,32 @@ export async function planInputs(ctx: Ctx, productionId: string): Promise<{ line
   return { lines, requests };
 }
 
-// Debounced: each new take pushes the queued job back, up to two minutes after it was first queued.
-// Wakes the worker so it can sleep until the job is due.
+/**
+ * Once every part someone picked is recorded (by anyone; TTS never counts), the completion emails
+ * go out (once each, `sendOnce`). They no longer wait for a stitched render: the run-through plays
+ * line by line, so it is ready to listen through as soon as the cast is.
+ */
+export async function notifyIfCastComplete(ctx: Ctx, productionId: string): Promise<void> {
+  const lines = await renderInputs(ctx.sql, productionId);
+  if (lines.some((l) => l.cast) && lines.every((l) => !l.cast || l.castRecorded)) await notifyCastComplete(ctx, productionId);
+}
+
+/**
+ * Checks for a complete cast in the background after anything that can complete it: a take, a
+ * restored take, and any change to the script's lines or parts (a stray line deleted or joined, a
+ * duplicate part merged). Request-driven only.
+ */
+export function checkCastComplete(ctx: Ctx, productionId: string): void {
+  ctx.jobs.run("check the cast is complete", () => notifyIfCastComplete(ctx, productionId));
+}
+
+/**
+ * Queues the stitched render: only when it is asked for (POST /render, the seed). The run-through
+ * plays line by line and nothing in the app needs the one long file, so takes, deletes and opening
+ * the run-through no longer build it. Debounced unless forced: each new request pushes the queued
+ * job back, up to two minutes after it was first queued. Wakes the worker so it can sleep until
+ * the job is due.
+ */
 export async function scheduleRender(ctx: Ctx, productionId: string, opts: { force?: boolean } = {}): Promise<void> {
   const delay = opts.force ? 0 : ctx.config.renderDebounceMs;
   await ctx.sql`
@@ -205,7 +229,7 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
           for (const [key, value] of await prepareMixes(ctx, job.productionId, lines, workDir)) samples.set(key, value);
           return samples;
         }),
-        prepareTts(ctx, requests, workDir).then((samples) => {
+        prepareTts(ctx, requests, workDir, job.productionId).then((samples) => {
           if (requests.length) log.info({ renderId: job.id, lines: requests.length, ready: samples.size, ms: Date.now() - started }, "render tts ready");
           return samples;
         }),
@@ -237,7 +261,6 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
                 where id = ${job.id}`;
     }
     log.info({ renderId: job.id, productionId: job.productionId, ms: Date.now() - started, lines: lines.length, cached: Boolean(cached) }, "render ready");
-    if (allCastRecorded) await notifyCastComplete(ctx, job.productionId);
   } catch (err) {
     log.error({ err, renderId: job.id }, "render failed");
     await sql`update renders set status = 'failed', error = ${String((err as Error).message).slice(0, 500)}, finished_at = now() where id = ${job.id}`;
@@ -248,16 +271,36 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
 
 // Synthesizes (or reuses) a clip for each line without a take and downloads them. Lines whose
 // clip failed are left out and render as silence. Returns measured lengths in samples by hash.
-async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string): Promise<Map<string, number>> {
+async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string, productionId: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!ctx.tts || !requests.length) return result;
-  const clips = [...(await ctx.tts.ensure(requests, { priority: TTS_PRIORITY.render })).values()];
+  const tts = ctx.tts;
+  const clips = [...(await tts.ensure(requests, { priority: TTS_PRIORITY.render, productionId })).values()];
+  const byHash = new Map(requests.map((r) => [r.hash, r]));
   await eachLimit(clips, 8, async (clip) => {
+    const fetch = async (c: { hash: string; storageKey: string; samples: number }) => {
+      await writeFile(path.join(workDir, `tts-${c.hash}.flac`), await ctx.storage.get(c.storageKey));
+      result.set(c.hash, c.samples);
+    };
     try {
-      await writeFile(path.join(workDir, `tts-${clip.hash}.flac`), await ctx.storage.get(clip.storageKey));
-      result.set(clip.hash, clip.samples);
+      await fetch(clip);
     } catch (err) {
-      ctx.log.warn({ err, key: clip.storageKey }, "tts clip missing from storage; rendering silence");
+      // Its file went with another show's deletion (they shared the words): made again, once,
+      // rather than leaving this render silent on that line for good. Not for a show that is itself
+      // being deleted: its speech is meant to go.
+      try {
+        const request = byHash.get(clip.hash);
+        if (!request) throw err;
+        if (await ctx.storage.exists(clip.storageKey)) return await fetch(clip); // made again meanwhile
+        const [gone] = await ctx.sql`select 1 from productions where id = ${productionId} and content_deleted_at is not null`;
+        if (gone) throw err;
+        await tts.forget(clip.hash);
+        const again = (await tts.ensure([request], { priority: TTS_PRIORITY.render, productionId })).get(clip.hash);
+        if (!again) throw err;
+        await fetch(again);
+      } catch (retryErr) {
+        ctx.log.warn({ err: retryErr, key: clip.storageKey }, "tts clip missing from storage; rendering silence");
+      }
     }
   });
   return result;

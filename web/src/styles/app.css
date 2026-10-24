@@ -139,6 +139,16 @@
   align-self: flex-start;
 }
 
+/* Quiet, below sign out: deleting the account is there for anyone who looks, never in the way. */
+.account-delete {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+  color: var(--accent-text);
+}
+
 .accent-icon {
   color: var(--accent-text);
 }

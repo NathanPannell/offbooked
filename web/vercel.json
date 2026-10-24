@@ -4,8 +4,9 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "git": { "deploymentEnabled": { "**": false, "main": true } },
   "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]",
-  "rewrites": [{ "source": "/((?!assets/|models/).*)", "destination": "/index.html" }],
+  "rewrites": [{ "source": "/((?!assets/|models/|\\.well-known/).*)", "destination": "/index.html" }],
   "headers": [
     {
       "source": "/(.*)",
@@ -22,6 +23,13 @@
     {
       "source": "/models/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    },
+    {
+      "source": "/.well-known/apple-app-site-association",
+      "headers": [
+        { "key": "Content-Type", "value": "application/json" },
+        { "key": "Cache-Control", "value": "public, max-age=3600" }
+      ]
     }
   ]
 }

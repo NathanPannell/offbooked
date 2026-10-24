@@ -1,21 +1,21 @@
 import { ArrowLeft, Headphones } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ApiError, errorMessage } from "../../api/client";
 import { productions, script as scriptApi, standins } from "../../api/director";
 import type { ActorLine, Section, SectionLine } from "../../api/types";
 import { claimFirstTakeHint } from "../../audio/micPrefs";
-import { usePlayback, useTakeRecorder } from "../../audio/useTakeRecorder";
+import { usePlayback, useTakeRecorder, type FinishedTake } from "../../audio/useTakeRecorder";
 import { CharacterName } from "../../components/CharacterName";
 import { Loading } from "../../components/Loading";
 import { PartProgress } from "../../components/PartProgress";
 import { RecordDock } from "../../components/RecordDock";
-import { FIRST_TAKE_HINT, RecordOptions, useRecordOptions } from "../../components/RecordOptions";
+import { firstTakeHint as firstTakeHintText, RecordOptions, useRecordOptions } from "../../components/RecordOptions";
 import { useToast } from "../../components/Toast";
 import { useResource } from "../../lib/useResource";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
-import { takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
+import { listenEndMs, takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
@@ -147,8 +147,21 @@ function SceneLines({
   /** Server take ids of takes saved on this screen, by client take id. */
   const serverTakeIds = useRef(new Map<string, string>());
   const [deleted, setDeleted] = useState(new Set<string>());
+  /** Lines whose take has ended and is still being kept, while the next line already records: shown as saving. */
+  const [finishing, setFinishing] = useState(new Set<string>());
   const cardRefs = useRef(new Map<string, HTMLElement>());
   const stopRef = useRef<(opts?: { recordNext?: boolean }) => void>(() => {});
+  /** The latest handOff, for the live take's advance. */
+  const handOffRef = useRef<() => boolean>(() => false);
+  /** After a take: show the next line with the take just kept, once that take's bar has rendered. */
+  const pendingReveal = useRef<{ from: string; to: string } | null>(null);
+  useLayoutEffect(() => {
+    const reveal = pendingReveal.current;
+    const card = reveal && cardRefs.current.get(reveal.to);
+    if (!reveal || !card) return;
+    pendingReveal.current = null;
+    revealAfterTakeIn(cardRefs.current.get(reveal.from) ?? null, card, studioBand());
+  });
   /** The latest start, for the timer that records the next line. */
   const startRef = useRef<(lineId: string) => Promise<void>>(async () => {});
   /** The move to the next line after a take; cleared on leaving, so it can't open the mic on a screen that's gone. */
@@ -167,7 +180,7 @@ function SceneLines({
   });
   // Hands-free like the cast's recorder: words light up as they're heard, and a pause at the end of
   // the line stops the take and moves on (mic settings turn that off, or record the next line too).
-  const { session: stt } = useSttSession();
+  const { session: stt, state: sttState } = useSttSession();
   const options = useRecordOptions();
   const { autoAdvance, keepRecording } = options;
   const [firstTakeHint, setFirstTakeHint] = useState(false);
@@ -194,7 +207,10 @@ function SceneLines({
     stt,
     text: all.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
     autoAdvance,
-    onAdvance: (_lineId, mode) => stopRef.current({ recordNext: keepRecording && mode === "live" }),
+    onAdvance: (_lineId, mode) => {
+      const recordNext = keepRecording && mode === "live";
+      if (!(recordNext && handOffRef.current())) stopRef.current({ recordNext });
+    },
     timingRef,
   });
 
@@ -236,13 +252,21 @@ function SceneLines({
   };
   startRef.current = start;
 
-  /** Stops and keeps the take, then moves to the next line; with "Keep recording" it records that one too. */
-  const stop = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
-    const lineId = recorder.recording?.lineId;
-    setFirstTakeHint(false);
-    const take = await recorder.stop();
-    if (!take || !lineId) return;
-    if (take.tooShort) return onError("Too short. Tap record, read the line, then tap stop.");
+  /** Shows a line as saving while its finished take is kept. */
+  const markFinishing = (lineId: string, on: boolean) =>
+    setFinishing((set) => {
+      const next = new Set(set);
+      if (on) next.add(lineId);
+      else next.delete(lineId);
+      return next;
+    });
+
+  /** Keeps a finished take: queued on the device for upload and playable here at once. False when it was too short or couldn't be stored. */
+  const keepTake = async (lineId: string, take: FinishedTake, timing: TakeTiming | null): Promise<boolean> => {
+    if (take.tooShort) {
+      onError("Too short. Tap record, read the line, then tap stop.");
+      return false;
+    }
     const url = URL.createObjectURL(take.blob);
     try {
       const voiceId = all.find((l) => l.line.id === lineId)?.voiceId ?? null;
@@ -253,30 +277,71 @@ function SceneLines({
         characterId: voiceId,
         audio: take.blob,
         durationMs: take.durationMs,
-        wordStartsMs: takeWordStarts(timingRef.current, lineId, take.durationMs),
+        wordStartsMs: takeWordStarts(timing, lineId, take.durationMs),
       });
       setLocalTakes((m) => {
         const next = new Map(m);
         const old = next.get(lineId);
         if (old) URL.revokeObjectURL(old.url);
-        next.set(lineId, { clientTakeId, url, durationMs: take.durationMs });
+        next.set(lineId, { clientTakeId, url, durationMs: take.durationMs, endMs: listenEndMs(timing, lineId, take.durationMs) });
         return next;
       });
+      return true;
     } catch {
       URL.revokeObjectURL(url);
-      return onError("Couldn't save that take on this device. Try again.");
+      onError("Couldn't save that take on this device. Try again.");
+      return false;
     }
-    // On to the next line in view that nobody has recorded, else just the next one. "Keep recording"
-    // only carries on into a line nobody has recorded, never over someone's take.
+  };
+
+  /**
+   * On to the next line in view that nobody has recorded, else just the next one. "Keep recording"
+   * only carries on into a line nobody has recorded, never over someone's take.
+   */
+  const nextAfter = (lineId: string) => {
     const index = shown.findIndex((l) => l.line.id === lineId);
-    const unrecorded = shown.slice(index + 1).find((l) => !l.take && !localTakes.has(l.line.id));
-    const next = unrecorded ?? shown[index + 1];
+    const unrecorded = shown.slice(index + 1).find((l) => !l.take && !localTakes.has(l.line.id) && !finishing.has(l.line.id));
+    return { next: unrecorded ?? shown[index + 1], unrecorded };
+  };
+
+  /**
+   * Hands-free: the next unrecorded line starts recording at once on the same mic, and the take
+   * just said is kept in the background, so nothing waits on it. False when there's none to record.
+   */
+  const handOff = (): boolean => {
+    const lineId = recorder.recording?.lineId;
+    const next = lineId ? nextAfter(lineId).unrecorded : undefined;
+    if (!lineId || !next) return false;
+    // This take's word timing; the next take's live tracking replaces it in a moment.
+    const timing = timingRef.current;
+    const done = recorder.handoff(next.line.id);
+    if (!done) return false;
+    setFirstTakeHint(false);
+    markFinishing(lineId, true);
+    setCurrentId(next.line.id);
+    pendingReveal.current = { from: lineId, to: next.line.id };
+    void done
+      .then((take) => keepTake(lineId, take, timing))
+      .catch(() => onError("That take didn't record. Tap the line to record it again."))
+      .finally(() => markFinishing(lineId, false));
+    return true;
+  };
+  handOffRef.current = handOff;
+
+  /** Stops and keeps the take, then moves to the next line; with "Keep recording" it records that one too. */
+  const stop = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
+    const lineId = recorder.recording?.lineId;
+    const timing = timingRef.current;
+    setFirstTakeHint(false);
+    const take = await recorder.stop();
+    if (!take || !lineId) return;
+    if (!(await keepTake(lineId, take, timing))) return;
+    const { next, unrecorded } = nextAfter(lineId);
     if (next) {
       advanceTimer.current = setTimeout(() => {
         advanceTimer.current = null;
         setCurrentId(next.line.id);
-        const card = cardRefs.current.get(next.line.id);
-        if (card) revealAfterTakeIn(cardRefs.current.get(lineId) ?? null, card, studioBand());
+        pendingReveal.current = { from: lineId, to: next.line.id };
         if (recordNext && unrecorded) void startRef.current(next.line.id);
       }, 600);
     }
@@ -397,6 +462,7 @@ function SceneLines({
                   current={l.line.id === currentId}
                   recording={recorder.recording?.lineId === l.line.id}
                   localTake={localTakes.get(l.line.id) ?? null}
+                  finishing={finishing.has(l.line.id)}
                   upload={uploadFor(l.line.id)}
                   score={null}
                   playing={playback.playing}
@@ -407,7 +473,7 @@ function SceneLines({
                   progress={playback.progress}
                   onPlay={playback.play}
                   onPlayTogether={playback.playTogether}
-                  onDelete={l.take || localTakes.has(l.line.id) ? () => void remove(l.line.id) : undefined}
+                  onDelete={!finishing.has(l.line.id) && (l.take || localTakes.has(l.line.id)) ? () => void remove(l.line.id) : undefined}
                   onSelect={() => !recorder.recording && setCurrentId(l.line.id)}
                   onRerecord={() => void start(l.line.id)}
                   onRetry={(takeId) => uploader.retry(takeId)}
@@ -423,7 +489,7 @@ function SceneLines({
         analyser={recorder.analyser}
         micStatus={recorder.micStatus}
         micError={recorder.micError}
-        note={recorder.recording && firstTakeHint ? FIRST_TAKE_HINT : undefined}
+        note={recorder.recording && firstTakeHint ? firstTakeHintText(keepRecording && (live ? live.mode === "live" : sttState.status === "ready")) : undefined}
         disabled={!current}
         label={current ? `Record ${current.characterName}'s line` : "Record"}
         onToggle={() => (recorder.recording ? void stop() : current && void start(current.line.id))}

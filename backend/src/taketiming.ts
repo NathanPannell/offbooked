@@ -23,6 +23,37 @@ const HAS_WORD = /[\p{L}\p{N}]/u;
  * letter or digit in it has none. Keep the two in step.
  */
 export function pieceCount(text: string): number {
+  return linePieces(text).length;
+}
+
+/** A short first word this far before the next, with no comma or full stop after it, was something else ("Um, I…"). */
+export const LONE_FIRST_WORD_MS = 1500;
+
+/**
+ * When the line's first and last said words start, from a take's word starts (one per piece, ms of
+ * the recording; the narrator's pieces skipped), for cutting the take by them. A short first word
+ * heard far ahead of the rest with no break after it ("I" in "Um, I… [2 s] I shall…") is taken for
+ * noise and the cut starts at the next word. Null when they don't fit the line.
+ */
+export function wordAnchors(starts: readonly number[] | null, text: string): { firstMs: number; lastMs: number } | null {
+  const pieces = linePieces(text);
+  if (!starts?.length || starts.length !== pieces.length) return null;
+  const said = pieces.flatMap((p, i) => (p.narrator ? [] : [{ ms: starts[i]!, text: p.text, at: i }]));
+  if (!said.length) return null;
+  // Only when nothing in the script marks a pause there: no punctuation after the word (an ellipsis
+  // or a dash included), and no direction or lone dash between it and the next word.
+  const lone =
+    said.length >= 3 &&
+    said[1]!.at === said[0]!.at + 1 &&
+    /[\p{L}\p{N}]/u.test(said[1]!.text) &&
+    said[1]!.ms - said[0]!.ms > LONE_FIRST_WORD_MS &&
+    said[0]!.text.replace(/[^\p{L}\p{N}]/gu, "").length <= 4 &&
+    !/[,;:.!?\u2014\u2013\u2026-]['"\u2019\u201d)]*$/.test(said[0]!.text);
+  return { firstMs: said[lone ? 1 : 0]!.ms, lastMs: said[said.length - 1]!.ms };
+}
+
+/** The pieces `pieceCount` counts, in order: their text, and whether the narrator says them (a [direction]) rather than the character. */
+export function linePieces(text: string): { text: string; narrator: boolean }[] {
   const braces = new Array<boolean>(text.length).fill(false);
   for (const m of text.matchAll(/\{[^}]*\}/g)) for (let i = m.index; i < m.index + m[0].length; i++) braces[i] = true;
   // The character's own stretches and the narrator's [bracketed] ones.
@@ -39,7 +70,7 @@ export function pieceCount(text: string): number {
   if (at < text.length) regions.push({ from: at, to: text.length, narrator: false });
 
   // Pieces per (region, printed line), and whether that group has a word in it at all.
-  const groups = new Map<string, { pieces: number; wordy: boolean }>();
+  const groups = new Map<string, { pieces: { text: string; narrator: boolean }[]; wordy: boolean }>();
   regions.forEach((region, r) => {
     let line = 0;
     for (let i = 0; i < region.from; i++) if (text[i] === "\n") line++;
@@ -57,15 +88,13 @@ export function pieceCount(text: string): number {
       const said = region.narrator ? raw.replace(/[[\]{}()]/g, " ") : inBrace ? "" : raw;
       const pieces = said.replace(/[_*]+/g, "").split(/\s+/).filter(Boolean);
       const key = `${r}:${line}`;
-      const g = groups.get(key) ?? { pieces: 0, wordy: false };
-      g.pieces += pieces.length;
+      const g = groups.get(key) ?? { pieces: [], wordy: false };
+      g.pieces.push(...pieces.map((p) => ({ text: p, narrator: region.narrator })));
       g.wordy ||= pieces.some((p) => HAS_WORD.test(p));
       groups.set(key, g);
     }
   });
-  let count = 0;
-  for (const g of groups.values()) if (g.wordy) count += g.pieces;
-  return count;
+  return [...groups.values()].flatMap((g) => (g.wordy ? g.pieces : []));
 }
 
 /**

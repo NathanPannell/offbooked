@@ -5,15 +5,27 @@ import { readStorage, writeStorage } from "../lib/storage";
 // per device, and the one line shown on the device's first take.
 
 export const AUTO_ADVANCE_KEY = "offbooked.autoAdvance";
-export const KEEP_RECORDING_KEY = "offbooked.keepRecording";
-export const FIRST_TAKE_HINT = "Moves to the next line when you finish. Change this in mic settings.";
+/**
+ * "Keep recording the next line". It was off by default under `offbooked.keepRecording`, where
+ * anyone who tried the switch (and turned it back off) left a "0"; the on-by-default setting starts
+ * afresh under a new key so every device gets it.
+ */
+export const KEEP_RECORDING_KEY = "offbooked.recordNext";
 
-/** A yes/no setting kept in localStorage ("1"/"0"); without storage it lasts the visit. */
+/** The one line on the device's first take: what happens when the line is said. */
+export function firstTakeHint(recordsNext: boolean): string {
+  return `${recordsNext ? "Records the next line" : "Moves to the next line"} when you finish. Change this in mic settings.`;
+}
+
+/** A yes/no setting kept in localStorage ("1"/"0"), or `fallback` when this device never chose. */
+export function storedFlag(key: string, fallback: boolean): boolean {
+  const stored = readStorage(key);
+  return stored === null ? fallback : stored === "1";
+}
+
+/** A yes/no setting kept in localStorage; only a choice is written, so a new default reaches everyone who never chose. Without storage it lasts the visit. */
 export function useStoredFlag(key: string, fallback: boolean) {
-  const [value, setValue] = useState(() => {
-    const stored = readStorage(key);
-    return stored === null ? fallback : stored === "1";
-  });
+  const [value, setValue] = useState(() => storedFlag(key, fallback));
   const set = useCallback(
     (next: boolean) => {
       setValue(next);
@@ -24,10 +36,10 @@ export function useStoredFlag(key: string, fallback: boolean) {
   return [value, set] as const;
 }
 
-/** Stop and move on when the line is said (on by default), and record the next one straight away (off). */
+/** Stop and move on when the line is said, and record the next one straight away: both on by default, so recording is hands-free. */
 export function useRecordOptions() {
   const [autoAdvance, setAutoAdvance] = useStoredFlag(AUTO_ADVANCE_KEY, true);
-  const [keepRecording, setKeepRecording] = useStoredFlag(KEEP_RECORDING_KEY, false);
+  const [keepRecording, setKeepRecording] = useStoredFlag(KEEP_RECORDING_KEY, true);
   return { autoAdvance, setAutoAdvance, keepRecording, setKeepRecording };
 }
 

@@ -59,7 +59,7 @@ async function rowsFor(ctx: Ctx, productionId: string, lineIds: string[]): Promi
   if (!lineIds.length) return [];
   return ctx.sql<LineAudioRow[]>`
     select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id,
-      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.speech_ms, t.trim_start_ms, t.word_starts_ms,
+      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.speech_ms, t.trim_start_ms, coalesce(t.aligned_word_starts_ms, t.word_starts_ms) as word_starts_ms,
       l.voice_ids is not null as shared
     from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'
     where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') and l.id = any(${lineIds}::uuid[])`;
@@ -118,14 +118,14 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
 
   // A take's word timing, in ms of the clip as served. Takes normalized before takes kept their
   // speech have it worked out once, in the background, for next time.
-  const timingOf = (r: LineAudioRow, durationMs: number, fresh: { speechMs?: number[]; trimStartMs?: number } = {}) => {
+  const timingOf = (r: LineAudioRow, durationMs: number, fresh: { speechMs?: number[]; trimStartMs?: number; wordStartsMs?: number[] } = {}) => {
     const speechMs = fresh.speechMs ?? r.speechMs;
     if (!speechMs && r.takeId && r.storageKey) {
       const take = { id: r.takeId, storageKey: r.storageKey };
       ctx.jobs.run("work out a take's speech", () => backfillTiming(ctx, take, durationMs));
     }
     const speech = servedSpeech(speechMs, durationMs);
-    const wordStartsMs = servedWordStarts(r.wordStartsMs, fresh.trimStartMs ?? r.trimStartMs, durationMs, r.text);
+    const wordStartsMs = servedWordStarts(fresh.wordStartsMs ?? r.wordStartsMs, fresh.trimStartMs ?? r.trimStartMs, durationMs, r.text);
     return { ...(speech ? { speech } : {}), ...(wordStartsMs ? { wordStartsMs } : {}) };
   };
 
@@ -206,11 +206,14 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       if (req) requests.set(r.id, req);
     }
     tts.prewarm([...requests.values()].map((q) => q.voice));
-    clips = await tts.cached([...requests.values()].map((q) => q.hash));
+    clips = await tts.cached(
+      [...requests.values()].map((q) => q.hash),
+      productionId,
+    );
     const missing = [...requests.values()].filter((q) => !clips.get(q.hash)?.cueKey);
     if (missing.length) {
       ttsSettled = false;
-      const pending = tts.ensure(missing, { cue: true, priority: opts.priority }).then((made) => {
+      const pending = tts.ensure(missing, { cue: true, priority: opts.priority, productionId }).then((made) => {
         for (const [hash, clip] of made) clips.set(hash, clip);
         ttsSettled = true;
       });

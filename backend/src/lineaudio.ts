@@ -1,7 +1,7 @@
 import type { Ctx } from "./context.ts";
 import type { AudioSource } from "./render/plan.ts";
 import { TTS_PRIORITY } from "./tts/service.ts";
-import { takeColumns, type LineRow, type TakeRow } from "./views.ts";
+import { takeColumns, takePlayKey, type LineRow, type TakeRow } from "./views.ts";
 
 export interface CueView {
   characterName: string;
@@ -37,7 +37,7 @@ export async function cueViews(ctx: Ctx, productionId: string, cues: (LineRow | 
       if (!cue) return null;
       const base = { characterName: names.get(cue.characterId!) ?? "", text: cue.text };
       const take = cue.currentTakeId ? takes.get(cue.currentTakeId) : undefined;
-      if (take) return { ...base, audioUrl: await storage.signedUrl(take.storageKey), audioSource: take.recordedBy };
+      if (take) return { ...base, audioUrl: await storage.signedUrl(takePlayKey(take)), audioSource: take.recordedBy };
       const url = ttsUrls.get(cue.id);
       return url ? { ...base, audioUrl: url, audioSource: "tts" as const } : { ...base, audioUrl: null, audioSource: "none" as const };
     }),
@@ -58,17 +58,23 @@ async function ttsCueUrls(ctx: Ctx, productionId: string, lines: LineRow[], wait
     }),
   );
   const requests = [...byLine.values()];
-  let clips = await tts.cached(requests.map((r) => r.hash));
+  let clips = await tts.cached(
+    requests.map((r) => r.hash),
+    productionId,
+  );
   const missing = requests.filter((r) => !clips.get(r.hash)?.cueKey);
   if (missing.length) {
     // An actor waiting on the lines page outranks a warm-up started when they opened their link.
-    const pending = tts.ensure(missing, { cue: true, priority: waitMs > 0 ? TTS_PRIORITY.prefetch : TTS_PRIORITY.cue });
+    const pending = tts.ensure(missing, { cue: true, priority: waitMs > 0 ? TTS_PRIORITY.prefetch : TTS_PRIORITY.cue, productionId });
     ctx.jobs.run("tts cue warm-up", () => pending.then(() => undefined));
     if (waitMs > 0) {
       let timer: NodeJS.Timeout | undefined;
       await Promise.race([pending, new Promise((resolve) => (timer = setTimeout(resolve, waitMs)))]);
       clearTimeout(timer);
-      clips = await tts.cached(requests.map((r) => r.hash));
+      clips = await tts.cached(
+        requests.map((r) => r.hash),
+        productionId,
+      );
     }
   }
   for (const [lineId, r] of byLine) {
