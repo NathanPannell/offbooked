@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { integratedLoudness } from "./loudness.ts";
+import { fileLoudness, integratedLoudness } from "./loudness.ts";
 
 const exec = promisify(execFile);
 const RATE = 48_000;
@@ -70,6 +70,25 @@ test("agrees with ffmpeg's loudnorm on noise in speech-like bursts", async () =>
     const b = await readFile(raw);
     const ours = integratedLoudness(new Int16Array(b.buffer, b.byteOffset, b.length / 2))!;
     assert.ok(Math.abs(ours - ffmpegI) < 0.6, `ours ${ours.toFixed(2)}, ffmpeg ${ffmpegI}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("measured streaming from a file, in chunks, it matches the same samples in memory", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "offbooked-loudness-"));
+  try {
+    const both = new Int16Array([...tone(2.3, 0.1), ...tone(1.7, 0.5, 440)]);
+    const raw = path.join(dir, "clip.pcm");
+    await import("node:fs/promises").then((fs) => fs.writeFile(raw, Buffer.from(both.buffer)));
+    for (const [from, to] of [
+      [0, both.length],
+      [RATE / 2 + 1, 3 * RATE - 7],
+    ] as const) {
+      const fromFile = (await fileLoudness(raw, from, to))!;
+      assert.ok(Math.abs(fromFile - integratedLoudness(both, from, to)!) < 1e-9, `${from}-${to}`);
+    }
+    assert.equal(await fileLoudness(raw, 100, 100), null);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

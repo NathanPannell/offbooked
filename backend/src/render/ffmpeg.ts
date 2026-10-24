@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
-import { open, readFile, rm, writeFile } from "node:fs/promises";
+import { open, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { RENDER_SETTINGS } from "./plan.ts";
-import { integratedLoudness } from "./loudness.ts";
+import { fileLoudness } from "./loudness.ts";
 import { analyzePcm, pcmOf, shiftStretches, TRIM, type Stretch, type WordsOnVoice } from "./trim.ts";
 
 const exec = promisify(execFile);
@@ -156,8 +156,8 @@ export async function normalizeClipCut(
   );
   try {
     const cut = trimFilters(analyzePcm(pcmOf(stdout as Buffer), opts.words));
-    const samples48 = pcmOf(await readFile(clip));
-    return await finish(clip, samples48, cut, output, m4a);
+    // The clip's length from the file itself: its samples are only ever streamed, never held.
+    return await finish(clip, (await stat(clip)).size / 2, cut, output, m4a);
   } finally {
     await rm(clip, { force: true });
   }
@@ -167,14 +167,14 @@ export async function normalizeClipCut(
 // the .m4a when asked). Nearly all below the silence threshold: kept whole instead.
 async function finish(
   clip: string,
-  pcm: Int16Array,
+  length: number,
   cut: ReturnType<typeof trimFilters>,
   output: string,
   m4a: string | undefined,
 ): Promise<{ samples: number; cutStartMs: number; speech: Stretch[]; cut: boolean }> {
-  const at = (ms: number) => Math.max(0, Math.min(pcm.length, Math.round((ms * RATE) / 1000)));
-  const run = (pre: string, from: number, to: number) => {
-    const filters = `${pre}${levelTo(integratedLoudness(pcm, from, to))}`;
+  const at = (ms: number) => Math.max(0, Math.min(length, Math.round((ms * RATE) / 1000)));
+  const run = async (pre: string, from: number, to: number) => {
+    const filters = `${pre}${levelTo(await fileLoudness(clip, from, to))}`;
     const source = ["-f", "s16le", "-ar", String(RATE), "-ac", "1", "-i", clip];
     return ffmpeg(
       m4a
@@ -211,7 +211,7 @@ async function finish(
   const lengthMs = (n: number) => (n * 1000) / RATE;
   if (samples < RATE / 20) {
     // Nearly everything was below the silence threshold; keep the take untrimmed instead.
-    await run("", 0, pcm.length);
+    await run("", 0, length);
     const whole = await measure(output);
     return { samples: whole, cutStartMs: 0, speech: shiftStretches(cut.stretches, 0, lengthMs(whole)), cut: false };
   }

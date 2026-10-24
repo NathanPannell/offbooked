@@ -395,10 +395,12 @@ export async function analyzeSpeech(file: string, words?: WordsOnVoice | null): 
   return analyzePcm(pcmOf(stdout as Buffer), words);
 }
 
-/** 16-bit little-endian samples from a buffer ffmpeg wrote. */
+/** 16-bit little-endian samples from a buffer ffmpeg wrote: a view of it when it is aligned (this is little-endian Node), else a copy. */
 export function pcmOf(bytes: Buffer): Int16Array {
-  const pcm = new Int16Array(Math.floor(bytes.length / 2));
-  for (let i = 0; i < pcm.length; i++) pcm[i] = bytes.readInt16LE(i * 2);
+  const n = Math.floor(bytes.length / 2);
+  if (bytes.byteOffset % 2 === 0 && new Uint8Array(new Uint16Array([1]).buffer)[0] === 1) return new Int16Array(bytes.buffer, bytes.byteOffset, n);
+  const pcm = new Int16Array(n);
+  for (let i = 0; i < n; i++) pcm[i] = bytes.readInt16LE(i * 2);
   return pcm;
 }
 
