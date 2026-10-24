@@ -69,6 +69,21 @@ export async function planInputs(ctx: Ctx, productionId: string): Promise<{ line
 
 // Debounced: each new take pushes the queued job back, up to two minutes after it was first queued.
 // Wakes the worker so it can sleep until the job is due.
+/**
+ * After a take lands: once every part someone picked is recorded (by anyone; TTS never counts),
+ * the completion emails go out (once each, `sendOnce`). They no longer wait for a stitched render:
+ * the run-through plays line by line, so it is ready to listen through as soon as the last take is in.
+ */
+export async function notifyIfCastComplete(ctx: Ctx, productionId: string): Promise<void> {
+  const lines = await renderInputs(ctx.sql, productionId);
+  if (lines.some((l) => l.cast) && lines.every((l) => !l.cast || l.castRecorded)) await notifyCastComplete(ctx, productionId);
+}
+
+/**
+ * Queues the stitched render: only when it is asked for (POST /render, the seed). The run-through
+ * plays line by line and nothing in the app needs the one long file, so takes, deletes and opening
+ * the run-through no longer build it.
+ */
 export async function scheduleRender(ctx: Ctx, productionId: string, opts: { force?: boolean } = {}): Promise<void> {
   const delay = opts.force ? 0 : ctx.config.renderDebounceMs;
   await ctx.sql`
@@ -237,7 +252,6 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
                 where id = ${job.id}`;
     }
     log.info({ renderId: job.id, productionId: job.productionId, ms: Date.now() - started, lines: lines.length, cached: Boolean(cached) }, "render ready");
-    if (allCastRecorded) await notifyCastComplete(ctx, job.productionId);
   } catch (err) {
     log.error({ err, renderId: job.id }, "render failed");
     await sql`update renders set status = 'failed', error = ${String((err as Error).message).slice(0, 500)}, finished_at = now() where id = ${job.id}`;
