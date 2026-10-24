@@ -16,6 +16,10 @@ export const REALIGN = {
   pauseMs: 250, // a quiet gap this long between two stretches of voice is a pause: a word starts after it
   minStretchMs: 80, // voice shorter than this is a click or a breath's edge, not a word
   skipCost: 3000, // what leaving a stretch without a word costs, in ms of distance from the live starts (a cough, a laugh)
+  farSkipCost: 300, // ...for a stretch a second or more outside the live words: likely not the line at all ("okay" after it)
+  farMs: 1000,
+  fitMs: 300, // a live start this close to the voice fits it
+  minFit: 0.5, // fewer live starts than this share on the voice, and they don't say where the words are
   maxWords: 120, // longer speeches keep the live starts
   maxStretches: 60,
   maxPerStretch: 30, // words one stretch of voice may hold (without a pause): keeps the search to words × stretches × this²
@@ -58,13 +62,16 @@ export function layOnVoice(live: readonly number[], weights: readonly number[], 
   const m = voice.length;
   if (!n || !m || n > REALIGN.maxWords || m > REALIGN.maxStretches) return null;
   const cost = (from: number, to: number, s: Stretch) => place(weights, from, to, s).reduce((c, t, k) => c + Math.abs(t - live[from + k]!), 0);
+  const lo = Math.min(...live) - REALIGN.farMs;
+  const hi = Math.max(...live) + REALIGN.farMs;
+  const skip = voice.map((s) => (s.endMs < lo || s.startMs > hi ? REALIGN.farSkipCost : REALIGN.skipCost));
   // best[k][j]: words [0, j) laid on stretches [0, k); how[k][j]: where stretch k's words begin (-1: it has none).
   const best = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(Infinity));
   const how = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(-1));
   best[0]![0] = 0;
   for (let k = 1; k <= m; k++) {
     for (let j = 0; j <= n; j++) {
-      let b = best[k - 1]![j]! + REALIGN.skipCost;
+      let b = best[k - 1]![j]! + skip[k - 1]!;
       let h = -1;
       for (let i = Math.max(0, j - REALIGN.maxPerStretch); i < j; i++) {
         if (best[k - 1]![i] === Infinity) continue;
@@ -101,6 +108,10 @@ export function realignWordStarts(live: readonly number[] | null, text: string, 
   if (!live || live.length !== pieces.length || !pieces.length) return null;
   const said = pieces.flatMap((p, i) => (p.narrator ? [] : [i]));
   const stretches = voiceStretches(voice);
+  // Live starts that mostly miss the voice (the tracker piled the words into a late pass) say
+  // nothing about where the words are: keep them, and let the cut go by loudness.
+  const fits = said.filter((i) => stretches.some((s) => live[i]! >= s.startMs - REALIGN.fitMs && live[i]! <= s.endMs + REALIGN.fitMs)).length;
+  if (fits < said.length * REALIGN.minFit) return null;
   const laid = layOnVoice(
     said.map((i) => live[i]!),
     said.map((i) => weight(pieces[i]!.text)),

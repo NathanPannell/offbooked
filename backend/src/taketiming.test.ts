@@ -15,11 +15,25 @@ import {
   servedSpeech,
   servedWordStarts,
   pieceCount,
+  wordAnchors,
 } from "./taketiming.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "./test/helpers.ts";
 
 // Frame levels: `ms` of each level in turn, in 10 ms frames.
 const levels = (...parts: [number, number][]) => parts.flatMap(([db, ms]) => Array<number>(ms / 10).fill(db));
+
+test("the line's first and last said words, for cutting by them", () => {
+  assert.deepEqual(wordAnchors([500, 800, 1500], "Hello there, friend."), { firstMs: 500, lastMs: 1500 });
+  assert.deepEqual(wordAnchors([500, 900, 900], "Go [Exit] away"), { firstMs: 500, lastMs: 900 }, "the narrator's pieces don't count");
+  assert.equal(wordAnchors([500, 800], "Hello there, friend."), null, "they don't fit the line");
+  // "Um, I… [2.4 s] I shall in all": the lone short first word was something else.
+  assert.deepEqual(wordAnchors([400, 3200, 3530, 3760], "I shall in all"), { firstMs: 3200, lastMs: 3760 });
+  // When the script marks a pause after the first word, it is the actor's.
+  assert.deepEqual(wordAnchors([400, 3200, 3530], "Ay, madam, common."), { firstMs: 400, lastMs: 3530 });
+  assert.equal(wordAnchors([0, 2000, 2300, 2600], "Well… I suppose so.")?.firstMs, 0, "an ellipsis");
+  assert.equal(wordAnchors([0, 2000, 2300, 2600, 2900], "Well – I suppose so.")?.firstMs, 0, "a spaced dash");
+  assert.equal(wordAnchors([0, 2000, 2000, 2300], "Well [pause] I suppose")?.firstMs, 0, "a direction");
+});
 
 test("counts the words a character says as the web player does", () => {
   // The same lines as web/src/player/words.test.ts (lineTokens) and web/src/stt/wordTiming.test.ts.
@@ -368,5 +382,24 @@ describe("re-timing a take as soon as it is uploaded", { skip: dbSkip }, () => {
     assert.ok(row!.normalizedKey && row!.streamKey, "normalized without anyone playing it");
     assert.deepEqual(row!.alignedWordStartsMs, [500, 770, 1500]);
     assert.deepEqual(row!.wordStartsMs, [520, 800, 1900], "what the app sent is kept");
+  });
+
+  test("cuts by the line's words: a voiced sound 2.6 s before the line doesn't start the cut", async () => {
+    const [line] = await t.ctx.sql<{ id: string }[]>`select id from lines where text = 'And you.'`;
+    // A "hmm" at 0.2–0.5 s, then the line: "And" at 3.1 s, "you." at 4.1 s.
+    const res = await t.app.inject({
+      method: "PUT",
+      url: `/api/lines/${line!.id}/take`,
+      headers: { ...bearer(alice), "content-type": "audio/wav", "x-take-id": randomUUID(), "x-duration-ms": "5100", "x-word-starts": "3100,4100" },
+      payload: wav([false, 200], [true, 300], [false, 2600], [true, 600], [false, 400], [true, 500], [false, 500]),
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    await t.ctx.jobs.idle();
+    const [row] = await t.ctx.sql<
+      { trimStartMs: number; normalizedSamples: number }[]
+    >`select trim_start_ms, normalized_samples from takes where line_id = ${line!.id}`;
+    assert.equal(row!.trimStartMs, 3100 - L, "cut just before the first word, not before the hmm");
+    const lengthMs = (row!.normalizedSamples * 1000) / 48_000;
+    assert.ok(Math.abs(lengthMs - (4600 + TRIM.tailPadMs - (3100 - L))) <= 40, `kept ${lengthMs} ms`);
   });
 });

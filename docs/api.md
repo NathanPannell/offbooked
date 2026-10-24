@@ -173,15 +173,15 @@ interface RunThrough {
 
 ## Render pipeline (server)
 
-- Triggered automatically, debounced by about 15 seconds after takes land, and on demand. One job per production at a time, run in-process on Railway, with ffmpeg on `PATH`.
+- Built only on demand (`POST /api/productions/:id/render`, the seed). One job per production at a time, run in-process on Railway, with ffmpeg on `PATH`.
 - Per current take: decode, trim leading and trailing silence, apply `loudnorm` (I=-16), resample to 48 kHz mono. Cache each normalized take by take ID so only new takes are processed again.
 - Concatenate dialogue lines in `seq` order. Gaps are 350 ms between lines in a section and 1200 ms at a section change. An unrecorded line becomes silence of `clamp(words × 380 ms, 1200, 8000)` with `recorded: false` in timing.
 - Output AAC in `.m4a` plus the `timing` array, stored with a content hash of (take IDs + line order + settings). Renders are kept until the production's content is deleted.
-- When a render finishes with every cast line recorded, the notifications below fire.
+- Takes and opening the run-through don't queue it. The notifications below don't wait for it: they are checked after every take, restored take and change to the script's lines or parts.
 
 ## Notifications (Resend, completion only)
 
-- To the director: "{firstName or name} finished all {n} lines" when an actor's last line lands, and "Cast complete — run-through ready" when the full-cast render finishes.
+- To the director: "{firstName or name} finished all {n} lines" when an actor's last line lands, and "Cast complete — run-through ready" when the take that completes the cast lands (every part someone picked is recorded).
 - To actors with a verified email: "{title} is ready to listen through", linking to `${APP_URL}/i/{token}/play`.
 - The one other email: the verification link a cast member asks for in their profile (`POST /api/invite/contact`), "Confirm your email for Offbooked".
 - Each sends once (unique on kind + production + actor). With `EMAIL_DRIVER=log` emails are logged, not sent. Nothing ever emails invites or reminders.
@@ -266,7 +266,7 @@ Until 2026-10-20 a director's take was a "stand-in" that never counted. Since th
 - The director's upload response's `linesRecorded`/`linesTotal` are production progress, counting every take.
 - `ActorLine.take` is the actor's own latest take, never someone else's (that is `current`).
 - A cue whose TTS clip is still being synthesized comes back with `audioUrl: null, audioSource: "none"` (the lines endpoints wait up to `TTS_CUE_WAIT_MS`, default 2.5 s); it fills in on the next fetch.
-- `GET` run-through may queue a render (first open, or when stale with nothing queued).
+- `GET` run-through reports the stitched render's state but never queues one.
 - The director's takes count as recordings for the "script can't be replaced once recorded" rule.
 - `/health` reports `tts: "piper <version>" | null` and never fails because of it; without Piper, unrecorded lines render as silence (`source: "none"`).
 

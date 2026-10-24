@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { open, writeFile } from "node:fs/promises";
+import { open, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { RENDER_SETTINGS } from "./plan.ts";
-import { analyzeSpeech, shiftStretches, type Stretch } from "./trim.ts";
+import { fileLoudness } from "./loudness.ts";
+import { analyzePcm, pcmOf, shiftStretches, TRIM, type Stretch, type WordsOnVoice } from "./trim.ts";
 
 const exec = promisify(execFile);
 const RATE = RENDER_SETTINGS.sampleRate;
@@ -72,14 +73,15 @@ const measure = async (flac: string) => (await flacSamples(flac)) ?? (await prob
 
 // The filters that cut a clip to its speech (see trim.ts), with a few ms of fade at each cut so it
 // never clicks. Empty when there is nothing to cut. `stretches` is where the voice is in the input.
-async function trimFilters(input: string): Promise<{ filters: string; startMs: number; stretches: Stretch[] }> {
-  const { bounds: b, stretches } = await analyzeSpeech(input);
-  if (!b || b.endMs - b.startMs < 50) return { filters: "", startMs: 0, stretches };
+function trimFilters(analysis: ReturnType<typeof analyzePcm>): { filters: string; startMs: number; endMs: number; stretches: Stretch[] } {
+  const { bounds: b, stretches } = analysis;
+  if (!b || b.endMs - b.startMs < 50) return { filters: "", startMs: 0, endMs: Infinity, stretches };
   const s = (ms: number) => (ms / 1000).toFixed(3);
   const length = b.endMs - b.startMs;
   return {
     filters: `asetpts=PTS-STARTPTS,atrim=start=${s(b.startMs)}:end=${s(b.endMs)},asetpts=PTS-STARTPTS,afade=t=in:d=0.005,afade=t=out:st=${s(Math.max(0, length - 10))}:d=0.01,`,
     startMs: b.startMs,
+    endMs: b.endMs,
     stretches,
   };
 }
@@ -89,36 +91,17 @@ async function trimFilters(input: string): Promise<{ filters: string; startMs: n
 // settings make voices watery, so this leaves the voice itself alone. TTS is clean already.
 const CLEAN = "highpass=f=70,afftdn=nr=10:nf=-45:tn=1,";
 
-interface Loudness {
-  input_i: string;
-  input_tp: string;
-  input_lra: string;
-  input_thresh: string;
-  target_offset: string;
-}
-
-// First loudnorm pass: how loud the clip is after the filters before it.
-async function measureLoudness(input: string, filters: string): Promise<Loudness | null> {
-  try {
-    const stderr = await ffmpeg(["-i", input, "-vn", "-af", `${filters}${loudnorm}:print_format=json`, "-f", "null", "-"]);
-    const json = stderr.slice(stderr.lastIndexOf("{"), stderr.lastIndexOf("}") + 1);
-    const m = JSON.parse(json) as Loudness;
-    return [m.input_i, m.input_tp, m.input_lra, m.input_thresh, m.target_offset].every((v) => Number.isFinite(Number(v))) ? m : null;
-  } catch {
-    return null;
-  }
-}
-
-// Second pass: one fixed gain to the target loudness, so every clip, recorded or synthesized, plays
-// at the same level, with a quick limiter that only touches the odd peak the gain pushes past
-// -1.5 dBFS. Single-pass loudnorm adjusts the gain as it goes and lands several LU off on clips a
-// few seconds long, and its linear mode can't raise a clip that already peaks near full scale.
-// Falls back to it when there was nothing to measure (near silence). The gain is capped at ±30 dB
-// so a nearly silent take isn't turned into loud hiss.
+// One fixed gain to the target loudness, so every clip, recorded or synthesized, plays at the same
+// level, with a quick limiter that only touches the odd peak the gain pushes past -1.5 dBFS. The
+// loudness is measured in-process (loudness.ts) on the clip as it will be cut. Single-pass
+// loudnorm adjusts the gain as it goes and lands several LU off on clips a few seconds long, and
+// its linear mode can't raise a clip that already peaks near full scale; it is only the fallback
+// when there was nothing to measure (near silence). The gain is capped at ±30 dB so a nearly
+// silent take isn't turned into loud hiss.
 const PEAK_LIMIT = 10 ** (-1.5 / 20);
-const levelTo = (m: Loudness | null) => {
-  if (!m) return loudnorm;
-  const gainDb = Math.max(-30, Math.min(30, RENDER_SETTINGS.loudnessI - Number(m.input_i)));
+const levelTo = (inputI: number | null) => {
+  if (inputI === null) return loudnorm;
+  const gainDb = Math.max(-30, Math.min(30, RENDER_SETTINGS.loudnessI - inputI));
   return `volume=${gainDb.toFixed(2)}dB,alimiter=limit=${PEAK_LIMIT.toFixed(3)}:attack=2:release=40:level=false`;
 };
 
@@ -138,16 +121,65 @@ export async function normalizeClipCut(
   input: string,
   output: string,
   m4a?: string,
-  opts: { clean?: boolean } = {},
+  opts: { clean?: boolean; words?: WordsOnVoice | null } = {},
 ): Promise<{ samples: number; cutStartMs: number; speech: Stretch[]; cut: boolean }> {
-  const run = async (pre: string) => {
-    const filters = `${pre}${levelTo(await measureLoudness(input, pre))}`;
+  // One decode of the input: the clip at 48 kHz mono, cleaned up when asked, kept as raw samples
+  // beside the output, and at 16 kHz for finding the speech, from the same run.
+  const clip = `${output}.pcm`;
+  const { stdout } = await exec(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-nostdin",
+      "-y",
+      "-i",
+      input,
+      "-vn",
+      "-filter_complex",
+      `[0:a]aformat=channel_layouts=mono,aresample=${RATE},asplit[c][s];[c]${opts.clean ? CLEAN.replace(/,$/, "") : "anull"}[clip];[s]aresample=${TRIM.analysisRate}[speech]`,
+      "-map",
+      "[clip]",
+      "-f",
+      "s16le",
+      "-acodec",
+      "pcm_s16le",
+      clip,
+      "-map",
+      "[speech]",
+      "-f",
+      "s16le",
+      "-acodec",
+      "pcm_s16le",
+      "-",
+    ],
+    { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, timeout: 10 * 60_000 },
+  );
+  try {
+    const cut = trimFilters(analyzePcm(pcmOf(stdout as Buffer), opts.words));
+    // The clip's length from the file itself: its samples are only ever streamed, never held.
+    return await finish(clip, (await stat(clip)).size / 2, cut, output, m4a);
+  } finally {
+    await rm(clip, { force: true });
+  }
+}
+
+// The second and last run: the decoded clip cut, levelled to the target and written as FLAC (and
+// the .m4a when asked). Nearly all below the silence threshold: kept whole instead.
+async function finish(
+  clip: string,
+  length: number,
+  cut: ReturnType<typeof trimFilters>,
+  output: string,
+  m4a: string | undefined,
+): Promise<{ samples: number; cutStartMs: number; speech: Stretch[]; cut: boolean }> {
+  const at = (ms: number) => Math.max(0, Math.min(length, Math.round((ms * RATE) / 1000)));
+  const run = async (pre: string, from: number, to: number) => {
+    const filters = `${pre}${levelTo(await fileLoudness(clip, from, to))}`;
+    const source = ["-f", "s16le", "-ar", String(RATE), "-ac", "1", "-i", clip];
     return ffmpeg(
       m4a
         ? [
-            "-i",
-            input,
-            "-vn",
+            ...source,
             "-filter_complex",
             `${filters},aresample=${RATE},asplit[f][a]`,
             "-map",
@@ -171,17 +203,15 @@ export async function normalizeClipCut(
             "+faststart",
             m4a,
           ]
-        : ["-i", input, "-vn", "-af", filters, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output],
+        : [...source, "-af", filters, "-ar", String(RATE), "-ac", "1", "-sample_fmt", "s16", "-c:a", "flac", output],
     );
   };
-  const clean = opts.clean ? CLEAN : "";
-  const cut = await trimFilters(input);
-  await run(`${cut.filters}${clean}`);
+  await run(cut.filters, at(cut.startMs), at(cut.endMs));
   const samples = await measure(output);
   const lengthMs = (n: number) => (n * 1000) / RATE;
   if (samples < RATE / 20) {
     // Nearly everything was below the silence threshold; keep the take untrimmed instead.
-    await run(clean);
+    await run("", 0, length);
     const whole = await measure(output);
     return { samples: whole, cutStartMs: 0, speech: shiftStretches(cut.stretches, 0, lengthMs(whole)), cut: false };
   }

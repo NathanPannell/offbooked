@@ -26,7 +26,7 @@ test("the first word starts with the voice, not the breath the live tracker put 
 });
 
 test("every stretch of voice after a pause starts a word", () => {
-  const starts = layOnVoice([0, 100, 200, 300], [4, 4, 4, 4], voice([1000, 1400], [2000, 2400]))!;
+  const starts = layOnVoice([1000, 1100, 1200, 1300], [4, 4, 4, 4], voice([1000, 1400], [2000, 2400]))!;
   assert.equal(starts[0], 1000);
   assert.ok(starts.includes(2000), JSON.stringify(starts));
 });
@@ -64,4 +64,14 @@ test("keeps the live starts when it can't help", () => {
     null,
     "too long to search",
   );
+});
+
+test('a stretch well after the line (an "okay") is left without a word', () => {
+  const starts = realignWordStarts([700, 1000, 1400], "Get thee hence!", voice([700, 1700], [3000, 3400]))!;
+  assert.ok(starts[2]! < 1700, JSON.stringify(starts));
+});
+
+test("live starts that mostly miss the voice aren't re-timed", () => {
+  // The tracker piled every word into a late pass, after the voice had ended.
+  assert.equal(realignWordStarts([5000, 5050, 5100], "Get thee hence!", voice([700, 1700])), null);
 });
