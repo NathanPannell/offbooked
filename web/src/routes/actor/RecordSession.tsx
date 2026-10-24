@@ -30,7 +30,7 @@ import { LineCard, type LocalTake } from "./LineCard";
 import { CastProfile } from "./CastProfile";
 import { PickUpParts } from "./PickUpParts";
 import { useFollowWhileRecording } from "./recorderFollow";
-import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake } from "./recordedBy";
+import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake, partInView, saysPart } from "./recordedBy";
 import { Wrapped } from "./Wrapped";
 
 const ADVANCE_DELAY_MS = 700;
@@ -139,11 +139,13 @@ export function RecordSession({
   const parts = invite.characters;
   const partKey = `offbooked.part.${token}`;
   const [chosenPart, setChosenPart] = useState<string | null>(() => readStorage(partKey));
-  const activePart = useMemo(() => {
-    if (parts.length <= 1) return null;
-    if (chosenPart && parts.some((p) => p.id === chosenPart)) return chosenPart;
-    return (parts.find((p) => allLines.some((l) => saysPart(l, p.id) && !lineRecorded(l))) ?? parts[0]!).id;
-  }, [parts, chosenPart, allLines]);
+  const activePart = useMemo(() => partInView(parts, chosenPart, allLines), [parts, chosenPart, allLines]);
+  // Keep the part it opened on: without this, the take that finishes it made the next part with
+  // lines left the one in view, and its wrapped screen showed that part instead. Not remembered on
+  // the device: the next visit opens on whichever part still needs a voice.
+  useEffect(() => {
+    if (!chosenPart && activePart && lines.data) setChosenPart(activePart);
+  }, [chosenPart, activePart, lines.data]);
   const actorLines: ActorLine[] = useMemo(() => (activePart ? allLines.filter((l) => saysPart(l, activePart)) : allLines), [allLines, activePart]);
   /** Parts other than the one in view that still have lines needing a voice. */
   const otherParts = parts
@@ -271,13 +273,18 @@ export function RecordSession({
 
   useEffect(() => () => localTakesRef.current.forEach((t) => URL.revokeObjectURL(t.url)), []);
 
-  /** The next line to record: one nobody has recorded, else one someone else has. */
-  const nextLine = (justRecorded: string): string | null =>
+  /**
+   * The next line to record: one nobody has recorded; null once every line is (the part is
+   * wrapped). After a take over someone else's (`overOthers`), the next line without one of the
+   * actor's own instead.
+   */
+  const nextLine = (justRecorded: string, overOthers = false): string | null =>
     nextToRecord(
       // A take still being kept counts as this actor's, so the chain never loops back to it.
       actorLines.map((l) => ({ id: l.line.id, recorded: isRecorded(l.line.id) || finishing.has(l.line.id), mine: hasOwn(l) || finishing.has(l.line.id) })),
       justRecorded,
       new Set([justRecorded]),
+      overOthers,
     );
 
   const startRecording = async (lineId: string) => {
@@ -461,6 +468,8 @@ export function RecordSession({
   const stopRecording = async ({ recordNext = false }: { recordNext?: boolean } = {}) => {
     const lineId = recorder.recording?.lineId;
     const timing = timingRef.current;
+    // Recording over someone else's take: carry on through the others' takes afterwards.
+    const overOthers = !!actorLines.find((l) => l.line.id === lineId)?.current;
     accompaniment.stop();
     setFirstTakeHint(false);
     const recorded = await recorder.stop();
@@ -470,21 +479,24 @@ export function RecordSession({
       // The cue starts once the take is stored (a few ms), and the chain stops if it couldn't be.
       markFinishing(lineId, true);
       const kept = await keepTake(lineId, recorded, timing).finally(() => markFinishing(lineId, false));
-      if (kept) goToNext(lineId, true, 0);
+      if (kept) goToNext(lineId, { recordNext: true, delayMs: 0, overOthers });
       return;
     }
-    if (await keepTake(lineId, recorded, timing)) goToNext(lineId);
+    if (await keepTake(lineId, recorded, timing)) goToNext(lineId, { overOthers });
   };
   stopRef.current = () => void stopRecording();
 
-  const goToNext = (lineId: string, recordNext = false, delayMs = ADVANCE_DELAY_MS) => {
-    const next = nextLine(lineId);
+  /** On to the next line to record, or "You're wrapped" when every line of the part is recorded. */
+  const goToNext = (lineId: string, { recordNext = false, delayMs = ADVANCE_DELAY_MS, overOthers = false } = {}) => {
+    const next = nextLine(lineId, overOthers);
+    // Hands-free only carries on into a line nobody has recorded, never over someone's take.
+    const recordIt = recordNext && !!next && !isRecorded(next);
     advanceTimer.current = setTimeout(() => {
       advanceTimer.current = null;
       if (next) {
         setCurrentId(next);
         pendingReveal.current = { from: lineId, to: next };
-        if (recordNext) void startRef.current(next);
+        if (recordIt) void startRef.current(next);
       } else {
         setView("wrapped");
         window.scrollTo({ top: 0 });
@@ -800,9 +812,4 @@ function SttChip({ state, onEnable }: { state: ReturnType<typeof useSttSession>[
       {percent !== null && <span className="nums">{percent}%</span>}
     </span>
   );
-}
-
-/** Whether a line belongs to a part: its speaker, or one of a shared line's voices. */
-function saysPart(l: ActorLine, characterId: string): boolean {
-  return l.line.characterId === characterId || (l.line.voiceIds ?? []).includes(characterId);
 }

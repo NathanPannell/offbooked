@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActorLine, Take } from "../../api/types";
-import { lineTake, nextToRecord, opensOnWrapped, ownTake, recordedByLabel, takeAuthor } from "./recordedBy";
+import { lineTake, nextToRecord, opensOnWrapped, ownTake, partInView, recordedByLabel, takeAuthor } from "./recordedBy";
 
 function take(id: string, by: { kind: "actor" | "director"; name: string }, mine: boolean): Take {
   return { id, lineId: `l-${id}`, audioUrl: `https://audio/${id}`, durationMs: 1200, createdAt: "2026-10-20T00:00:00Z", stt: null, recordedBy: by, mine };
@@ -85,14 +85,43 @@ describe("the next line to record", () => {
     expect(nextToRecord(lines, "d")).toBe("c");
   });
 
-  it("then to lines someone else recorded, going round", () => {
+  it("is wrapped once every line is recorded, whoever recorded the others", () => {
+    // The bug: finishing the last line nobody had recorded moved on to (and, hands-free, recorded
+    // over) a line the director or another cast member had recorded, instead of "You're wrapped".
     const done = lines.map((l) => (l.id === "c" ? { ...l, recorded: true, mine: true } : l));
-    expect(nextToRecord(done, "c")).toBe("d");
-    expect(nextToRecord(done, "d")).toBe("b");
+    expect(nextToRecord(done, "c", new Set(["c"]))).toBeNull();
+  });
+
+  it("walks through others' takes only when recording over them", () => {
+    const done = lines.map((l) => (l.id === "c" ? { ...l, recorded: true, mine: true } : l));
+    expect(nextToRecord(done, "b", new Set(["b"]), true)).toBe("d");
+    expect(nextToRecord(done, "d", new Set(["d"]), true)).toBe("b");
+    expect(nextToRecord(done, "d", new Set(["d"]))).toBeNull();
   });
 
   it("skips the line just recorded, and stops when every line is theirs", () => {
     expect(nextToRecord([{ id: "a", recorded: false, mine: false }], "a", new Set(["a"]))).toBeNull();
     expect(nextToRecord([{ id: "a", recorded: true, mine: true }], "a")).toBeNull();
+  });
+});
+
+describe("the part in view", () => {
+  const parts = [{ id: "anna" }, { id: "ben" }];
+  const said = (id: string, by: string, recorded: boolean) =>
+    line(id, { line: { ...line(id).line, characterId: by }, take: recorded ? take(`t-${id}`, { kind: "actor", name: "Sam" }, true) : null });
+
+  it("opens on the first part with lines needing a voice", () => {
+    expect(partInView(parts, null, [said("a1", "anna", true), said("b1", "ben", false)])).toBe("ben");
+    expect(partInView(parts, null, [said("a1", "anna", false), said("b1", "ben", false)])).toBe("anna");
+    expect(partInView([{ id: "anna" }], null, [said("a1", "anna", false)])).toBeNull();
+  });
+
+  it("stays on the part the recorder kept once its last line is recorded", () => {
+    // The bug: once ANNA's last take landed the part in view became BEN, and the wrapped screen
+    // read "Ben's wrapped" over BEN's unrecorded lines. The recorder now keeps ANNA (chosen).
+    const finished = [said("a1", "anna", true), said("a2", "anna", true), said("b1", "ben", false)];
+    expect(partInView(parts, null, finished)).toBe("ben");
+    expect(partInView(parts, "anna", finished)).toBe("anna");
+    expect(partInView(parts, "gone", finished)).toBe("ben");
   });
 });
