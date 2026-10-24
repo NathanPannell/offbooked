@@ -15,6 +15,7 @@ import {
   speakable,
   speakableDirection,
   spokenParts,
+  spokenSentences,
   TTS_SETTINGS,
   VOICE_MODELS,
   VOICES,
@@ -184,16 +185,60 @@ test("a line splits into the character's words and the narrator's directions, in
   assert.deepEqual(spokenParts("— [ ] —"), []);
 });
 
-test("printed lines are joined with a pause between them", async () => {
+test("speech goes by sentence, not by printed line", () => {
+  // Verse whose sentence runs over four printed lines, then a new one that ends mid-line.
+  const verse = [
+    "To be, or not to be, that is the question:",
+    "Whether 'tis nobler in the mind to suffer",
+    "The slings and arrows of outrageous fortune,",
+    "Or to take arms against a sea of troubles",
+    "And by opposing end them. To die, to sleep—",
+    "No more;",
+  ].join("\n");
+  assert.deepEqual(spokenSentences(verse), [
+    "To be, or not to be, that is the question: Whether 'tis nobler in the mind to suffer The slings and arrows of outrageous fortune, Or to take arms against a sea of troubles And by opposing end them.",
+    "To die, to sleep— No more;",
+  ]);
+  // A printed line that ends mid-sentence runs on into the next.
+  assert.deepEqual(spokenSentences("I'll speak to it, though hell itself should gape\nAnd bid me hold my peace."), [
+    "I'll speak to it, though hell itself should gape And bid me hold my peace.",
+  ]);
+  // A printed line that ends a sentence ends its utterance.
+  assert.deepEqual(spokenSentences("Speak to me.\nIf there be any good thing to be done"), ["Speak to me.", "If there be any good thing to be done"]);
+  assert.deepEqual(spokenSentences("Stay! Speak, speak! I charge thee, speak!"), ["Stay!", "Speak, speak!", "I charge thee, speak!"]);
+  // Not sentence ends: a lower-case word after "!", an abbreviation. "I" and "No" end sentences.
+  assert.deepEqual(spokenSentences("What, ho! my lord. Mr. Smith is here."), ["What, ho! my lord.", "Mr. Smith is here."]);
+  assert.deepEqual(spokenSentences("So am I. Good night. No. Go."), ["So am I.", "Good night.", "No.", "Go."]);
+  // Closing quotes stay with their sentence; an ellipsis before a new word is a break.
+  assert.deepEqual(spokenSentences('He cried "Away!" Then he fled… I… I shall'), ['He cried "Away!"', "Then he fled…", "I…", "I shall"]);
+  // A word hyphenated across a printed line is joined back; one that is really hyphenated isn't split.
+  assert.deepEqual(spokenSentences("this too too sul-\nlied flesh"), ["this too too sullied flesh"]);
+  assert.deepEqual(spokenSentences("a well-\nKnown face"), ["a well- Known face"]);
+  assert.deepEqual(spokenSentences(""), []);
+});
+
+test("a line printed on one line keeps its clip; one over several printed lines gets a new one", () => {
+  const voice = VOICES[0]!;
+  // What clipHash is given: the words, printed line breaks joined (service.ts, request).
+  const key = (text: string) => clipHash("piper 1.2.0", voice, spokenSentences(speakable(text)).join(" "));
+  const before = (text: string) => clipHash("piper 1.2.0", voice, speakable(text));
+  assert.equal(key("Who's there?"), before("Who's there?"), "one printed line: same hash, no new synthesis");
+  const twoSentences = "Nay, answer me. Stand and unfold yourself.";
+  assert.equal(key(twoSentences), before(twoSentences), "several sentences on one printed line too");
+  assert.notEqual(key("Nay, answer me:\nstand, and unfold yourself."), before("Nay, answer me:\nstand, and unfold yourself."));
+  assert.equal(key("Long live\nthe King!"), key("Long live the King!"), "where the printed line broke doesn't matter");
+});
+
+test("sentences are joined with a pause between them", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "offbooked-wav-"));
   try {
     const parts = [path.join(dir, "a.wav"), path.join(dir, "b.wav")];
     await writeFile(parts[0]!, toneWav(0.5, 300));
     await writeFile(parts[1]!, toneWav(0.25, 300));
     const out = path.join(dir, "out.wav");
-    await joinWavs(parts, TTS_SETTINGS.lineBreakMs, out);
+    await joinWavs(parts, TTS_SETTINGS.sentenceGapMs, out);
     const wav = await readFile(out);
-    const gap = Math.round((22_050 * TTS_SETTINGS.lineBreakMs) / 1000);
+    const gap = Math.round((22_050 * TTS_SETTINGS.sentenceGapMs) / 1000);
     assert.equal(wav.readUInt32LE(40) / 2, Math.round(22_050 * 0.5) + Math.round(22_050 * 0.25) + gap);
     assert.equal(wav.readUInt32LE(4), wav.length - 8);
     await writeFile(parts[1]!, toneWav(0.25, 300, 16_000));

@@ -8,10 +8,10 @@ import { RENDER_SETTINGS } from "../render/plan.ts";
 import type { Storage } from "../storage/storage.ts";
 import type { Synthesizer } from "./piper.ts";
 import { deleteClipsOfDeleted } from "./cleanup.ts";
-import { assignVoices, clipHash, NARRATOR, speakableDirection, spokenParts, TTS_SETTINGS, type Voice } from "./voices.ts";
+import { assignVoices, clipHash, NARRATOR, speakableDirection, spokenParts, spokenSentences, TTS_SETTINGS, type Voice } from "./voices.ts";
 import { joinWavs } from "./wav.ts";
 
-// One spoken stretch of a clip: a printed line, or the narrator's part of a line. Times are in the
+// One spoken stretch of a clip: a sentence of a line, or of the narrator's part of one. Times are in the
 // normalized clip, so the run-through can light up words as they are read.
 export interface SpokenSegment {
   startMs: number;
@@ -33,7 +33,8 @@ export interface TtsRequest {
   text: string; // what is said, for logs and word counts
   voice: Voice; // the line's own voice (the narrator's for a stage direction)
   // In order: the character's words and, read by the narrator in their place, any [bracketed]
-  // direction inside the line. Each part's printed lines are spoken one at a time.
+  // direction inside the line. Each part's text is its sentences, one per text line, each spoken
+  // as one utterance.
   parts: { voice: Voice; text: string; narrator: boolean }[];
 }
 
@@ -174,19 +175,25 @@ export class TtsService {
   // A [bracketed] direction inside the line is read by the narrator, between the character's words.
   request(engine: string, voice: Voice | undefined, text: string): TtsRequest | null {
     if (!voice) return null;
-    const parts = spokenParts(text).map((p) => ({ voice: p.narrator ? NARRATOR : voice, text: p.text, narrator: p.narrator }));
-    if (!parts.some((p) => !p.narrator)) return null;
+    // Sentences, not printed lines: a sentence that runs over several lines of verse is said whole.
+    const said = spokenParts(text).map((p) => ({ voice: p.narrator ? NARRATOR : voice, sentences: spokenSentences(p.text), narrator: p.narrator }));
+    if (!said.some((p) => !p.narrator)) return null;
+    const parts = said.map((p) => ({ voice: p.voice, text: p.sentences.join("\n"), narrator: p.narrator }));
     const spoken = parts.map((p) => p.text).join("\n");
-    // A line the character says alone keeps the key it always had.
-    const key = parts.length === 1 ? spoken : parts.map((p) => `${p.narrator ? "N" : "C"}:${p.text}`).join("\n|");
+    // The key has each part's words on one line: a line printed on one line keeps the key (and the
+    // clip) it always had, as Piper already split its sentences, and one that ran over several
+    // printed lines gets a new clip. A line the character says alone keeps the key it always had.
+    const words = (p: { sentences: string[] }) => p.sentences.join(" ");
+    const key = said.length === 1 ? words(said[0]!) : said.map((p) => `${p.narrator ? "N" : "C"}:${words(p)}`).join("\n|");
     return { hash: clipHash(engine, voice, key), text: spoken, voice, parts };
   }
 
   // A stage direction, read by the narrator (a voice no character has).
   directionRequest(engine: string, text: string): TtsRequest | null {
-    const spoken = speakableDirection(text);
-    if (!spoken) return null;
-    return { hash: clipHash(engine, NARRATOR, spoken), text: spoken, voice: NARRATOR, parts: [{ voice: NARRATOR, text: spoken, narrator: true }] };
+    const sentences = spokenSentences(speakableDirection(text));
+    if (!sentences.length) return null;
+    const spoken = sentences.join("\n");
+    return { hash: clipHash(engine, NARRATOR, sentences.join(" ")), text: spoken, voice: NARRATOR, parts: [{ voice: NARRATOR, text: spoken, narrator: true }] };
   }
 
   // The clips that exist for these hashes. With a production, each one found is recorded as used by
@@ -304,8 +311,8 @@ export class TtsService {
       const m4a = path.join(dir, "clip.m4a");
       if (!clip) {
         const wav = path.join(dir, "clip.wav");
-        // One utterance per printed line, in its part's voice, joined with a pause, so verse isn't
-        // run together and a direction inside a line is heard in the narrator's voice.
+        // One utterance per sentence, in its part's voice, joined with a pause, so a direction
+        // inside a line is heard in the narrator's voice.
         const pieces: { file: string; text: string; voice: Voice; narrator: boolean; gapBeforeMs: number }[] = [];
         r.parts.forEach((part, pi) =>
           part.text.split("\n").forEach((text, li) =>
@@ -314,7 +321,7 @@ export class TtsService {
               text,
               voice: part.voice,
               narrator: part.narrator,
-              gapBeforeMs: pieces.length === 0 ? 0 : li === 0 && pi > 0 ? VOICE_SWITCH_MS : TTS_SETTINGS.lineBreakMs,
+              gapBeforeMs: pieces.length === 0 ? 0 : li === 0 && pi > 0 ? VOICE_SWITCH_MS : TTS_SETTINGS.sentenceGapMs,
             }),
           ),
         );

@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 // Joins PCM WAV files from one voice (so one format) into a single WAV, with `gapMs` of silence
-// between them. Piper writes one file per printed line; the gap is the pause at each line break.
+// between them. Piper writes one file per sentence; the gap is the pause after each one.
 
 interface Pcm {
   fmt: Buffer; // the fmt chunk's body

@@ -110,7 +110,7 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 - Rows: scripts (with their raw text), sections, characters, lines, takes, renders, take mixes, practice runs and part assignments.
 - Cast details: a cast member's name, first name and phone are cleared unless they verified an email (`POST /api/invite/contact`, then the link sent to it); details tied to a verified email are kept, and so is a director's own cast row. Unverified addresses (`pending_email`) are cleared for everyone.
 - Kept: the production row as an archived tombstone (title kept, `content_deleted_at` set), the actor rows (so their links answer 410 "This production has wrapped" instead of looking forged), and notification records.
-- Synthesized speech (`tts_clips`, shared across productions by hash): every clip the production used (`tts_clip_uses`), its lines' current clips, any clip that speaks one of its printed lines and any clip from before clips kept their text, files and rows, unless another production whose content is still there uses it.
+- Synthesized speech (`tts_clips`, shared across productions by hash): every clip the production used (`tts_clip_uses`), its lines' current clips, any clip that speaks one of its sentences or printed lines and any clip from before clips kept their text, files and rows, unless another production whose content is still there uses it.
 
 Cast and join links return 410 `invite_expired` afterwards, and the production drops out of `GET /api/productions`. The job is idempotent: a failure leaves `content_deleted_at` unset and the next pass finishes it. A take upload, normalization, mix, render or script upload that finishes after the deletion sweeps the folder again and fails (a take or script upload with 410 `content_deleted`).
 
@@ -290,7 +290,7 @@ interface LineAudio {
   durationMs: number;       // the clip's length; for a silent line, the render's placeholder silence
   source: AudioSource;      // "actor" | "director" | "tts" | "none"
   ready: boolean;           // false while the clip is still being made: ask again
-  segments?: SpokenSegment[]; // a synthesized clip: when each printed line (and narrated direction) is said
+  segments?: SpokenSegment[]; // a synthesized clip: when each sentence (and narrated direction) is said
   speech?: { startMs: number; endMs: number }[]; // a take: where the voice is (see "Take word timing")
   wordStartsMs?: number[];  // a take: when each word starts (see "Take word timing")
 }

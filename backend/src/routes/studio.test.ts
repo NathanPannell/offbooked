@@ -9,6 +9,9 @@ import { processDueRenders } from "../render/queue.ts";
 import { SEED_SCENE } from "../seed-scene.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "../test/helpers.ts";
 import { FakeSynthesizer } from "../test/tts.ts";
+import { spokenParts, spokenSentences, TTS_SETTINGS } from "../tts/voices.ts";
+
+const utterancesOf = (text: string) => spokenParts(text).reduce((n, part) => n + spokenSentences(part.text).length, 0);
 
 interface Line {
   id: string;
@@ -84,13 +87,20 @@ describe("the director's takes and TTS", { skip: dbSkip }, () => {
       rt.timing.every((e) => e.source === "tts" && !e.recorded && e.endMs > e.startMs),
       JSON.stringify(rt.timing.slice(0, 3)),
     );
-    // The fake speaks 250 ms per word; trimmed and loudness-normalized, the clip keeps about that length.
+    // The fake speaks 250 ms per word, one utterance per sentence with a gap after each; trimmed and
+    // loudness-normalized, the clip keeps about that length.
     const first3 = rt.timing[0]!;
     const words = dialogue()[0]!.text.split(/\s+/).length;
-    assert.ok(Math.abs(first3.endMs - first3.startMs - words * 250) < 150, `${first3.endMs - first3.startMs} ms for ${words} words`);
+    const gaps = (utterancesOf(dialogue()[0]!.text) - 1) * TTS_SETTINGS.sentenceGapMs;
+    assert.ok(Math.abs(first3.endMs - first3.startMs - words * 250 - gaps) < 150, `${first3.endMs - first3.startMs} ms for ${words} words`);
 
     const synthesized = fake.calls.length;
-    assert.equal(synthesized, new Set(dialogue().map((l) => `${l.characterId}|${l.text}`)).size);
+    const unique = [...new Map(dialogue().map((l) => [`${l.characterId}|${l.text}`, l.text])).values()];
+    assert.equal(
+      synthesized,
+      unique.reduce((n, text) => n + utterancesOf(text), 0),
+      "each line once, one utterance per sentence",
+    );
     const voiceOf = new Map<string, Set<string>>();
     for (const call of fake.calls) {
       const line = dialogue().find((l) => l.text.replace(/\s+/g, " ").includes(call.text.slice(0, 30)))!;
