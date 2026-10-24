@@ -127,9 +127,13 @@ function spread(pieces: Piece[], fromMs: number, toMs: number, out: Span[]) {
   }
 }
 
-/** Lead-in and tail around the words of a recorded take (already trimmed to the speech). */
-export const LEAD_MS = 120;
-export const TAIL_MS = 220;
+/**
+ * Lead-in and tail around the words of a recorded take (already trimmed to the speech): about the
+ * trim's pads (TRIM in backend/src/render/trim.ts, 250 ms each side), less the soft start of the
+ * first word and plus the voice dying away after the last.
+ */
+export const LEAD_MS = 220;
+export const TAIL_MS = 290;
 /** Piper leaves about this much quiet after each utterance, inside its segment. */
 export const SEGMENT_TAIL_MS = 180;
 

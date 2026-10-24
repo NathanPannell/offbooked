@@ -167,9 +167,9 @@ describe("wordTimes for a recorded take", () => {
   });
 
   it("ends the last word at the clip's end less the tail without speech stretches", () => {
-    const times = wordTimes(tokens, { durationMs: 3000, wordStartsMs: [100, 450, 900, 1800, 2100, 2300] });
+    const times = wordTimes(tokens, { durationMs: 4000, wordStartsMs: [100, 450, 900, 1800, 2100, 2300] });
     expect(times[2]!.endMs).toBe(1800);
-    expect(times[5]!.endMs).toBe(3000 - TAIL_MS);
+    expect(times[5]!.endMs).toBe(4000 - TAIL_MS);
   });
 
   it("never runs a word backwards when the starts are out of order", () => {

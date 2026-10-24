@@ -22,8 +22,8 @@ const exec = promisify(execFile);
 export const TRIM = {
   frameMs: 10,
   analysisRate: 16_000,
-  leadPadMs: 150, // kept before the first word's sound, for the softest part of its onset
-  tailPadMs: 180, // kept after the last word's, for the decay of the voice
+  leadPadMs: 250, // kept before the first word's sound, for the softest part of its onset and a breath of room (150 until t7)
+  tailPadMs: 250, // kept after the last word's, for the decay of the voice (180 until t7)
   minRunMs: 40, // sound must last this long to count as speech (a click is 5–20 ms)
   minRangeDb: 10, // below this between floor and speech, the clip can't be told apart: keep it whole
   pauseMs: 150, // a quiet gap this long inside the speech splits it into two stretches (see speechStretches)
