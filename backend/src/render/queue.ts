@@ -251,13 +251,29 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
 async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string, productionId: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!ctx.tts || !requests.length) return result;
-  const clips = [...(await ctx.tts.ensure(requests, { priority: TTS_PRIORITY.render, productionId })).values()];
+  const tts = ctx.tts;
+  const clips = [...(await tts.ensure(requests, { priority: TTS_PRIORITY.render, productionId })).values()];
+  const byHash = new Map(requests.map((r) => [r.hash, r]));
   await eachLimit(clips, 8, async (clip) => {
+    const fetch = async (c: { hash: string; storageKey: string; samples: number }) => {
+      await writeFile(path.join(workDir, `tts-${c.hash}.flac`), await ctx.storage.get(c.storageKey));
+      result.set(c.hash, c.samples);
+    };
     try {
-      await writeFile(path.join(workDir, `tts-${clip.hash}.flac`), await ctx.storage.get(clip.storageKey));
-      result.set(clip.hash, clip.samples);
+      await fetch(clip);
     } catch (err) {
-      ctx.log.warn({ err, key: clip.storageKey }, "tts clip missing from storage; rendering silence");
+      // Its file went with another show's deletion (they shared the words): made again, once,
+      // rather than leaving this render silent on that line for good.
+      try {
+        const request = byHash.get(clip.hash);
+        if (!request || (await ctx.storage.exists(clip.storageKey))) throw err;
+        await tts.forget(clip.hash);
+        const again = (await tts.ensure([request], { priority: TTS_PRIORITY.render, productionId })).get(clip.hash);
+        if (!again) throw err;
+        await fetch(again);
+      } catch (retryErr) {
+        ctx.log.warn({ err: retryErr, key: clip.storageKey }, "tts clip missing from storage; rendering silence");
+      }
     }
   });
   return result;

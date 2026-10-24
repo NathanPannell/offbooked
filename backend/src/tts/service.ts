@@ -210,19 +210,22 @@ export class TtsService {
     const fresh = [...new Set(hashes)].filter((h) => !this.used.has(`${productionId}:${h}`));
     if (!fresh.length) return;
     try {
-      const [row] = await this.sql<{ deleted: boolean }[]>`
-        with recorded as (
+      // `recorded`: the uses this statement wrote, plus those already there. A hash whose clip was
+      // deleted meanwhile is in neither, so it is asked about again once the clip is made again.
+      const [row] = await this.sql<{ deleted: boolean; recorded: string[] }[]>`
+        with inserted as (
           insert into tts_clip_uses (hash, production_id)
           select hash, ${productionId}::uuid from tts_clips where hash = any(${fresh}::text[])
-          on conflict do nothing)
-        select p.content_deleted_at is not null or o.deleted_at is not null as deleted
+          on conflict do nothing returning hash)
+        select p.content_deleted_at is not null or o.deleted_at is not null as deleted,
+          array(select hash from inserted union select hash from tts_clip_uses where production_id = ${productionId} and hash = any(${fresh}::text[])) as recorded
         from productions p join users o on o.id = p.owner_id where p.id = ${productionId}`;
       if (row?.deleted) {
         await deleteClipsOfDeleted({ sql: this.sql, storage: this.storage }, productionId, fresh);
         return;
       }
       if (this.used.size > 100_000) this.used.clear();
-      for (const h of fresh) this.used.add(`${productionId}:${h}`);
+      for (const h of row?.recorded ?? []) this.used.add(`${productionId}:${h}`);
     } catch (err) {
       this.log.error({ err, productionId }, "recording tts clip uses failed");
     }
@@ -242,14 +245,26 @@ export class TtsService {
     // Background batches are grouped by model so pooled Piper processes rarely switch models.
     // Interactive ones keep their order: the first line is the one someone is waiting for.
     if (priority >= TTS_PRIORITY.cue) missing.sort((a, b) => a.voice.model.localeCompare(b.voice.model));
-    const done = await Promise.all(missing.map((r) => this.one(r, result.get(r.hash), Boolean(opts.cue), priority)));
+    // Each clip's use is recorded the moment it lands, not when the batch ends (a render's can take
+    // minutes): until then, deleting another show with the same words could take it.
+    const pid = opts.productionId;
+    const done = await Promise.all(
+      missing.map((r) =>
+        this.one(r, result.get(r.hash), Boolean(opts.cue), priority).then(async (clip) => {
+          if (clip && pid) await this.recordUses(pid, [clip.hash]);
+          return clip;
+        }),
+      ),
+    );
     for (const clip of done) if (clip) result.set(clip.hash, clip);
-    if (opts.productionId)
-      await this.recordUses(
-        opts.productionId,
-        done.flatMap((c) => (c ? [c.hash] : [])),
-      );
     return result;
+  }
+
+  // A clip whose file is gone (another show's deletion took it between a lookup and its use):
+  // dropped, so the next ensure makes it again instead of finding the row.
+  async forget(hash: string): Promise<void> {
+    await this.sql`delete from tts_clips where hash = ${hash}`;
+    for (const key of [...this.used]) if (key.endsWith(`:${hash}`)) this.used.delete(key);
   }
 
   // Clips waiting for a synthesis slot (for logs and tests).

@@ -19,6 +19,9 @@ import {
 } from "./retention.ts";
 import { notifyActorsDone, notifyCastComplete } from "./email/notify.ts";
 import { performanceDates } from "./routes/productions.ts";
+import { silentLog } from "./log.ts";
+import { deleteProductionClips, productionSpeech } from "./tts/cleanup.ts";
+import { TTS_PRIORITY, TtsService } from "./tts/service.ts";
 import { SEED_SCENE } from "./seed-scene.ts";
 import type { LocalStorage } from "./storage/local.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "./test/helpers.ts";
@@ -470,6 +473,59 @@ describe("content retention", { skip: dbSkip }, () => {
     await t.ctx.tts!.cached(["late-clip"], id);
     assert.equal((await t.ctx.sql`select 1 from tts_clips where hash = 'late-clip'`).length, 0);
     assert.equal(await exists(path.join(root, "tts", "late-clip.flac")), false);
+  });
+
+  test("a live show's speech is safe from a deletion while it's being made, and a lost clip is made again", { timeout: 90_000 }, async () => {
+    const root = (t.ctx.storage as LocalStorage).root;
+    const LINES = "MIRANDA: O brave new world.\nPROSPERO: Tis new to thee, my girl.\n";
+    const live = await productionWithScript(t, director, LINES, "Live Tempest");
+    const doomed = await productionWithScript(t, director, LINES, "Doomed Tempest");
+    // A synthesizer that holds PROSPERO's line, so MIRANDA's clip lands while the batch still runs.
+    const fake = new FakeSynthesizer();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const tts = new TtsService({
+      sql: t.ctx.sql,
+      storage: t.ctx.storage,
+      log: silentLog,
+      concurrency: 2,
+      synthesizer: {
+        probe: () => fake.probe(),
+        close: async () => {},
+        synthesize: async (text, voice, out) => {
+          if (text.includes("Tis new")) await held;
+          await fake.synthesize(text, voice, out);
+        },
+      },
+    });
+    const engine = (await tts.engine())!;
+    const voices = await tts.voices(live.id);
+    const requests = live.script.lines
+      .filter((l: { kind: string }) => l.kind === "dialogue")
+      .map((l: { characterId: string; text: string }) => tts.request(engine, voices.get(l.characterId), l.text)!);
+    const first = requests.find((r: { text: string }) => r.text.includes("brave"))!;
+    const batch = tts.ensure(requests, { productionId: live.id, priority: TTS_PRIORITY.play });
+    await waitFor(async () => (await t.ctx.sql`select 1 from tts_clip_uses where hash = ${first.hash} and production_id = ${live.id}`).length > 0);
+    // The other show, with the same words, goes now: the live show's landed clip is recorded as its, so it stays.
+    await deleteProductionClips(t.ctx, doomed.id, await productionSpeech({ sql: t.ctx.sql, tts }, doomed.id));
+    assert.equal((await t.ctx.sql`select 1 from tts_clips where hash = ${first.hash}`).length, 1);
+    assert.ok(await exists(path.join(root, "tts", `${first.hash}.flac`)));
+    release();
+    assert.equal((await batch).size, 2);
+
+    // If a clip's file is lost anyway (shared, before its use was recorded), the render makes it again.
+    await scheduleRender(t.ctx, live.id, { force: true });
+    await processDueRenders(t.ctx);
+    await t.ctx.jobs.idle();
+    const [used] = await t.ctx.sql<{ hash: string; storageKey: string }[]>`
+      select c.hash, c.storage_key from tts_clips c join tts_clip_uses u on u.hash = c.hash where u.production_id = ${live.id} limit 1`;
+    await t.ctx.storage.deleteKeys([used!.storageKey]);
+    await scheduleRender(t.ctx, live.id, { force: true });
+    await processDueRenders(t.ctx);
+    await t.ctx.jobs.idle();
+    assert.ok(await exists(path.join(root, ...used!.storageKey.split("/"))), "the lost clip was synthesized again");
+    const [render] = await t.ctx.sql<{ status: string }[]>`select status from renders where production_id = ${live.id} order by created_at desc limit 1`;
+    assert.equal(render!.status, "ready");
   });
 
   test("a take that lands while an account is deleted emails nobody", { timeout: 60_000 }, async () => {

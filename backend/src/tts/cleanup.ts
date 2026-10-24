@@ -14,6 +14,7 @@ import { speakableDirection, spokenParts } from "./voices.ts";
 //   or settings that nothing records;
 // - it has no timings at all. Those were made before clips recorded their text (migration 010) and
 //   before settings version 3, so no current hash can ever ask for them again.
+// One gap: a clip made before tts_clip_uses existed, for a line edited since, matches none of these.
 // Keeping a clip needs a recorded use by another production whose content is still there. Deleting
 // one that another production happens to share but never recorded (identical text, same voice) is
 // harmless: it is synthesized again the next time that production asks for it.
@@ -47,17 +48,29 @@ async function currentHashes(sql: Sql, tts: TtsService | null, productionId: str
   });
 }
 
-/**
- * Deletes the clips only this production uses (see above). Run before its lines are deleted, since
- * they say which clips are its. Files first, then rows: a failure leaves the rows, so the next pass
- * finds the same clips again. Returns how many storage objects went.
- */
-export async function deleteProductionClips(deps: { sql: Sql; storage: Storage; tts: TtsService | null }, productionId: string): Promise<number> {
-  const { sql } = deps;
-  const lines = await sql<{ kind: string; text: string }[]>`
+/** What says a clip is this production's: its lines' printed pieces and current hashes. */
+export interface ProductionSpeech {
+  pieces: string[];
+  hashes: string[];
+}
+
+/** Read before the production's lines are deleted, since they say which clips are its. */
+export async function productionSpeech(deps: { sql: Sql; tts: TtsService | null }, productionId: string): Promise<ProductionSpeech> {
+  const lines = await deps.sql<{ kind: string; text: string }[]>`
     select kind, text from lines where production_id = ${productionId} and kind in ('dialogue', 'stage_direction')`;
-  const pieces = spokenPieces(lines);
-  const hashes = await currentHashes(sql, deps.tts, productionId);
+  return { pieces: spokenPieces(lines), hashes: await currentHashes(deps.sql, deps.tts, productionId) };
+}
+
+/**
+ * Deletes the clips only this production uses (see above). Files first, then rows: a failure
+ * leaves the rows, so the next pass finds the same clips again. The purge runs it twice, before
+ * and after the transaction that marks the content deleted, so a synthesis that lands in between
+ * goes too (any later one sees the production deleted, recordUses). Returns how many storage
+ * objects went.
+ */
+export async function deleteProductionClips(deps: { sql: Sql; storage: Storage }, productionId: string, speech: ProductionSpeech): Promise<number> {
+  const { sql } = deps;
+  const { pieces, hashes } = speech;
   const clips = await sql<ClipFiles[]>`
     select c.hash, c.storage_key, c.cue_key from tts_clips c
     where (c.timings is null

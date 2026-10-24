@@ -1,6 +1,6 @@
 import type { Ctx } from "./context.ts";
 import type { Sql } from "./db.ts";
-import { deleteProductionClips } from "./tts/cleanup.ts";
+import { deleteProductionClips, productionSpeech } from "./tts/cleanup.ts";
 
 // Content retention. A production's script content and recordings are deleted 7 days after its
 // final performance (performance_ends_on), on that day at 12:00 UTC, so the date the director sees
@@ -109,16 +109,17 @@ export async function deleteAccount(ctx: Ctx, userId: string): Promise<{ product
 // to a verified email (and a director's own cast row, tied to their account) and the title;
 // `account` clears those too (again: deleteAccount cleared them, but a production created while it
 // ran has its own). Its synthesized speech goes too, unless another production uses it
-// (tts/cleanup.ts): read before the lines go, since they say which clips are its. Returns how many
-// storage objects went.
+// (tts/cleanup.ts): which clips are its is read before the lines go, and they are swept again after
+// the transaction, like the folder, for a synthesis that landed meanwhile. Returns how many storage
+// objects went.
 async function purgeProduction(ctx: Ctx, productionId: string, reason: "retention" | "account"): Promise<number> {
   const { sql, storage } = ctx;
   const prefix = `productions/${productionId}/`;
   let objects = await storage.deletePrefix(prefix);
-  objects += await deleteProductionClips(ctx, productionId);
+  const speech = await productionSpeech(ctx, productionId);
+  objects += await deleteProductionClips(ctx, productionId, speech);
   await sql.begin(async (tx) => {
     await tx`select 1 from productions where id = ${productionId} for update`;
-    await tx`delete from tts_clip_uses where production_id = ${productionId}`;
     await tx`update lines set current_take_id = null where production_id = ${productionId} and current_take_id is not null`;
     await tx`delete from practice_runs where production_id = ${productionId}`;
     await tx`delete from take_mixes where production_id = ${productionId}`;
@@ -150,6 +151,8 @@ async function purgeProduction(ctx: Ctx, productionId: string, reason: "retentio
     await tx`update productions set content_deleted_at = coalesce(content_deleted_at, now()), script_status = 'none', script_error = null where id = ${productionId}`;
   });
   objects += await storage.deletePrefix(prefix);
+  objects += await deleteProductionClips(ctx, productionId, speech);
+  await sql`delete from tts_clip_uses where production_id = ${productionId}`;
   ctx.log.info({ productionId, objects }, `production content deleted (${reason})`);
   return objects;
 }
