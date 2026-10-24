@@ -20,7 +20,7 @@ export interface LineAudioView {
   durationMs: number; // the clip's length; for a silent line, how long the render's silence lasts
   source: AudioSource;
   ready: boolean; // false while the clip is still being made; ask again
-  // A synthesized line: when each printed line (and narrated direction) is said, for highlighting
+  // A synthesized line: when each sentence (and narrated direction) is said, for highlighting
   // words as they are read. Absent for takes and silent lines.
   segments?: SpokenSegment[];
   // A take (not a mix of several): where the voice is in the clip, split on pauses. Absent for TTS.

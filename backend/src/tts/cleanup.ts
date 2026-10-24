@@ -1,7 +1,7 @@
 import type { Sql } from "../db.ts";
 import type { Storage } from "../storage/storage.ts";
 import type { TtsService } from "./service.ts";
-import { speakableDirection, spokenParts } from "./voices.ts";
+import { speakableDirection, spokenParts, spokenSentences } from "./voices.ts";
 
 // Synthesized speech is shared across productions by content hash (tts_clips), and every clip is
 // some production's lines read aloud, with their text kept in timings for word highlighting. So
@@ -10,7 +10,7 @@ import { speakableDirection, spokenParts } from "./voices.ts";
 // production still uses them. A clip is this production's when any of these holds:
 // - it is recorded as used by it (tts_clip_uses);
 // - it is what one of its lines is synthesized as now (the same hash the player asks for);
-// - it speaks one of its lines' printed lines (timings), which finds clips made under older engines
+// - it speaks one of its lines' sentences or printed lines (timings), which finds clips made under older engines
 //   or settings that nothing records;
 // - it has no timings at all. Those were made before clips recorded their text (migration 010) and
 //   before settings version 3, so no current hash can ever ask for them again.
@@ -25,12 +25,12 @@ interface ClipFiles {
   cueKey: string | null;
 }
 
-/** The printed lines a production's lines are spoken as, the text a clip's timings hold. */
+/** The text a clip's timings hold for a production's lines: their sentences, and for clips made before speech went by sentence, their printed lines. */
 export function spokenPieces(lines: { kind: string; text: string }[]): string[] {
   const pieces = new Set<string>();
   for (const l of lines) {
     const said = l.kind === "stage_direction" ? [speakableDirection(l.text)] : spokenParts(l.text).map((p) => p.text);
-    for (const text of said) for (const piece of text.split("\n")) if (piece.trim()) pieces.add(piece);
+    for (const text of said) for (const piece of [...text.split("\n"), ...spokenSentences(text)]) if (piece.trim()) pieces.add(piece);
   }
   return [...pieces];
 }

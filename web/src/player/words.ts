@@ -2,7 +2,7 @@ import type { SpokenSegment } from "../api/types";
 
 // Word-by-word timing for the run-through: which word of a line is being said at a moment of its
 // clip. A recorded take can say when each word starts (`wordStartsMs`), or at least where its speech
-// is (`speech`); a synthesized clip says when each printed line (and each narrated [direction]) is
+// is (`speech`); a synthesized clip says when each sentence (and each narrated [direction]) is
 // spoken. Whatever isn't known is spread over the words by weight.
 
 /** A word as printed: its place in the line's text and what of it is said. */
@@ -142,7 +142,7 @@ export interface Span {
 /** What is known about when a clip's words are said. */
 export interface ClipTimings {
   durationMs: number;
-  /** A synthesized clip: when each printed line (and narrated [direction]) is said. */
+  /** A synthesized clip: when each sentence (and narrated [direction]) is said. */
   segments?: SpokenSegment[];
   /** A take: when each spoken piece starts. Used only with exactly one per piece. */
   wordStartsMs?: number[];
