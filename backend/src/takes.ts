@@ -7,8 +7,8 @@ import { isUuid } from "./crypto.ts";
 import { HttpError, badRequest, conflict, notFound } from "./errors.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
 import { probeDurationSeconds } from "./render/ffmpeg.ts";
+import { checkCastComplete } from "./render/queue.ts";
 import { normalizeSoon } from "./render/takeaudio.ts";
-import { scheduleRender } from "./render/queue.ts";
 import { ContentDeletedError, sweepIfDeleted } from "./retention.ts";
 import { parseWordStarts } from "./taketiming.ts";
 import { takeColumns, takeView, type TakeRow } from "./views.ts";
@@ -159,7 +159,8 @@ export async function setTakeDeleted(ctx: Ctx, takeId: string, deleted: boolean)
     }
     return rows;
   });
-  if (take) await scheduleRender(ctx, take.productionId);
+  // Putting a take back can complete the cast.
+  if (take && !deleted) checkCastComplete(ctx, take.productionId);
 }
 
 const PARTS_DIR = path.join(tmpdir(), "offbooked-take-parts");

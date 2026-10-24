@@ -45,8 +45,9 @@ describe("the director's takes and TTS", { skip: dbSkip }, () => {
   const actorTake = (who: { inviteUrl: string }, lineId: string) => put(`/api/invite/lines/${lineId}/take`, invite(who.inviteUrl));
   const get = (url: string, token = alice) => t.app.inject({ method: "GET", url, headers: bearer(token) });
   const runthrough = async (id = pid) => (await get(`/api/productions/${id}/runthrough`)).json();
+  // The stitched render is built only when asked for.
   const render = async () => {
-    await t.ctx.sql`update renders set run_after = now() where status = 'queued'`;
+    await t.app.inject({ method: "POST", url: `/api/productions/${pid}/render`, headers: bearer(alice) });
     await processDueRenders(t.ctx);
     return (await runthrough()).render as { status: string; stale: boolean; timing: Timing[] };
   };
@@ -74,7 +75,7 @@ describe("the director's takes and TTS", { skip: dbSkip }, () => {
 
   test("the first run-through of a fresh script is all TTS, with one voice per character", async () => {
     const first = await runthrough();
-    assert.equal(first.render.status, "queued", "opening the run-through queues the first render");
+    assert.equal(first.render.status, "none", "opening the run-through doesn't build the stitched render");
     const rt = await render();
     assert.equal(rt.status, "ready");
     assert.equal(rt.stale, false);
@@ -102,17 +103,16 @@ describe("the director's takes and TTS", { skip: dbSkip }, () => {
     assert.equal(new Set([...voiceOf.values()].map((v) => [...v][0])).size, voiceOf.size, "characters get different voices");
 
     // A forced rebuild reuses every cached clip.
-    await t.app.inject({ method: "POST", url: `/api/productions/${pid}/render`, headers: bearer(alice) });
     await render();
     assert.equal(fake.calls.length, synthesized);
 
-    // Editing an unrecorded line makes the render stale; opening the run-through rebuilds it and
-    // only that line is synthesized again.
+    // Editing an unrecorded line makes the render stale; opening the run-through no longer rebuilds
+    // it, and a rebuild asked for synthesizes only that line again.
     const edited = dialogue()[1]!;
     await t.app.inject({ method: "PATCH", url: `/api/lines/${edited.id}`, headers: bearer(alice), payload: { text: "Something else entirely now." } });
     const stale = await runthrough();
     assert.equal(stale.render.stale, true);
-    assert.equal(stale.render.status, "queued");
+    assert.equal(stale.render.status, "ready");
     assert.equal((await render()).stale, false);
     assert.equal(fake.calls.length, synthesized + 1);
     assert.equal(fake.calls.at(-1)!.text, "Something else entirely now.");
@@ -132,7 +132,7 @@ describe("the director's takes and TTS", { skip: dbSkip }, () => {
     const [{ n }] = await t.ctx.sql<{ n: number }[]>`select count(*)::int as n from takes where id = ${takeId}`;
     assert.equal(n, 1);
     const [queued] = await t.ctx.sql`select 1 from renders where production_id = ${pid} and status = 'queued'`;
-    assert.ok(queued, "a take schedules the debounced render");
+    assert.equal(queued, undefined, "a take no longer queues the stitched render");
 
     assert.equal((await record(line.id, bob)).statusCode, 404, "another director's line");
     assert.equal((await record(line.id, bob, takeId)).statusCode, 404, "another director can't replay a take id either");

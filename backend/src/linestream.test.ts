@@ -300,7 +300,8 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
 
   test("the render reuses clips made for playback, and playback reuses the render's", async () => {
     synth.releaseAll();
-    await t.ctx.sql`update renders set run_after = now() where status = 'queued'`;
+    // Built only when asked for.
+    await t.app.inject({ method: "POST", url: `/api/productions/${pid}/render`, headers: bearer(alice) });
     await processDueRenders(t.ctx);
     const rt = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json();
     assert.equal(rt.render.status, "ready", JSON.stringify(rt.render.status));
