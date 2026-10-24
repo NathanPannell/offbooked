@@ -4,6 +4,7 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "git": { "deploymentEnabled": { "**": false, "main": true } },
   "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]",
   "rewrites": [{ "source": "/((?!assets/|models/|\\.well-known/).*)", "destination": "/index.html" }],
   "headers": [

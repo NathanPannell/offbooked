@@ -83,7 +83,7 @@ Neon branches: the project (`mute-math-90372176`) keeps `production` (default) a
 ## Web hosting (Vercel) and DNS
 
 - `offbooked.com` was bought through Vercel and uses Vercel DNS, in team `nathanpannells-projects` (`team_CJ0RWNsNJK6vDQy2raakV6cZ`). The Vercel MCP connector cannot see this team; use `VERCEL_TOKEN` from the Windows user environment.
-- Vercel project `offbooked` (`prj_6C9NIcC5InImQXSAZWflMJhYFJYx`), root directory `web`, Git-linked to this repo. A push to `main` deploys production. Every other branch is skipped by `ignoreCommand` in `web/vercel.json`, so there are no preview deployments. The same check skips a `vercel --prod` CLI deploy (it has no Git ref); production web deploys come only from `main` through Git.
+- Vercel project `offbooked` (`prj_6C9NIcC5InImQXSAZWflMJhYFJYx`), root directory `web`, Git-linked to this repo. A push to `main` deploys production. Only `main` creates a Vercel deployment: `git.deploymentEnabled` in `web/vercel.json` turns every other branch, `staging` included, off, so Vercel never creates a deployment for them (an ignored build still creates a CANCELED deployment, and those count toward the Hobby plan's 100 deployments a day). `ignoreCommand` stays as a second guard. There are no preview deployments. The same check skips a `vercel --prod` CLI deploy (it has no Git ref); production web deploys come only from `main` through Git.
 - Domains: `offbooked.com` (production), `www.offbooked.com` redirects to it with a 308.
 - DNS records for the backend: `api` CNAME to Railway's target and the `_railway-verify.api` TXT record. Don't remove them.
 
