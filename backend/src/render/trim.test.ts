@@ -57,7 +57,7 @@ const voicedIn =
 
 describe("ends anchored on the voice", () => {
   // A hands-free take: a breath in, the line, the exhale, and the breath for the next line.
-  const take = levels([-70, 300], [-35, 300], [-70, 150], [-20, 800], [-70, 200], [-38, 400], [-70, 600], [-34, 300], [-70, 200]);
+  const take = levels([-70, 300], [-35, 300], [-70, 150], [-20, 800], [-70, 200], [-38, 400], [-70, 600], [-34, 300], [-70, 400]);
 
   test("breaths before and after the line are cut", () => {
     const b = speechBounds(take, 10, voicedIn([750, 1550]))!;
