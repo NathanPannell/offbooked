@@ -10,3 +10,7 @@ Re-record them when the pass schedule or the model changes (not when only the ma
 4. `REPLAY_REPORT=1 npx vitest run src/stt/liveReplay.test.ts --silent=false` prints every take.
 
 Keep the audio out of the repo; only the levels and passes are committed.
+
+## Whisper end-of-line check
+
+`whisper-endcheck.mjs` asks whether a teacher-forced Whisper tiny.en check ("did they say these next words?") would end takes better than Moonshine and the live tracker, on the same takes (step 2's folder): false ends mid-line, how often the end is heard 300 and 700 ms after the last word, and the time of one check against one Moonshine pass. `endcheck-models.mjs` loads both models on the page's main thread so the CPU throttle (4 for a mid-range phone) slows both alike. With `npm run dev` running: `node bench/live/whisper-endcheck.mjs <workspace>/.claude/tmp/live/takes 4`. The results and the decision are in `docs/on-device-stt.md` ("End-of-line check with Whisper").
