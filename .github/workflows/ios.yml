@@ -10,7 +10,7 @@ name: iOS
 # See docs/mobile.md.
 on:
   pull_request:
-    branches: [staging, main]
+    branches: [main]
     paths: ["web/**", ".github/workflows/ios.yml"]
   push:
     branches: [main]

@@ -16,14 +16,14 @@ Every change ships the same way, through the `deliver` skill (`~/.claude/skills/
 
 1. Branch from the latest `origin/staging` (`feat/`, `fix/`, `chore/` or `ci/<name>`), in the session's worktree or `<workspace>/.claude/worktrees/<branch>/`. Scratch files (logs, screenshots, throwaway databases) go in `<workspace>/.claude/tmp/<branch>/`, outside the repository, and can be deleted freely.
 2. Open a **draft** PR against `staging`.
-3. CI (`ci.yml`) is the gate. It runs on every PR into `staging` or `main` and on each push to `staging` or `main`, with these jobs:
+3. CI (`ci.yml`) runs only on PRs into `main` and pushes to `main` (owner's decision, 2026-10-24). For a PR into `staging`, run the same jobs locally; they are the gate there. The jobs:
    - **Backend**: `npm ci`, Prettier, ESLint with zero warnings, `tsc`, migrations applied twice to a throwaway Postgres 17 service container (the second run must be a no-op), and the tests with a coverage floor (`test:coverage`, which includes the render and retention workers' idle-no-queries tests). In CI the DB tests must run: `src/test/helpers.ts` fails without `DATABASE_URL`.
    - **Web**: `npm ci`, Prettier, ESLint with zero warnings, `tsc`, Vitest with a coverage floor (`vite.config.ts`), and the production build.
    - **E2E**: the web app built against a local API, served by `vite preview`, with the real backend on a throwaway Postgres (`web/playwright.config.ts`). The journeys in `web/e2e/` run on desktop and phone Chromium: a director signs in, uploads a script and copies the cast link; a cast member opens it, skips the intro, picks a part and reaches their lines. The report and traces are uploaded when it fails.
    - **Docker**: builds the Railway image and checks Piper speaks inside it.
    - **Security**: `npm audit --audit-level=high` for both packages, no committed `.env` files, and a gitleaks scan of the full history.
-4. Review the diff, fix blocking findings, mark the PR ready once every check is green on the head commit, and squash-merge into `staging`. Confirm CI passes for the merge commit on `staging`. Merging into `staging` deploys nothing.
-5. Production is a separate PR from `staging` to `main`, made only when the user asks and merged only with their approval. A push to `main` deploys the backend (`deploy-backend.yml`) and the web app (Vercel).
+4. Review the diff, fix blocking findings, mark the PR ready once every local check is green on the head commit, and squash-merge into `staging`. Merging into `staging` deploys nothing.
+5. Production is a separate PR from `staging` to `main`, made only when the user asks, gated by CI, and merged only with their approval. A push to `main` deploys the backend (`deploy-backend.yml`) and the web app (Vercel).
 
 GitHub rulesets and branch protection need a paid plan for this private repo, so nothing stops a red PR from merging: merge only when every check is green on the head commit. Coverage floors are today's levels; raise them when coverage rises, never lower them. The backend floor counts only modules a test imports (Node's coverage), so give every new module a test. The React Compiler lint rules are off in `web/eslint.config.js` because the app doesn't use the compiler; the classic hook rules are errors.
 
