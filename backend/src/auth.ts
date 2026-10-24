@@ -1,7 +1,7 @@
 import type { FastifyRequest } from "fastify";
 import type { Ctx } from "./context.ts";
 import { sha256 } from "./crypto.ts";
-import { HttpError, notFound, unauthorized } from "./errors.ts";
+import { HttpError, notFound, productionDeleted, unauthorized } from "./errors.ts";
 import { inviteExpiresAt, parseInviteToken } from "./invite.ts";
 import { castFacingName } from "./names.ts";
 import { enforce, LIMITS } from "./ratelimit.ts";
@@ -68,15 +68,17 @@ export async function requireActor(ctx: Ctx, req: FastifyRequest): Promise<Actor
       archivedAt: Date | null;
       directorName: string | null;
       directorEmail: string;
+      ownerDeleted: boolean;
     }[]
   >`
     select a.id, a.name, a.first_name, case when a.email_verified_at is not null then nullif(btrim(a.email), '') end as email,
       a.pending_email, a.token_version, a.created_at, p.id as production_id, p.title,
       p.performance_ends_on::text as performance_ends_on, p.archived_at, u.name as director_name,
-      u.email as director_email
+      u.email as director_email, u.deleted_at is not null as owner_deleted
     from actors a join productions p on p.id = a.production_id join users u on u.id = p.owner_id
     where a.id = ${parsed.actorId}`;
   if (!row) throw unauthorized("This link doesn't work. Ask your director for the cast link.");
+  if (row.ownerDeleted) throw productionDeleted();
   const directorName = castFacingName(row.directorName, row.directorEmail);
   const gone = (message: string) => new HttpError(410, "invite_expired", message, { directorName, productionTitle: row.title });
   if (row.archivedAt) throw gone("This production has wrapped, so this link no longer works.");

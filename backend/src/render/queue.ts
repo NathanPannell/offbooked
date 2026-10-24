@@ -229,7 +229,7 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
           for (const [key, value] of await prepareMixes(ctx, job.productionId, lines, workDir)) samples.set(key, value);
           return samples;
         }),
-        prepareTts(ctx, requests, workDir).then((samples) => {
+        prepareTts(ctx, requests, workDir, job.productionId).then((samples) => {
           if (requests.length) log.info({ renderId: job.id, lines: requests.length, ready: samples.size, ms: Date.now() - started }, "render tts ready");
           return samples;
         }),
@@ -271,16 +271,36 @@ async function runRender(ctx: Ctx, job: { id: string; productionId: string; forc
 
 // Synthesizes (or reuses) a clip for each line without a take and downloads them. Lines whose
 // clip failed are left out and render as silence. Returns measured lengths in samples by hash.
-async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string): Promise<Map<string, number>> {
+async function prepareTts(ctx: Ctx, requests: TtsRequest[], workDir: string, productionId: string): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (!ctx.tts || !requests.length) return result;
-  const clips = [...(await ctx.tts.ensure(requests, { priority: TTS_PRIORITY.render })).values()];
+  const tts = ctx.tts;
+  const clips = [...(await tts.ensure(requests, { priority: TTS_PRIORITY.render, productionId })).values()];
+  const byHash = new Map(requests.map((r) => [r.hash, r]));
   await eachLimit(clips, 8, async (clip) => {
+    const fetch = async (c: { hash: string; storageKey: string; samples: number }) => {
+      await writeFile(path.join(workDir, `tts-${c.hash}.flac`), await ctx.storage.get(c.storageKey));
+      result.set(c.hash, c.samples);
+    };
     try {
-      await writeFile(path.join(workDir, `tts-${clip.hash}.flac`), await ctx.storage.get(clip.storageKey));
-      result.set(clip.hash, clip.samples);
+      await fetch(clip);
     } catch (err) {
-      ctx.log.warn({ err, key: clip.storageKey }, "tts clip missing from storage; rendering silence");
+      // Its file went with another show's deletion (they shared the words): made again, once,
+      // rather than leaving this render silent on that line for good. Not for a show that is itself
+      // being deleted: its speech is meant to go.
+      try {
+        const request = byHash.get(clip.hash);
+        if (!request) throw err;
+        if (await ctx.storage.exists(clip.storageKey)) return await fetch(clip); // made again meanwhile
+        const [gone] = await ctx.sql`select 1 from productions where id = ${productionId} and content_deleted_at is not null`;
+        if (gone) throw err;
+        await tts.forget(clip.hash);
+        const again = (await tts.ensure([request], { priority: TTS_PRIORITY.render, productionId })).get(clip.hash);
+        if (!again) throw err;
+        await fetch(again);
+      } catch (retryErr) {
+        ctx.log.warn({ err: retryErr, key: clip.storageKey }, "tts clip missing from storage; rendering silence");
+      }
     }
   });
   return result;

@@ -1,7 +1,7 @@
 import { ArrowRight, Check, Headphones } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
-import { ApiError, errorMessage } from "../../api/client";
+import { ApiError, errorMessage, PRODUCTION_DELETED } from "../../api/client";
 import { join } from "../../api/join";
 import type { JoinInfo } from "../../api/types";
 import { Brand } from "../../components/Brand";
@@ -79,6 +79,13 @@ function Join({ token }: { token: string }) {
           <div className="row waiting" role="status">
             <span className="spinner" aria-hidden="true" /> Checking every few seconds…
           </div>
+        </JoinMessage>
+      );
+    }
+    if (error instanceof ApiError && error.code === PRODUCTION_DELETED) {
+      return (
+        <JoinMessage title="This show is no longer on Offbooked">
+          <p>Its director took it down, with its recordings, so this link no longer works.</p>
         </JoinMessage>
       );
     }

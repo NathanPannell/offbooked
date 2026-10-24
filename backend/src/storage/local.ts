@@ -53,6 +53,11 @@ export class LocalStorage implements Storage {
     return count;
   }
 
+  async deleteKeys(keys: string[]): Promise<number> {
+    for (const key of keys) await rm(this.pathFor(key), { force: true });
+    return keys.length;
+  }
+
   async signedUrl(key: string, ttlSeconds = AUDIO_URL_TTL_SECONDS): Promise<string> {
     assertSafeKey(key);
     const exp = Math.floor(Date.now() / 1000) + ttlSeconds;

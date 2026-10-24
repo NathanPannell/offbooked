@@ -206,11 +206,14 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       if (req) requests.set(r.id, req);
     }
     tts.prewarm([...requests.values()].map((q) => q.voice));
-    clips = await tts.cached([...requests.values()].map((q) => q.hash));
+    clips = await tts.cached(
+      [...requests.values()].map((q) => q.hash),
+      productionId,
+    );
     const missing = [...requests.values()].filter((q) => !clips.get(q.hash)?.cueKey);
     if (missing.length) {
       ttsSettled = false;
-      const pending = tts.ensure(missing, { cue: true, priority: opts.priority }).then((made) => {
+      const pending = tts.ensure(missing, { cue: true, priority: opts.priority, productionId }).then((made) => {
         for (const [hash, clip] of made) clips.set(hash, clip);
         ttsSettled = true;
       });

@@ -108,8 +108,8 @@ export default function Account() {
       <Dialog open={confirmDelete} onClose={() => !deleting && setConfirmDelete(false)} title="Delete your account?" variant="confirm">
         <div className="stack">
           <p>
-            Every production you set up goes now, for good: its script, every recording your cast and you made, and your cast&rsquo;s names and emails. Their
-            links stop working. This can&rsquo;t be undone.
+            Every production you set up goes now, for good: its script and the voices that read it, every recording your cast and you made, and your
+            cast&rsquo;s names and emails. Their links stop working. This can&rsquo;t be undone.
           </p>
           {deleteError && (
             <p className="field-error" role="alert">
