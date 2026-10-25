@@ -110,10 +110,7 @@ export const Demo = forwardRef<DemoHandle>(function Demo(_, ref) {
       {!RECORDED && (
         <p className="mk-demo-placeholder" data-placeholder="real-cast-recording">
           <Headphones size={18} aria-hidden="true" />
-          <span>
-            <strong>Real-cast recording coming soon.</strong> A cast is recording this scene. Until it's in, the demo plays silently so you can see how a
-            listen-through moves.
-          </span>
+          <strong>Real-cast recording coming soon.</strong>
         </p>
       )}
       <div className="mk-demo-bar">
@@ -162,11 +159,6 @@ export const Demo = forwardRef<DemoHandle>(function Demo(_, ref) {
           );
         })}
       </ol>
-      <p className="mk-demo-note small muted">
-        {mode === "pause"
-          ? "In “Pause, then read” the play waits for you to say each of your lines out loud, then plays it."
-          : "Every line plays in the voice of the castmate who recorded it."}
-      </p>
       {RECORDED && <audio ref={audio} preload="auto" />}
       <p className="sr-only" aria-live="polite">
         {inGap && current ? "Your line. Say it now." : ""}

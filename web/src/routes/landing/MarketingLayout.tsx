@@ -56,7 +56,7 @@ export function MarketingLayout({ path, children, navCta = true }: { path: strin
       <footer className="mk-footer">
         <div className="mk-footer-brand">
           <Brand to="/" />
-          <p className="small muted">Hear your script read by your real cast. Made in Victoria, BC.</p>
+          <p className="small muted">Made in Victoria, BC.</p>
         </div>
         <ul className="mk-footer-links">
           <li>
