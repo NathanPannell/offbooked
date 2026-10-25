@@ -4,6 +4,7 @@ import { silenceUrl } from "../player/silence";
 import { playToEnd, type CueEnd, type CuePlay } from "./cue";
 import { rememberedMic, rememberMic } from "./micPrefs";
 import { micConstraints, MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
+import { applySpeed, getSpeed, usePlaybackSpeed } from "./speed";
 import { useWakeLock } from "./wakeLock";
 
 /** Only a safety net for a take left running by mistake: real takes never get near it. */
@@ -140,7 +141,8 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
  * One shared player for previews (takes and cues), so only one thing plays at a time. `playTogether`
  * plays several clips at once (a shared line: your take with the others'). `progress` is how far the
  * playing clip has got, 0 to 1. With `endMs`, playback ends there, as if the clip did (a take just
- * recorded, which still has the pause that ended it).
+ * recorded, which still has the pause that ended it). Everything plays at the app's playback speed
+ * (SpeedButton), and a change of speed applies to what is playing.
  */
 export function usePlayback(onError?: () => void) {
   const players = useRef<HTMLAudioElement[]>([]);
@@ -149,10 +151,14 @@ export function usePlayback(onError?: () => void) {
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
   const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Where the playing clip ends early (endMs), for the timer that ends it there. */
+  const endAt = useRef<{ key: string; audio: HTMLAudioElement; endMs: number } | null>(null);
+  const speed = usePlaybackSpeed();
 
   const stopAll = useCallback(() => {
     if (endTimer.current) clearTimeout(endTimer.current);
     endTimer.current = null;
+    endAt.current = null;
     for (const a of players.current) {
       a.onplaying = null;
       a.onpause = null;
@@ -163,6 +169,26 @@ export function usePlayback(onError?: () => void) {
   }, []);
 
   useEffect(() => () => stopAll(), [stopAll]);
+
+  // The timer that ends a clip at endMs, from where it is now at the speed it plays.
+  const scheduleEnd = useCallback(() => {
+    if (endTimer.current) clearTimeout(endTimer.current);
+    endTimer.current = null;
+    const end = endAt.current;
+    if (!end || end.audio.paused) return;
+    endTimer.current = setTimeout(
+      () => {
+        stopAll();
+        setPlaying((p) => (p === end.key ? null : p));
+      },
+      Math.max(0, end.endMs - end.audio.currentTime * 1000) / (end.audio.playbackRate || 1),
+    );
+  }, [stopAll]);
+
+  useEffect(() => {
+    for (const a of players.current) applySpeed(a, speed);
+    scheduleEnd();
+  }, [speed, scheduleEnd]);
 
   const playTogether = useCallback(
     (key: string, urls: string[], endMs: number | null = null) => {
@@ -175,9 +201,11 @@ export function usePlayback(onError?: () => void) {
       const used = players.current.slice(0, urls.length);
       let left = used.length;
       setProgress(0);
+      const rate = getSpeed();
       used.forEach((audio, i) => {
         audio.src = urls[i]!;
         audio.currentTime = 0;
+        applySpeed(audio, rate);
         audio.onended = () => {
           if (--left === 0) setPlaying((p) => (p === key ? null : p));
         };
@@ -198,14 +226,8 @@ export function usePlayback(onError?: () => void) {
         };
         if (endMs !== null && i === 0) {
           audio.onplaying = () => {
-            if (endTimer.current) clearTimeout(endTimer.current);
-            endTimer.current = setTimeout(
-              () => {
-                stopAll();
-                setPlaying((p) => (p === key ? null : p));
-              },
-              Math.max(0, endMs - audio.currentTime * 1000) / (audio.playbackRate || 1),
-            );
+            endAt.current = { key, audio, endMs };
+            scheduleEnd();
           };
         }
       });
@@ -218,7 +240,7 @@ export function usePlayback(onError?: () => void) {
         },
       );
     },
-    [playing, stopAll],
+    [playing, stopAll, scheduleEnd],
   );
 
   const play = useCallback((key: string, url: string, endMs: number | null = null) => playTogether(key, [url], endMs), [playTogether]);
@@ -233,7 +255,8 @@ export function usePlayback(onError?: () => void) {
 
 /**
  * Other people's takes playing along while you record a shared line (headphones on, or the mic hears
- * them). Separate from the preview player so a preview never cuts it off.
+ * them). Separate from the preview player so a preview never cuts it off. It plays at 1×, whatever
+ * the playback speed: it accompanies a take as it is recorded, like the cue before it.
  */
 export function useAccompaniment() {
   const players = useRef<HTMLAudioElement[]>([]);

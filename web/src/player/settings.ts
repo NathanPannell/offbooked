@@ -1,9 +1,9 @@
 import { readStorage, writeStorage } from "../lib/storage";
 import type { MyLineMode } from "./queue";
-import { isSpeed, type Speed } from "./timing";
 
 // The listener's run-through settings, remembered per production on this device: which role is
-// theirs, what happens on their lines, and how fast everyone else speaks.
+// theirs and what happens on their lines. How fast everyone else speaks is the app's one playback
+// speed (audio/speed.ts), not a setting per production.
 
 /** "" for no role, MY_PART for an actor's own character(s), else a character ID. */
 export type Role = string;
@@ -12,10 +12,9 @@ export const MY_PART = "mine";
 export interface PlayerSettings {
   role: Role;
   mode: MyLineMode;
-  speed: Speed;
   /**
-   * The listener picked `mode` themselves. Only then is a stored mode used: a change of speed or
-   * part also saves the mode in force, and that one (an old default, say) shouldn't stick.
+   * The listener picked `mode` themselves. Only then is a stored mode used: a change of part also
+   * saves the mode in force, and that one (an old default, say) shouldn't stick.
    */
   modePicked?: boolean;
 }
@@ -29,7 +28,7 @@ const key = (productionId: string) => `offbooked.runthrough.${productionId}`;
  * pick reads out. `?mode=mine` opens "Pause, then read" either way.
  */
 export function defaultSettings(isActor: boolean, initialMode: "full" | "mine"): PlayerSettings {
-  return { role: isActor ? MY_PART : "", mode: isActor || initialMode === "mine" ? "pause" : "read", speed: 1 };
+  return { role: isActor ? MY_PART : "", mode: isActor || initialMode === "mine" ? "pause" : "read" };
 }
 
 /** The settings after a change; picking a mode marks it as the listener's own choice. */
@@ -49,7 +48,6 @@ export function parseSettings(raw: string | null, fallback: PlayerSettings, role
     return {
       role: typeof v.role === "string" && (v.role === "" || roles.has(v.role)) ? v.role : fallback.role,
       mode: picked ? (v.mode as MyLineMode) : fallback.mode,
-      speed: isSpeed(v.speed) ? v.speed : fallback.speed,
       ...(picked ? { modePicked: true } : {}),
     };
   } catch {
