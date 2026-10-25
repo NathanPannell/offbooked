@@ -1,198 +1,330 @@
-import { ArrowRight, Check, Mic, Play, Share2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  ArrowRight,
+  AudioLines,
+  BookOpenCheck,
+  Check,
+  Clock,
+  EyeOff,
+  FileText,
+  Gauge,
+  GraduationCap,
+  Link2,
+  ListChecks,
+  Lock,
+  Mic,
+  MonitorSmartphone,
+  Play,
+  ShieldCheck,
+  Smartphone,
+  Sun,
+  Trash2,
+  UserRoundPen,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+import { useRef } from "react";
 import { Link } from "react-router";
-import { session } from "../api/client";
-import { Brand } from "../components/Brand";
+import { CONTACT_EMAIL, mailto } from "../lib/contact";
+import { FAQ, PLANS, SOCIAL_PROOF } from "./landing/content";
 import { Demo, type DemoHandle } from "./landing/Demo";
+import { HeroScene } from "./landing/HeroScene";
+import { MarketingLayout, useCta } from "./landing/MarketingLayout";
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-const FAQ: { q: string; a: string }[] = [
+const PROOF = ["No app or accounts for the cast", "AI fills any line not yet recorded", "Deletes itself after closing night", "Free for your cast"];
+
+const DIRECTORS: { icon: LucideIcon; title: string; text: string }[] = [
+  { icon: Clock, title: "Set up in about two minutes", text: "One screen: the title, your performance dates and the script. Then copy one link for the cast." },
   {
-    q: "Does the cast need an account?",
-    a: "No. Your cast opens one link, picks their character, types a first name and starts recording. Only whoever sets up the production signs in, with a link we email you. No passwords.",
+    icon: ListChecks,
+    title: "See who has recorded what",
+    text: "The call sheet shows every part, who is reading it and how many of its lines are in, so you know who to nudge.",
   },
   {
-    q: "Do I have to be the director?",
-    a: "No. Anyone with the script can set up a production: a director, a stage manager, or an actor who wants the whole cast running lines.",
+    icon: Mic,
+    title: "Read in for anyone missing",
+    text: "Your own recordings count. Cover a part until its actor records it, and theirs takes over.",
   },
   {
-    q: "What scripts work?",
-    a: "PDFs with real text in them and Word .docx files, up to 20 MB. Scanned pages without a text layer don't work yet. We keep your line breaks and indentation, so verse and lyrics stay as written.",
+    icon: Users,
+    title: "Anyone can record any part",
+    text: "Understudies, doubling, a cast member on a new phone: everyone picks a part from the same link.",
   },
   {
-    q: "Is it free?",
-    a: "Yes, while Offbooked is in beta.",
+    icon: GraduationCap,
+    title: "Safe for student casts",
+    text: "No accounts for the cast, your email address is never shown to them, and everything is deleted after the show.",
   },
   {
-    q: "Are the recordings private to my cast?",
-    a: "Yes. Nothing is public. Recordings only play through your production's own links, for your cast and you. Seven days after your final performance date, the script and every recording are deleted.",
+    icon: FileText,
+    title: "Fix anything in place",
+    text: "Split, join, retype or reassign a line, with the original page of your script beside it.",
+  },
+];
+
+const ACTORS: { icon: LucideIcon; title: string; text: string }[] = [
+  {
+    icon: AudioLines,
+    title: "Hands-free recording",
+    text: "The app follows along as you speak and moves to your next line by itself. A dramatic pause won't cut you off.",
   },
   {
-    q: "Does it work on iPhone?",
-    a: "Yes, in Safari, and in Chrome on Android and computers. No app to install. If someone opens the link inside Instagram or Messenger, we'll nudge them to open it in their real browser, because those often block the microphone.",
+    icon: UserRoundPen,
+    title: "Pause, then read",
+    text: "Listen through the play with a pause sized to each of your lines, so you say it out loud before you hear it.",
+  },
+  {
+    icon: BookOpenCheck,
+    title: "Words light up as they're said",
+    text: "Your lines are highlighted and your cues underlined. Jump to any scene.",
+  },
+  { icon: Gauge, title: "Any speed", text: "Run a scene at half speed to 4×, with voices at their normal pitch." },
+  { icon: Sun, title: "Screen stays on", text: "Prop your phone on the music stand: it stays awake while you read along." },
+  {
+    icon: ShieldCheck,
+    title: "Safe on bad Wi-Fi",
+    text: "Every take stays on your phone until it's uploaded, through a dropped connection or a closed tab.",
   },
 ];
 
 export function Landing() {
-  const signedIn = !!session.get();
-  // One call to action everywhere on the page, so the corner, the hero and the closing band agree.
-  const cta = signedIn ? { to: "/app", label: "Your productions" } : { to: "/signin", label: "Get off book together" };
+  const cta = useCta();
   const demo = useRef<DemoHandle>(null);
-  // While the hero's button is on screen, the corner one waits (on a phone; see .is-waiting).
-  const heroCta = useRef<HTMLAnchorElement>(null);
-  const [heroCtaVisible, setHeroCtaVisible] = useState(true);
-  useEffect(() => {
-    const el = heroCta.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(([entry]) => setHeroCtaVisible(!!entry?.isIntersecting));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
-  const hearDemo = () => {
-    document.getElementById("demo")?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center" });
+  const seeDemo = () => {
+    document.getElementById("demo")?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
     demo.current?.play();
   };
 
   return (
-    <div className="landing">
-      <nav className="landing-nav" aria-label="Main">
-        <Brand to="/" />
-        <Link className={`btn btn-primary${heroCtaVisible ? " is-waiting" : ""}`} to={cta.to}>
-          {cta.label} <ArrowRight size={16} aria-hidden="true" />
-        </Link>
-      </nav>
-
-      <header className="hero">
-        <div className="hero-copy">
-          <p className="mono hero-strip">Free while in beta · Works on any phone · No app</p>
-          <h1 className="hero-title">
-            Run lines with your <span className="marker">whole cast.</span> No rehearsal room required.
+    <MarketingLayout path="/">
+      <header className="mk-hero">
+        <div className="mk-hero-copy">
+          <p className="eyebrow">For directors, drama teachers and stage managers</p>
+          <h1 className="mk-hero-title">
+            Hear your script read by your <span className="mk-marker">real cast.</span>
           </h1>
-          <p className="hero-lede">
-            Upload the script, send one link, and everyone records their lines from their phone in a few minutes. Then listen through the whole play, with gaps
-            where you speak.
+          <p className="mk-hero-lede">
+            Upload the script and send one link. Everyone records their lines from their phone, then the whole cast rehearses the play in each other's voices,
+            with gaps for your own lines.
           </p>
-          <div className="hero-ctas">
-            <Link className="btn btn-primary btn-lg" to={cta.to} ref={heroCta}>
+          <div className="mk-hero-ctas">
+            <Link className="btn btn-primary btn-lg" to={cta.to}>
               {cta.label} <ArrowRight size={18} aria-hidden="true" />
             </Link>
+            <button type="button" className="btn btn-secondary btn-lg" onClick={seeDemo}>
+              <Play size={17} fill="currentColor" aria-hidden="true" /> See the demo
+            </button>
           </div>
+          <ul className="mk-proof">
+            {PROOF.map((p) => (
+              <li key={p}>
+                <Check size={15} strokeWidth={2.5} aria-hidden="true" /> {p}
+              </li>
+            ))}
+          </ul>
+          <p className="mk-social small">{SOCIAL_PROOF}</p>
         </div>
         <HeroScene />
       </header>
 
-      <section className="landing-section demo-section" id="demo" aria-labelledby="demo-title">
-        <div className="section-intro">
-          <p className="eyebrow">Listen through</p>
-          <h2 id="demo-title" className="section-title">
-            Press play. You're Hamlet.
+      <section className="mk-problem" aria-label="The problem">
+        <p>
+          You can't get the whole cast in a room every night.
+          <br />
+          <span className="muted">Running lines alone with a robot isn't the same as hearing your scene partner.</span>
+        </p>
+      </section>
+
+      <section className="mk-section" id="how" aria-labelledby="how-title">
+        <div className="mk-intro">
+          <p className="eyebrow">How it works</p>
+          <h2 id="how-title" className="mk-title">
+            Upload. Send one link. Run the play.
           </h2>
-          <p className="muted">This is what your cast hears: the scene, line by line, like lyrics. Switch to “My part” and it stops for your lines.</p>
-          <div>
-            <button type="button" className="btn btn-secondary" onClick={hearDemo}>
-              <Play size={17} fill="currentColor" aria-hidden="true" /> Hear a demo
-            </button>
-          </div>
+        </div>
+        <ol className="mk-steps">
+          <li className="mk-step">
+            <p className="mk-step-n mono">1 · Upload</p>
+            <h3>Upload the script you already have.</h3>
+            <p className="muted">
+              A PDF or Word file. Offbooked finds every scene, character, line and stage direction, usually in under a minute. Add your performance dates and
+              that's the setup.
+            </p>
+            <StepUpload />
+          </li>
+          <li className="mk-step">
+            <p className="mk-step-n mono">2 · Send</p>
+            <h3>Send one link to the whole cast.</h3>
+            <p className="muted">
+              Drop it in the group chat. Everyone picks their part and records from their phone, hands-free. Nobody installs anything or makes an account.
+            </p>
+            <StepLink />
+          </li>
+          <li className="mk-step">
+            <p className="mk-step-n mono">3 · Run</p>
+            <h3>Run the whole play, anywhere.</h3>
+            <p className="muted">
+              Listen line by line in your castmates' own voices. Any line nobody has recorded yet is read by an AI voice, so the play is fully voiced from day
+              one.
+            </p>
+            <StepRun />
+          </li>
+        </ol>
+      </section>
+
+      <section className="mk-section mk-demo-section" id="demo" aria-labelledby="demo-title">
+        <div className="mk-intro">
+          <p className="eyebrow">The demo</p>
+          <h2 id="demo-title" className="mk-title">
+            Press play. You're Lady Macbeth.
+          </h2>
+          <p className="muted">
+            This is what your cast see and hear: the scene line by line, each line in the voice of the castmate who recorded it, with a pause for yours.
+          </p>
         </div>
         <Demo ref={demo} />
       </section>
 
-      <section className="landing-section" aria-labelledby="acts-title">
-        <div className="section-intro">
-          <p className="eyebrow">How it works</p>
-          <h2 id="acts-title" className="section-title">
-            A play in three acts
+      <section className="mk-section" id="directors" aria-labelledby="directors-title">
+        <div className="mk-intro">
+          <p className="eyebrow">For directors and teachers</p>
+          <h2 id="directors-title" className="mk-title">
+            Get the whole cast off book before tech week.
           </h2>
+          <p className="muted">You set it up once. Your cast do the rest from their phones, whenever they have ten minutes.</p>
         </div>
-        <ol className="acts">
-          <li className="act">
-            <p className="act-label mono">Act I</p>
-            <h3>Upload your script.</h3>
-            <p className="muted">A PDF or a Word file. Offbooked finds every scene, character and line.</p>
-            <ActParse />
-          </li>
-          <li className="act">
-            <p className="act-label mono">Act II</p>
-            <h3>Send one link to the cast.</h3>
-            <p className="muted">Everyone taps their part, types a first name and records. Two parts? Pick both.</p>
-            <ActCastLink />
-          </li>
-          <li className="act">
-            <p className="act-label mono">Act III</p>
-            <h3>Hear the whole play.</h3>
-            <p className="muted">Every take joins one play to listen through. Practise your part with gaps where you speak.</p>
-            <ActGap />
-          </li>
-        </ol>
+        <FeatureGrid items={DIRECTORS} />
       </section>
 
-      <section className="landing-section loop-section" aria-labelledby="loop-title">
-        <div className="section-intro">
-          <p className="eyebrow">The rehearsal loop</p>
-          <h2 id="loop-title" className="section-title">
-            It sounds like a play from day one
+      <section className="mk-section" id="actors" aria-labelledby="actors-title">
+        <div className="mk-intro">
+          <p className="eyebrow">For actors</p>
+          <h2 id="actors-title" className="mk-title">
+            Practise with your scene partners, without them.
           </h2>
-          <p className="muted">Nobody waits for the slowest recorder. Every line always has a voice, and it keeps getting better.</p>
+          <p className="muted">On the bus, on a walk, in the kitchen: the whole play in your cast's voices, with room for yours.</p>
         </div>
-        <ol className="loop">
-          <li className="loop-step">
-            <span className="tag tag-tts">TTS</span>
-            <h3>Day one, a computer voice reads every line.</h3>
-            <p className="muted small">Upload the script and you can already hear the whole scene.</p>
-          </li>
-          <li className="loop-step">
-            <span className="tag tag-director">you</span>
-            <h3>You read in for scene partners.</h3>
-            <p className="muted small">Record any line yourself, scene by scene, and it replaces the robot.</p>
-          </li>
-          <li className="loop-step">
-            <span className="tag tag-actor">Sam</span>
-            <h3>Actors replace them as they record.</h3>
-            <p className="muted small">Each take is ready to listen to within seconds.</p>
-          </li>
-          <li className="loop-step">
-            <span className="tag tag-score">94% word-perfect</span>
-            <h3>“Practise my part” checks your words.</h3>
-            <p className="muted small">Say your lines into the gaps and see which words slipped, right on your phone.</p>
-          </li>
-        </ol>
+        <FeatureGrid items={ACTORS} />
       </section>
 
-      <section className="landing-section who-section" aria-labelledby="who-title">
-        <div className="section-intro">
-          <p className="eyebrow">Who it's for</p>
-          <h2 id="who-title" className="section-title">
-            Anyone with lines to learn
+      <section className="mk-section mk-privacy" id="privacy" aria-labelledby="privacy-title">
+        <div className="mk-intro">
+          <p className="eyebrow">Privacy</p>
+          <h2 id="privacy-title" className="mk-title">
+            Built for the run of a show, then gone.
           </h2>
+          <p className="muted">Scripts and recordings are deleted automatically 7 days after your final performance. Nobody has to remember to clean up.</p>
         </div>
-        <ul className="who">
+        <ol className="mk-timeline" aria-label="What happens to your show's content">
           <li>
-            <strong>Directors</strong> who want the cast off book before the first stagger-through.
+            <span className="mk-timeline-dot" />
+            <strong>Rehearsals</strong>
+            <span className="small muted">Your cast record and listen.</span>
           </li>
           <li>
-            <strong>Drama teachers</strong> with thirty students, one script and two rehearsals a week.
+            <span className="mk-timeline-dot" />
+            <strong>Final performance</strong>
+            <span className="small muted">The date you set up front.</span>
           </li>
           <li>
-            <strong>Community theatre</strong> casts who rehearse around jobs, kids and night shifts.
+            <span className="mk-timeline-dot" />
+            <strong>+7 days</strong>
+            <span className="small muted">Time to grab anything you need.</span>
+          </li>
+          <li className="is-gone">
+            <span className="mk-timeline-dot">
+              <Trash2 size={13} aria-hidden="true" />
+            </span>
+            <strong>Gone</strong>
+            <span className="small muted">Script, recordings and lines, for good.</span>
+          </li>
+        </ol>
+        <ul className="mk-privacy-points">
+          <li>
+            <Lock size={18} aria-hidden="true" />
+            <span>
+              <strong>We never train AI on your voice or script.</strong> Recordings only play through your production's own links.
+            </span>
           </li>
           <li>
-            <strong>Actors drilling solo</strong> on the bus, with every cue in the right voice.
+            <Users size={18} aria-hidden="true" />
+            <span>
+              <strong>No accounts for the cast.</strong> A first name is enough. Names are cleared after the show unless someone verified their email.
+            </span>
+          </li>
+          <li>
+            <Smartphone size={18} aria-hidden="true" />
+            <span>
+              <strong>Speech recognition runs on the phone.</strong> The microphone only opens when you tap record.
+            </span>
+          </li>
+          <li>
+            <EyeOff size={18} aria-hidden="true" />
+            <span>
+              <strong>No marketing email.</strong> We only email to sign you in, to confirm an address, or to say a castmate has finished or the play is ready.
+            </span>
           </li>
         </ul>
+        <p className="small">
+          <Link to="/privacy">Read the privacy policy</Link>
+        </p>
       </section>
 
-      <section className="landing-section faq-section" aria-labelledby="faq-title">
-        <div className="section-intro">
+      <section className="mk-section" id="pricing" aria-labelledby="pricing-title">
+        <div className="mk-intro">
+          <p className="eyebrow">Pricing</p>
+          <h2 id="pricing-title" className="mk-title">
+            Free for your cast. Always.
+          </h2>
+          <p className="muted">The person running the show pays, once per show. Never per word, minute or actor.</p>
+        </div>
+        <ul className="mk-plans">
+          {PLANS.map((plan) => (
+            <li key={plan.name} className={`mk-plan ${plan.available ? "is-available raised" : "is-soon"}`} aria-disabled={!plan.available || undefined}>
+              <div className="mk-plan-head">
+                <h3>{plan.name}</h3>
+                {!plan.available && <span className="mk-soon">Coming soon</span>}
+              </div>
+              <p className="mk-plan-price">
+                <strong>{plan.price}</strong> <span className="muted">{plan.per}</span>
+              </p>
+              <p className="small muted">{plan.blurb}</p>
+              <ul className="mk-plan-features">
+                {plan.features.map((f) => (
+                  <li key={f}>
+                    <Check size={14} strokeWidth={2.5} aria-hidden="true" /> {f}
+                  </li>
+                ))}
+              </ul>
+              {plan.available ? (
+                <Link className="btn btn-primary" to={cta.to}>
+                  {cta.to === "/app" ? cta.label : "Set up your show, free"}
+                </Link>
+              ) : (
+                <button type="button" className="btn btn-secondary" disabled>
+                  Coming soon
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+        <p className="mk-plans-note small muted">
+          Offbooked is in private beta. <a href={mailto("Offbooked access code")}>Email {CONTACT_EMAIL}</a> for an access code. Your cast never need one.
+        </p>
+      </section>
+
+      <section className="mk-section" id="faq" aria-labelledby="faq-title">
+        <div className="mk-intro">
           <p className="eyebrow">Questions</p>
-          <h2 id="faq-title" className="section-title">
+          <h2 id="faq-title" className="mk-title">
             Fair questions
           </h2>
         </div>
-        <div className="faq">
+        <div className="mk-faq">
           {FAQ.map((item) => (
-            <details key={item.q} className="faq-item">
+            <details key={item.q} className="mk-faq-item">
               <summary>{item.q}</summary>
               <p>{item.a}</p>
             </details>
@@ -200,138 +332,84 @@ export function Landing() {
         </div>
       </section>
 
-      <section className="cta-band" aria-labelledby="cta-title">
-        <h2 id="cta-title" className="display">
+      <section className="mk-band" aria-labelledby="band-title">
+        <h2 id="band-title" className="display">
           Places, everyone.
         </h2>
-        <p>Add your script tonight, drop one link in the cast chat, and wake up to the whole play, ready to listen through.</p>
+        <p>Upload your script tonight, drop one link in the cast chat, and the whole play is ready to listen to. By opening night, it's all your cast.</p>
         <Link className="btn btn-primary btn-lg" to={cta.to}>
           {cta.label} <ArrowRight size={18} aria-hidden="true" />
         </Link>
-      </section>
-
-      <footer className="landing-footer">
-        <Brand to="/" />
-        <p>Made for casts, crews and whoever is holding the book. Offbooked is in early development, so tell us what breaks.</p>
-        <p className="mono">Break a leg.</p>
-      </footer>
-    </div>
-  );
-}
-
-/** The hero: an actor's recording screen next to the run-through, with lines lighting up in turn. */
-function HeroScene() {
-  const [beat, setBeat] = useState(1);
-  useEffect(() => {
-    if (reducedMotion()) return;
-    const id = setInterval(() => setBeat((b) => (b + 1) % 4), 2200);
-    return () => clearInterval(id);
-  }, []);
-  const lyrics = [
-    { who: "Horatio", text: "Hail to your lordship." },
-    { who: "Hamlet", text: "I am glad to see you well.", you: true },
-    { who: "Horatio", text: "The same, my lord, and your poor servant ever." },
-    { who: "Hamlet", text: "Sir, my good friend; I'll change that name with you.", you: true },
-  ];
-  return (
-    <div className="hero-scene" aria-hidden="true">
-      <svg className="hero-spot" viewBox="0 0 400 400">
-        <path d="M200 0 60 400h280z" fill="var(--marker)" opacity="0.35" />
-      </svg>
-      <div className="phone">
-        <div className="phone-notch" />
-        <p className="phone-title mono">Hamlet · Act 1, Sc. 2</p>
-        <p className="phone-progress">
-          You're <strong>HAMLET</strong> · 7 of 23
+        <p className="small mk-band-works">
+          <MonitorSmartphone size={15} aria-hidden="true" /> Works on iPhone, Android, laptops and Chromebooks. No app needed.
         </p>
-        <div className="phone-bar">
-          <span />
-        </div>
-        <div className="phone-card">
-          <p className="phone-cue">
-            <span className="phone-who">Horatio</span> The same, my lord, and your poor servant ever.
-          </p>
-          <p className="phone-line">Sir, my good friend; I'll change that name with you.</p>
-        </div>
-        <div className="phone-rec">
-          <span className="phone-rec-btn">
-            <Mic size={26} />
-          </span>
-          <span className="phone-rec-hint">Tap, say your line, tap to stop</span>
-        </div>
-      </div>
-      <div className="hero-lyrics raised">
-        <p className="mono hero-lyrics-label">Listen</p>
-        {lyrics.map((l, i) => (
-          <p key={i} className={`hero-lyric ${i === beat ? "is-current" : i < beat ? "is-past" : ""} ${l.you ? "is-you" : ""}`}>
-            <span className="hero-lyric-who">
-              {l.who}
-              {l.you && i === beat && <em> · your line</em>}
-            </span>
-            {l.text}
-          </p>
-        ))}
-      </div>
-      <span className="hero-badge">
-        <Check size={14} strokeWidth={3} /> Saved
-      </span>
-    </div>
+      </section>
+    </MarketingLayout>
   );
 }
 
-/** Act I: the live count while a script is read. */
-function ActParse() {
+function FeatureGrid({ items }: { items: { icon: LucideIcon; title: string; text: string }[] }) {
   return (
-    <div className="act-ui" aria-hidden="true">
-      <p className="mono act-ui-label">Reading your script</p>
-      <div className="progress act-progress">
+    <ul className="mk-features">
+      {items.map(({ icon: Icon, title, text }) => (
+        <li key={title} className="mk-feature">
+          <Icon size={20} className="mk-feature-icon" aria-hidden="true" />
+          <h3>{title}</h3>
+          <p className="small muted">{text}</p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Step 1: the script being read. */
+function StepUpload() {
+  return (
+    <div className="mk-step-ui" aria-hidden="true">
+      <p className="mono mk-step-ui-label">Reading macbeth.pdf</p>
+      <div className="progress mk-step-progress">
         <span />
       </div>
-      <p className="mono act-ui-counts">97 pages · 2,340 of 5,190 lines · 14 scenes</p>
+      <p className="mono mk-step-ui-counts">28 scenes · 648 lines · 38 parts</p>
     </div>
   );
 }
 
-/** Act II: the cast link, with parts picked and recorded. */
-function ActCastLink() {
+/** Step 2: one link, parts picked. */
+function StepLink() {
   return (
-    <div className="act-ui" aria-hidden="true">
-      <div className="act-link">
+    <div className="mk-step-ui" aria-hidden="true">
+      <div className="mk-step-link">
+        <Link2 size={14} />
         <span className="mono">offbooked.com/join/k3x9…</span>
-        <span className="act-share">
-          <Share2 size={13} /> Share
-        </span>
       </div>
-      <ul className="act-roles">
+      <ul className="mk-step-roles">
         <li>
-          <strong>HAMLET</strong> <span>Sam + 1</span>
-        </li>
-        <li className="is-picked">
-          <strong>OPHELIA</strong> <span>58 lines</span>
+          <strong>MACBETH</strong> <span>Robin · 146 of 146</span>
         </li>
         <li>
-          <strong>HORATIO</strong> <span>41 lines</span>
+          <strong>LADY MACBETH</strong> <span>Jess · 52 of 59</span>
+        </li>
+        <li>
+          <strong>BANQUO</strong> <span className="muted">Not taken yet</span>
         </li>
       </ul>
     </div>
   );
 }
 
-/** Act III: your line, as a gap to speak into. */
-function ActGap() {
+/** Step 3: a pause for your line. */
+function StepRun() {
   return (
-    <div className="act-ui" aria-hidden="true">
-      <p className="act-lyric is-past">
-        <span>Polonius</span>What do you read, my lord?
+    <div className="mk-step-ui" aria-hidden="true">
+      <p className="mk-step-lyric is-past">
+        <span>MACBETH</span>If we should fail?
       </p>
-      <p className="act-lyric is-current">
-        <span>
-          Hamlet <em>· your line</em>
-        </span>
-        Words, words, words.
+      <p className="mk-step-lyric is-current">
+        <span>LADY MACBETH · your line</span>We fail? But screw your courage to the sticking-place, and we'll not fail.
       </p>
-      <div className="gap-meter act-gap">
-        <span />
+      <div className="mk-gap">
+        <span style={{ width: "62%" }} />
       </div>
     </div>
   );

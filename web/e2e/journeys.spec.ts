@@ -41,6 +41,51 @@ async function createProduction(page: Page, title: string): Promise<void> {
   await expect(page.getByText("Stand, and unfold yourself.")).toBeVisible();
 }
 
+test("the marketing pages are real HTML before any script runs, and the app's pages aren't indexed", async ({ browser, request }, testInfo) => {
+  const home = await (await request.get("/")).text();
+  expect(home).toContain("Hear your script read by your <span");
+  expect(home).toContain('<link rel="canonical" href="https://offbooked.com/">');
+  expect(home).toContain('<meta property="og:image" content="https://offbooked.com/og.png">');
+  expect(home).toContain('"@type":"FAQPage"');
+  expect(home).toContain("Is Offbooked the “Off Book!” app?");
+  expect(await (await request.get("/join/abc")).text()).toContain('<meta name="robots" content="noindex">');
+  expect(await (await request.get("/robots.txt")).text()).toContain("Sitemap: https://offbooked.com/sitemap.xml");
+  expect((await request.get("/og.png")).headers()["content-type"]).toBe("image/png");
+
+  const noScript = await browser.newContext({ ...testInfo.project.use, javaScriptEnabled: false });
+  const page = await noScript.newPage();
+  for (const [path, heading] of [
+    ["/", "Hear your script read by your real cast."],
+    ["/privacy", "Your script, your voices, your cast"],
+    ["/terms", "The house rules"],
+  ]) {
+    await page.goto(path!);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(heading!);
+  }
+  await expect(page.getByText(/We never use them to train AI/)).toBeVisible();
+  await noScript.close();
+});
+
+test("the landing page plays its demo and leads to setting up a show", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  await page.goto("/");
+  await expect(page.getByText("Used by casts in British Columbia and Nova Scotia for real productions.")).toBeVisible();
+  // No synthesized voices in the demo: until the real cast's recording is in, it says so.
+  await expect(page.getByText("Real-cast recording coming soon.")).toBeVisible();
+  await page.getByRole("button", { name: "See the demo" }).click();
+  await expect(page.getByRole("button", { name: "Pause the demo" })).toBeVisible();
+  await expect(page.getByText("Your line · say it now")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Coming soon" }).first()).toBeDisabled();
+  await page.getByRole("link", { name: "Privacy policy", exact: true }).click();
+  await expect(page).toHaveURL(/\/privacy$/);
+  await expect(page).toHaveTitle("Privacy policy · Offbooked");
+  await page.goto("/");
+  await page.getByRole("link", { name: "Set up your show, free" }).first().click();
+  await expect(page).toHaveURL(/\/signin$/);
+  expect(errors).toEqual([]);
+});
+
 test("a new director needs the beta access code to set up a play, and keeps it", async ({ page }) => {
   await signInAsDirector(page, { beta: false });
   await expect(page.getByRole("heading", { name: "Offbooked is in private beta" })).toBeVisible();
