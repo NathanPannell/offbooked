@@ -448,7 +448,7 @@ export function RecordSession({
       return next;
     });
     if (announce) setAnnouncement("Take saved.");
-    flubs.settled(lineId);
+    flubs.settled();
 
     const text = actorLines.find((l) => l.line.id === lineId)?.line.text ?? "";
     void stt.score(lineId, recorded.blob, text).then((result) => {

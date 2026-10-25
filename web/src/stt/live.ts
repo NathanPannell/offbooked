@@ -209,12 +209,14 @@ export interface LiveProgress {
   cursor: number;
   /** Tokens matched in any pass so far. */
   matched: boolean[];
+  /** One past the furthest token any pass matched (the cursor may trail it: see `traceCursor`). */
+  reach: number;
   /** The end of the line has been heard: every word, or its last words (`tailHeard`). */
   ended: boolean;
 }
 
 export function startProgress(tokenCount: number): LiveProgress {
-  return { cursor: 0, matched: new Array<boolean>(tokenCount).fill(false), ended: false };
+  return { cursor: 0, matched: new Array<boolean>(tokenCount).fill(false), reach: 0, ended: false };
 }
 
 /** The line's last words looked for at the end of what was heard. */
@@ -251,20 +253,25 @@ export function tailHeard(tokens: readonly string[], heard: readonly string[]): 
 export const NEXT_WORDS = 2;
 /** Further ahead, up to this many words past the cursor, only with the word after it heard too. */
 export const LOOKAHEAD_WORDS = 5;
+/** Matches in a row (each within a word of the last) that move the cursor however far ahead they are. */
+export const RUN_WORDS = 3;
 
 /**
  * Traces along the line: the cursor moves only when the words heard are the next ones expected.
  * The alignment finds which of the line's words were heard; a match counts when it is the next
- * word (or the one after it), or a little further on when the next match follows close behind it.
- * So a stray word that happens to be in the line further on (the "and" of a cue read aloud) never
- * lights up everything before it.
+ * word (or the one after it), a little further on when the next match follows close behind it, or
+ * anywhere once it starts a run of RUN_WORDS close matches (the actor is clearly there: a phrase
+ * the model missed in a long speech never stalls the cursor). So a stray word that happens to be in
+ * the line further on (the "and" of a cue read aloud) never lights up everything before it.
  */
 export function traceCursor(cursor: number, matched: readonly number[]): number {
   let c = cursor;
+  const close = (k: number) => matched[k + 1] !== undefined && matched[k + 1]! - matched[k]! <= NEXT_WORDS;
   matched.forEach((i, k) => {
     if (i < c) return;
-    const after = matched[k + 1];
-    if (i - c < NEXT_WORDS || (i - c <= LOOKAHEAD_WORDS && after !== undefined && after - i < NEXT_WORDS + 1)) c = i + 1;
+    let run = 1;
+    while (run < RUN_WORDS && close(k + run - 1)) run++;
+    if (i - c < NEXT_WORDS || (i - c <= LOOKAHEAD_WORDS && close(k)) || run >= RUN_WORDS) c = i + 1;
   });
   return c;
 }
@@ -279,15 +286,18 @@ export const WINDOW_BACK_TOKENS = 12;
 export function applyPass(progress: LiveProgress, tokens: readonly string[], transcript: string, windowed = false): LiveProgress {
   const heard = heardWords(transcript, tokens);
   if (heard.length === 0 || tokens.length === 0) return progress;
+  // A windowed pass may start anywhere from a little before the cursor to the furthest word heard
+  // (the cursor may trail it), so the words heard keep being found even while the cursor waits.
   const anchor = windowed ? Math.max(0, progress.cursor - WINDOW_BACK_TOKENS) : 0;
-  const { matched } = alignPartial(tokens, heard, anchor, progress.cursor);
+  const { matched } = alignPartial(tokens, heard, anchor, windowed ? Math.max(progress.cursor, progress.reach) : progress.cursor);
   const next = progress.matched.slice();
   for (const i of matched) next[i] = true;
   let cursor = traceCursor(progress.cursor, matched);
   // The line's last words, heard just now: the line is said, whatever was missed on the way.
   if (cursor < tokens.length && cursor >= tokens.length * TAIL_MIN_SHARE && tailHeard(tokens, heard)) cursor = tokens.length;
   if (cursor === progress.cursor && matched.length === 0) return progress;
-  return { cursor, matched: next, ended: progress.ended || cursor >= tokens.length };
+  const reach = Math.max(progress.reach, matched.length ? matched[matched.length - 1]! + 1 : 0);
+  return { cursor, matched: next, reach, ended: progress.ended || cursor >= tokens.length };
 }
 
 export function matchedCount(progress: LiveProgress): number {

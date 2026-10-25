@@ -35,6 +35,30 @@ describe("applyPass traces along", () => {
   });
 });
 
+describe("a long speech with words the model missed", () => {
+  const speech =
+    "To be, or not to be, that is the question: Whether 'tis nobler in the mind to suffer The slings and arrows of outrageous fortune, Or to take arms against a sea of troubles And by opposing end them. To die, to sleep, No more; and by a sleep to say we end The heart-ache and the thousand natural shocks That flesh is heir to: 'tis a consummation Devoutly to be wish'd. To die, to sleep; To sleep, perchance to dream, ay, there's the rub: For in that sleep of death what dreams may come, When we have shuffled off this mortal coil, Must give us pause, there's the respect That makes calamity of so long life.";
+  const { tokens } = segmentLine(speech);
+  /** Full passes for the first 25 words, then 17-word windows, as a long take is heard. */
+  const replay = (said: string[]) => {
+    let p = startProgress(tokens.length);
+    for (let n = 4; n <= 25; n += 3) p = applyPass(p, tokens, said.slice(0, n).join(" "));
+    for (let n = 28; n <= said.length + 2; n += 3) p = applyPass(p, tokens, said.slice(Math.max(0, n - 17), n).join(" "), true);
+    return p;
+  };
+
+  it.each([
+    [5, 10],
+    [10, 16],
+    [30, 37],
+  ])("follows to the end past words %i–%i mumbled, and the check lets it through", (from, to) => {
+    const said = tokens.map((w, i) => (i >= from && i <= to ? "um" : w));
+    const p = replay(said);
+    expect(p.cursor).toBe(tokens.length);
+    expect(flubbed(startLineCheck([]), p)).toBe(false);
+  });
+});
+
 describe("the wrong-line check", () => {
   const line = "A little more than kin, and less than kind.";
   const nearby = ["But now, my cousin Hamlet, and my son,\u2014", "Not so, my lord; I am too much i' the sun.", "How is it that the clouds still hang on you?"];

@@ -299,7 +299,7 @@ function SceneLines({
         audio: take.blob,
         durationMs: take.durationMs,
       });
-      flubs.settled(lineId);
+      flubs.settled();
       setLocalTakes((m) => {
         const next = new Map(m);
         const old = next.get(lineId);

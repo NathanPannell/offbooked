@@ -4,7 +4,9 @@ import type { Cue, Line } from "../../api/types";
 // A take the wrong-line check flagged (see `flubbed` in stt/live.ts), held while the recorder asks
 // "Did you mean to say something else?": keep it and carry on (✓), or read the line again (←). The
 // ← side counts down and re-records the line by itself, except after the same line was flagged
-// twice in a row: then it waits for a tap. Shared by the cast's recorder and the director's studio.
+// twice in a row: then it waits for a tap. Doing anything else on the page (a tap or key outside the
+// prompt, or leaving the page) stops the countdown too, so the mic never opens behind a dialog or
+// for a line no longer in view. Shared by the cast's recorder and the director's studio.
 
 /** How long the ← side counts down before it records the line again by itself. */
 export const FLUB_COUNTDOWN_MS = 3000;
@@ -27,9 +29,9 @@ export interface FlubView {
 
 /**
  * Holds one flagged take at a time. `raise` holds it and starts the countdown; `keep` and `retake`
- * end it (each hands back the held take to its callback); `settled` says a take of the line was
- * kept another way, so the next flag on it counts from one again; `drop` forgets it (the screen
- * started recording something else).
+ * end it (each hands back the held take to its callback); `settled` says a take was kept another
+ * way, so the next flag counts from one again; `drop` forgets the held take (the screen started
+ * recording something else), and the flags in a row with it.
  */
 export function useFlubPrompt<T extends { lineId: string }>({ onKeep, onRetake }: { onKeep: (held: T) => void; onRetake: (held: T) => void }) {
   const [held, setHeld] = useState<{ take: T; deadline: number | null } | null>(null);
@@ -59,7 +61,8 @@ export function useFlubPrompt<T extends { lineId: string }>({ onKeep, onRetake }
     setHeld({ take, deadline: autoRetake(count) ? start + FLUB_COUNTDOWN_MS : null });
   }, []);
 
-  // The countdown: ticks for the number shown, and records the line again when it runs out.
+  // The countdown: ticks for the number shown, and records the line again when it runs out. Any
+  // other tap or key, or leaving the page, turns it into a wait for a tap.
   const deadline = held?.deadline ?? null;
   useEffect(() => {
     if (deadline === null) return;
@@ -68,7 +71,20 @@ export function useFlubPrompt<T extends { lineId: string }>({ onKeep, onRetake }
       setNow(t);
       if (t >= deadline) end("retake");
     }, 100);
-    return () => clearInterval(id);
+    const wait = () => setHeld((h) => (h && h.deadline !== null ? { ...h, deadline: null } : h));
+    const elsewhere = (e: Event) => {
+      if (!(e.target instanceof Element && e.target.closest(".flub-prompt"))) wait();
+    };
+    const hidden = () => document.visibilityState === "hidden" && wait();
+    document.addEventListener("pointerdown", elsewhere, true);
+    document.addEventListener("keydown", elsewhere, true);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("pointerdown", elsewhere, true);
+      document.removeEventListener("keydown", elsewhere, true);
+      document.removeEventListener("visibilitychange", hidden);
+    };
   }, [deadline, end]);
 
   const view: FlubView | null = held
@@ -80,11 +96,14 @@ export function useFlubPrompt<T extends { lineId: string }>({ onKeep, onRetake }
     raise,
     keep: useCallback(() => end("keep"), [end]),
     retake: useCallback(() => end("retake"), [end]),
-    settled: useCallback((lineId: string) => {
-      if (last.current?.lineId === lineId) last.current = null;
+    settled: useCallback(() => {
+      last.current = null;
     }, []),
     drop: useCallback(() => {
+      // Nothing held: this is the retake itself starting, which keeps the count.
+      if (!heldRef.current) return;
       heldRef.current = null;
+      last.current = null;
       setHeld(null);
     }, []),
   };
