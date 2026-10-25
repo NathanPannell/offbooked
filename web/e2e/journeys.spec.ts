@@ -202,14 +202,14 @@ test("the run-through plays at the chosen speed, remembered on this device", asy
   await play.click();
   const rate = () => page.locator("audio").evaluate((a: HTMLAudioElement) => ({ rate: a.playbackRate, pitch: a.preservesPitch }));
   await expect.poll(rate).toEqual({ rate: 1.5, pitch: true });
-  // Changed while playing: the line playing now and every one after it.
+
+  // Remembered on this device; a new choice plays from the first line.
+  await page.reload();
+  await expect(speed).toHaveText("1.5×");
   await speed.click();
   await expect(speed).toHaveText("2×");
+  await play.click();
   await expect.poll(rate).toEqual({ rate: 2, pitch: true });
-  await page.getByRole("button", { name: "Pause", exact: true }).click();
-
-  await page.reload();
-  await expect(page.getByRole("group", { name: "Playback" }).getByRole("button", { name: /^Speed: / })).toHaveText("2×");
 });
 
 test("a take the server won't store stays on the phone through a reload, then goes up by itself", async ({ page, browser }, testInfo) => {

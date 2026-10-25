@@ -26,6 +26,20 @@ export function nextSpeed(current: number): number {
 
 export const formatSpeed = (speed: number) => `${speed}×`;
 
+/** The step nearest any rate (clamped first), so a speed set in code is always one offered. */
+export function snapSpeed(value: unknown): number {
+  const r = clampSpeed(value);
+  return SPEEDS.reduce((best, s) => (Math.abs(s - r) < Math.abs(best - r) ? s : best), DEFAULT_SPEED as number);
+}
+
+/**
+ * How long until a clip playing at `rate` reaches `endMs` of its media, from `currentTimeS`: the
+ * timer that ends Listen back at the end of the voice.
+ */
+export function msUntil(endMs: number, currentTimeS: number, rate: number): number {
+  return Math.max(0, endMs - currentTimeS * 1000) / (rate > 0 ? rate : 1);
+}
+
 /** A stored speed, or 1× when there is none or it isn't one of the steps. */
 export function parseSpeed(raw: string | null): number {
   const n = raw === null ? NaN : Number(raw);
@@ -57,7 +71,7 @@ export function getSpeed(): number {
 }
 
 export function setSpeed(speed: number): void {
-  const next = parseSpeed(String(clampSpeed(speed)));
+  const next = snapSpeed(speed);
   if (next === getSpeed()) return;
   current = next;
   writeStorage(SPEED_KEY, String(next));
@@ -65,8 +79,9 @@ export function setSpeed(speed: number): void {
 }
 
 const onStorage = (e: StorageEvent) => {
-  if (e.key !== SPEED_KEY) return;
-  current = parseSpeed(e.newValue);
+  // null: another tab cleared storage.
+  if (e.key !== SPEED_KEY && e.key !== null) return;
+  current = parseSpeed(e.key === null ? null : e.newValue);
   listeners.forEach((l) => l());
 };
 
@@ -75,7 +90,10 @@ export function subscribeSpeed(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
-    if (listeners.size === 0 && typeof window !== "undefined") window.removeEventListener("storage", onStorage);
+    if (listeners.size > 0) return;
+    if (typeof window !== "undefined") window.removeEventListener("storage", onStorage);
+    // Unheard while nothing listens, so read it again next time: another tab may have changed it.
+    current = null;
   };
 }
 

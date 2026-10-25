@@ -1,5 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applySpeed, clampSpeed, formatSpeed, getSpeed, nextSpeed, parseSpeed, resetSpeedForTests, setSpeed, SPEED_KEY, SPEEDS, subscribeSpeed } from "./speed";
+import {
+  applySpeed,
+  clampSpeed,
+  formatSpeed,
+  getSpeed,
+  msUntil,
+  nextSpeed,
+  parseSpeed,
+  resetSpeedForTests,
+  setSpeed,
+  snapSpeed,
+  SPEED_KEY,
+  SPEEDS,
+  subscribeSpeed,
+} from "./speed";
 
 function memoryStorage() {
   const map = new Map<string, string>();
@@ -53,6 +67,24 @@ describe("playback speeds", () => {
     expect(clampSpeed(Infinity)).toBe(1);
   });
 
+  it("snaps a rate set in code to the nearest step", () => {
+    expect(snapSpeed(1.1)).toBe(1);
+    expect(snapSpeed(1.2)).toBe(1.25);
+    expect(snapSpeed(2.6)).toBe(3);
+    expect(snapSpeed(9)).toBe(4);
+    expect(snapSpeed(0.1)).toBe(0.5);
+    expect(snapSpeed("x")).toBe(1);
+  });
+
+  it("times the end of Listen back in media time, at the speed it plays", () => {
+    // 3 s of voice, 1 s in: 2 s of media left, 1 s at 2×, 4 s at 0.5×.
+    expect(msUntil(3000, 1, 2)).toBe(1000);
+    expect(msUntil(3000, 1, 0.5)).toBe(4000);
+    expect(msUntil(3000, 1, 1)).toBe(2000);
+    expect(msUntil(3000, 4, 4)).toBe(0);
+    expect(msUntil(3000, 0, 0)).toBe(3000);
+  });
+
   it("reads back only a speed it offers", () => {
     expect(parseSpeed("1.5")).toBe(1.5);
     expect(parseSpeed("4")).toBe(4);
@@ -75,6 +107,16 @@ describe("the chosen speed", () => {
     expect(heard).toEqual([2, 0.5]);
     resetSpeedForTests();
     expect(getSpeed()).toBe(3);
+    setSpeed(1.6); // not a step: the nearest one
+    expect(getSpeed()).toBe(1.5);
+  });
+
+  it("reads storage again once nothing listens, so another tab's change isn't missed", () => {
+    const off = subscribeSpeed(() => {});
+    expect(getSpeed()).toBe(1);
+    off();
+    storage.map.set(SPEED_KEY, "2"); // set in another tab while no player was on screen
+    expect(getSpeed()).toBe(2);
   });
 
   it("a stored speed that isn't offered reads as 1×", () => {

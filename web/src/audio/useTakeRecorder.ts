@@ -4,7 +4,7 @@ import { silenceUrl } from "../player/silence";
 import { playToEnd, type CueEnd, type CuePlay } from "./cue";
 import { rememberedMic, rememberMic } from "./micPrefs";
 import { micConstraints, MicError, MicSession, type ActiveTake, type RecordedTake } from "./recorder";
-import { applySpeed, getSpeed, usePlaybackSpeed } from "./speed";
+import { applySpeed, getSpeed, msUntil, usePlaybackSpeed } from "./speed";
 import { useWakeLock } from "./wakeLock";
 
 /** Only a safety net for a take left running by mistake: real takes never get near it. */
@@ -181,7 +181,7 @@ export function usePlayback(onError?: () => void) {
         stopAll();
         setPlaying((p) => (p === end.key ? null : p));
       },
-      Math.max(0, end.endMs - end.audio.currentTime * 1000) / (end.audio.playbackRate || 1),
+      msUntil(end.endMs, end.audio.currentTime, end.audio.playbackRate),
     );
   }, [stopAll]);
 
