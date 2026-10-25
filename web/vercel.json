@@ -6,7 +6,12 @@
   "outputDirectory": "dist",
   "git": { "deploymentEnabled": { "**": false, "main": true } },
   "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]",
-  "rewrites": [{ "source": "/((?!assets/|models/|\\.well-known/).*)", "destination": "/index.html" }],
+  "rewrites": [
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/terms", "destination": "/terms.html" },
+    { "source": "/((?!assets/|models/|\\.well-known/|robots\\.txt|sitemap\\.xml|og\\.png|favicon\\.svg).*)", "destination": "/shell.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

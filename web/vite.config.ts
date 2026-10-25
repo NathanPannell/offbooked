@@ -17,8 +17,29 @@ function dropUnusedOrtWasm(): Plugin {
   };
 }
 
+/**
+ * `vite preview` serves the build the way vercel.json does: the pre-rendered marketing pages at /,
+ * /privacy and /terms, and the plain app shell (dist/shell.html) for every other page, so the e2e
+ * journeys see what production serves.
+ */
+function serveLikeVercel(): Plugin {
+  const pages = new Set(["/", "/privacy", "/terms"]);
+  // What vercel.json leaves to the files themselves. Not "anything with a dot": invite tokens have dots.
+  const files = /^\/(assets\/|models\/|\.well-known\/|robots\.txt|sitemap\.xml|og\.png|favicon\.svg|\w+\.html)/;
+  return {
+    name: "serve-like-vercel",
+    configurePreviewServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const [path = "/", query] = (req.url ?? "/").split("?");
+        if (req.method === "GET" && !pages.has(path) && !files.test(path)) req.url = `/shell.html${query ? `?${query}` : ""}`;
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), serveLikeVercel()],
   server: { port: 5173 },
   preview: { port: 4173 },
   // The speech model runs in a module worker; transformers.js is only imported there.

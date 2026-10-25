@@ -91,10 +91,12 @@ export async function createTestApp(
   };
 }
 
-export async function signIn(t: TestApp, email: string): Promise<string> {
+// Signs in as a director with beta access (they can set up productions), unless `beta: false`.
+export async function signIn(t: TestApp, email: string, { beta = true } = {}): Promise<string> {
   const req = await t.app.inject({ method: "POST", url: "/api/auth/request", payload: { email } });
   const token = new URL(req.json().devLink).searchParams.get("token");
   const res = await t.app.inject({ method: "POST", url: "/api/auth/verify", payload: { token } });
+  if (beta) await t.ctx.sql`update users set beta_access_at = coalesce(beta_access_at, now()) where email = ${email.toLowerCase()}`;
   return res.json().sessionToken;
 }
 

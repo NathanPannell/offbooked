@@ -1,4 +1,5 @@
 import { availableParallelism } from "node:os";
+import { DEFAULT_BETA_ACCESS_CODE } from "./beta.ts";
 
 export type StorageConfig =
   { driver: "local"; dir: string } | { driver: "s3"; endpoint: string; bucket: string; region: string; accessKeyId: string; secretAccessKey: string };
@@ -32,6 +33,8 @@ export interface Config {
   normalizeOnUpload: boolean;
   tts: TtsConfig;
   align: AlignConfig;
+  /** The phrase a director enters once for beta access, which setting up a production needs (src/beta.ts). */
+  betaAccessCode: string;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -95,5 +98,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       modelPath: env.ALIGN_MODEL?.trim() || "/opt/align/wav2vec2-base-960h-q4.onnx",
       threads: Math.max(1, Number(env.ALIGN_THREADS) || Math.min(2, availableParallelism())),
     },
+    betaAccessCode: env.BETA_ACCESS_CODE?.trim() || DEFAULT_BETA_ACCESS_CODE,
   };
 }

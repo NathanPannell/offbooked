@@ -11,6 +11,8 @@ export interface Director {
   id: string;
   email: string;
   name: string | null;
+  /** May set up productions: entered the beta access code (src/beta.ts), or had an account before the beta gate. */
+  betaAccess: boolean;
 }
 
 export const SESSION_DAYS = 30;
@@ -26,7 +28,7 @@ export async function requireDirector(ctx: Ctx, req: FastifyRequest): Promise<Di
   const token = credential(req, "Bearer");
   if (!token) throw unauthorized("Sign in to continue.");
   const [user] = await ctx.sql<Director[]>`
-    select u.id, u.email, u.name from sessions s join users u on u.id = s.user_id
+    select u.id, u.email, u.name, u.beta_access_at is not null as beta_access from sessions s join users u on u.id = s.user_id
     where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.deleted_at is null`;
   if (!user) throw unauthorized("Your session has ended. Sign in again.");
   return user;
