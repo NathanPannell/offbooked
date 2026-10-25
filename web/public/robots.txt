@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /join/
+Disallow: /i/
+Disallow: /signin
+Disallow: /auth/
+
+Sitemap: https://offbooked.com/sitemap.xml

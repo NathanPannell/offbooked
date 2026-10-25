@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { requireDirector, SESSION_DAYS } from "../auth.ts";
+import { requireDirector, SESSION_DAYS, type Director } from "../auth.ts";
+import { codeMatches } from "../beta.ts";
 import type { Ctx } from "../context.ts";
 import { randomToken, sha256 } from "../crypto.ts";
 import { HttpError, unauthorized } from "../errors.ts";
@@ -10,6 +11,7 @@ import { enforce, LIMITS } from "../ratelimit.ts";
 import { deleteAccount } from "../retention.ts";
 
 const LOGIN_TOKEN_MINUTES = 15;
+const BETA_TOO_MANY = "Too many tries. Wait an hour, or email us for help.";
 
 export function authRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post("/api/auth/request", async (req, reply) => {
@@ -45,10 +47,10 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
       where token_hash = ${sha256(token)} and used_at is null and expires_at > now()
       returning email`;
     if (!login) throw unauthorized("This sign-in link has expired or was already used. Request a new one.");
-    const [user] = await ctx.sql<{ id: string; email: string; name: string | null }[]>`
+    const [user] = await ctx.sql<Director[]>`
       insert into users (email) values (${login.email})
       on conflict (email) do update set email = excluded.email
-      returning id, email, name`;
+      returning id, email, name, beta_access_at is not null as beta_access`;
     const sessionToken = randomToken();
     await ctx.sql`insert into sessions (token_hash, user_id, expires_at)
                   values (${sha256(sessionToken)}, ${user!.id}, now() + ${SESSION_DAYS} * interval '1 day')`;
@@ -61,7 +63,24 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     const director = await requireDirector(ctx, req);
     const name = optionalString(body(req.body), "name", 80);
     if (name === undefined) return { user: director };
-    const [user] = await ctx.sql`update users set name = ${name} where id = ${director.id} returning id, email, name`;
+    const [user] = await ctx.sql`update users set name = ${name} where id = ${director.id}
+      returning id, email, name, beta_access_at is not null as beta_access`;
+    return { user };
+  });
+
+  // Offbooked is in private beta: entering the access code (BETA_ACCESS_CODE, emailed on request)
+  // lets this account set up productions, for good. Every try counts toward the limits, right or wrong.
+  app.post("/api/me/beta-access", async (req) => {
+    const director = await requireDirector(ctx, req);
+    if (director.betaAccess) return { user: director };
+    const code = requiredString(body(req.body), "code", 200);
+    await enforce(ctx.sql, ctx.log, `beta-code-ip:${req.ip}`, LIMITS.betaCodeIp, BETA_TOO_MANY);
+    await enforce(ctx.sql, ctx.log, `beta-code-user:${director.id}`, LIMITS.betaCodeUser, BETA_TOO_MANY);
+    if (!codeMatches(code, ctx.config.betaAccessCode)) throw new HttpError(400, "wrong_code", "That code doesn't match. Check it and try again.");
+    const [user] = await ctx.sql<Director[]>`
+      update users set beta_access_at = coalesce(beta_access_at, now()) where id = ${director.id}
+      returning id, email, name, beta_access_at is not null as beta_access`;
+    ctx.log.info({ userId: director.id }, "beta access granted");
     return { user };
   });
 

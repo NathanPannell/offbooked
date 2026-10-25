@@ -8,7 +8,8 @@ const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures
 /** YYYY-MM-DD, `days` from today. */
 const dayFromNow = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
-async function signInAsDirector(page: Page): Promise<void> {
+/** Signs in as a new director, and enters the beta access code unless `beta` is false. */
+async function signInAsDirector(page: Page, { beta = true } = {}): Promise<void> {
   await page.goto("/signin");
   await page.getByLabel("Email").fill(`director-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`);
   await page.getByRole("button", { name: "Email me a sign-in link" }).click();
@@ -16,6 +17,14 @@ async function signInAsDirector(page: Page): Promise<void> {
   await page.getByRole("link", { name: "Use dev sign-in link" }).click();
   // A new director has no productions yet, so signing in goes straight to setting one up.
   await expect(page).toHaveURL(/\/app\/new$/);
+  if (beta) await enterBetaCode(page);
+}
+
+/** Offbooked is in private beta: a new account enters the access code before setting up a play. */
+async function enterBetaCode(page: Page, code = "Break a leg!"): Promise<void> {
+  await page.getByLabel("Access code").fill(code);
+  await page.getByRole("button", { name: "Unlock Offbooked" }).click();
+  await expect(page.getByRole("heading", { name: "What are you putting on?" })).toBeVisible();
 }
 
 /** Sets up a play on one screen (title, dates, script) and waits on it until the script is read. */
@@ -31,6 +40,67 @@ async function createProduction(page: Page, title: string): Promise<void> {
   await expect(page).toHaveURL(/\/app\/p\/[^/?]+\?tab=script$/, { timeout: 30_000 });
   await expect(page.getByText("Stand, and unfold yourself.")).toBeVisible();
 }
+
+test("the marketing pages are real HTML before any script runs, and the app's pages aren't indexed", async ({ browser, request }, testInfo) => {
+  const home = await (await request.get("/")).text();
+  expect(home).toContain("Hear your script read by your <span");
+  expect(home).toContain('<link rel="canonical" href="https://offbooked.com/">');
+  expect(home).toContain('<meta property="og:image" content="https://offbooked.com/og.png">');
+  expect(home).toContain('"@type":"FAQPage"');
+  expect(home).toContain("Is Offbooked the “Off Book!” app?");
+  expect(await (await request.get("/join/abc")).text()).toContain('<meta name="robots" content="noindex">');
+  expect(await (await request.get("/robots.txt")).text()).toContain("Sitemap: https://offbooked.com/sitemap.xml");
+  expect((await request.get("/og.png")).headers()["content-type"]).toBe("image/png");
+
+  const noScript = await browser.newContext({ ...testInfo.project.use, javaScriptEnabled: false });
+  const page = await noScript.newPage();
+  for (const [path, heading] of [
+    ["/", "Hear your script read by your real cast."],
+    ["/privacy", "Your script, your voices, your cast"],
+    ["/terms", "The house rules"],
+  ]) {
+    await page.goto(path!);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(heading!);
+  }
+  await expect(page.getByText(/We never use them to train AI/)).toBeVisible();
+  await noScript.close();
+});
+
+test("the landing page plays its demo and leads to setting up a show", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  await page.goto("/");
+  await expect(page.getByText("Used by casts in British Columbia and Nova Scotia for real productions.")).toBeVisible();
+  // No synthesized voices in the demo: until the real cast's recording is in, it says so.
+  await expect(page.getByText("Real-cast recording coming soon.")).toBeVisible();
+  await page.getByRole("button", { name: "See the demo" }).click();
+  await expect(page.getByRole("button", { name: "Pause the demo" })).toBeVisible();
+  await expect(page.getByText("Your line · say it now")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Coming soon" }).first()).toBeDisabled();
+  await page.getByRole("link", { name: "Privacy policy", exact: true }).click();
+  await expect(page).toHaveURL(/\/privacy$/);
+  await expect(page).toHaveTitle("Privacy policy · Offbooked");
+  await page.goto("/");
+  await page.getByRole("link", { name: "Set up your show, free" }).first().click();
+  await expect(page).toHaveURL(/\/signin$/);
+  expect(errors).toEqual([]);
+});
+
+test("a new director needs the beta access code to set up a play, and keeps it", async ({ page }) => {
+  await signInAsDirector(page, { beta: false });
+  await expect(page.getByRole("heading", { name: "Offbooked is in private beta" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "contact@nathanpannell.com" })).toHaveAttribute("href", /^mailto:contact@nathanpannell\.com\?/);
+  await expect(page.getByLabel("Title")).toHaveCount(0);
+
+  await page.getByLabel("Access code").fill("break a log");
+  await page.getByRole("button", { name: "Unlock Offbooked" }).click();
+  await expect(page.getByText("That code doesn't match. Check it and try again.")).toBeVisible();
+
+  // Case, punctuation and spacing don't matter, and the account keeps its access.
+  await enterBetaCode(page, "  BREAK a leg ");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "What are you putting on?" })).toBeVisible();
+});
 
 test("a director uploads a script and shares the cast link, and a cast member opens it", async ({ page, browser }, testInfo) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -183,6 +253,35 @@ test("the screen stays on while the run-through plays", async ({ page }) => {
   await expect.poll(wakeLock).toEqual({ requested: 1, released: 1 });
 });
 
+test("the run-through plays at the chosen speed, remembered on this device", async ({ page }) => {
+  await signInAsDirector(page);
+  await createProduction(page, "Hamlet (speed)");
+  await page.getByRole("button", { name: "Listen", exact: true }).click();
+  const controls = page.getByRole("group", { name: "Playback" });
+  const speed = controls.getByRole("button", { name: /^Speed: / });
+  await expect(speed).toHaveText("1×");
+  // A tap steps up; the keyboard works too.
+  await speed.click();
+  await expect(speed).toHaveText("1.25×");
+  await speed.focus();
+  await page.keyboard.press("Enter");
+  await expect(speed).toHaveText("1.5×");
+
+  const play = controls.getByRole("button", { name: "Play", exact: true });
+  await expect(play).toBeEnabled();
+  await play.click();
+  const rate = () => page.locator("audio").evaluate((a: HTMLAudioElement) => ({ rate: a.playbackRate, pitch: a.preservesPitch }));
+  await expect.poll(rate).toEqual({ rate: 1.5, pitch: true });
+
+  // Remembered on this device; a new choice plays from the first line.
+  await page.reload();
+  await expect(speed).toHaveText("1.5×");
+  await speed.click();
+  await expect(speed).toHaveText("2×");
+  await play.click();
+  await expect.poll(rate).toEqual({ rate: 2, pitch: true });
+});
+
 test("a take the server won't store stays on the phone through a reload, then goes up by itself", async ({ page, browser }, testInfo) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAsDirector(page);
@@ -228,6 +327,10 @@ test("a take the server won't store stays on the phone through a reload, then go
   await phone.reload();
   await expect(kept).toBeVisible();
   await expect(phone.getByRole("button", { name: "Play your take, kept on this device" })).toBeVisible();
+  // Listen back has the playback speed beside it.
+  const speed = phone.getByRole("button", { name: /^Playback speed: 1×/ });
+  await speed.click();
+  await expect(phone.getByRole("button", { name: /^Playback speed: 1.25×/ })).toBeVisible();
 
   // The server is back: the take goes up without the actor doing anything.
   refusing = false;

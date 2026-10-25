@@ -6,6 +6,8 @@ import { productions, script as scriptApi } from "../../api/director";
 import type { ParseProgress } from "../../api/types";
 import { InfoTip } from "../../components/InfoTip";
 import { useInterval, useResource } from "../../lib/useResource";
+import { BetaGate } from "./BetaGate";
+import { useDirector } from "./DirectorLayout";
 import { ParseProgressView } from "./ParseProgressView";
 import { ScriptDropZone } from "./ScriptDropZone";
 import { localToday, performanceDatesProblem, sendSetup, type SetupApi } from "./setup";
@@ -20,12 +22,19 @@ const setupApi: SetupApi = {
 type Phase = "form" | "sending" | "reading" | "failed";
 type Errors = { title?: string; dates?: string; file?: string; form?: string };
 
+/** Setting up a play needs beta access; an account without it is asked for the code first. */
+export default function NewProduction() {
+  const { user, setUser } = useDirector();
+  // Only an explicit false gates: an API from before the beta gate sends no betaAccess at all.
+  return user.betaAccess !== false ? <SetUpProduction /> : <BetaGate onGranted={setUser} />;
+}
+
 /**
  * Setting up a play is one screen: the title, the performance dates and the script. Sending it
  * creates the production, uploads the file and reads it right here; once it's read, the director
  * lands on their script.
  */
-export default function NewProduction() {
+function SetUpProduction() {
   const navigate = useNavigate();
   const [today] = useState(localToday);
   const [title, setTitle] = useState("");

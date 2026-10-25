@@ -4,7 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { RENDER_SETTINGS } from "./plan.ts";
 import { fileLoudness } from "./loudness.ts";
-import { analyzePcm, pcmOf, shiftStretches, TRIM, type Stretch, type WordsOnVoice } from "./trim.ts";
+import { analyzePcm, pcmOf, shiftStretches, TRIM, type LineSpan, type Stretch } from "./trim.ts";
 
 const exec = promisify(execFile);
 const RATE = RENDER_SETTINGS.sampleRate;
@@ -121,7 +121,7 @@ export async function normalizeClipCut(
   input: string,
   output: string,
   m4a?: string,
-  opts: { clean?: boolean; words?: WordsOnVoice | null } = {},
+  opts: { clean?: boolean; align?: ((pcm: Int16Array) => Promise<LineSpan | null>) | null } = {},
 ): Promise<{ samples: number; cutStartMs: number; speech: Stretch[]; cut: boolean }> {
   // One decode of the input: the clip at 48 kHz mono, cleaned up when asked, kept as raw samples
   // beside the output, and at 16 kHz for finding the speech, from the same run.
@@ -155,7 +155,9 @@ export async function normalizeClipCut(
     { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, timeout: 10 * 60_000 },
   );
   try {
-    const cut = trimFilters(analyzePcm(pcmOf(stdout as Buffer), opts.words));
+    // With `align`, the cut follows the line's words where the aligner found them (align/ctc.ts).
+    const pcm = pcmOf(stdout as Buffer);
+    const cut = trimFilters(analyzePcm(pcm, opts.align ? await opts.align(pcm) : null));
     // The clip's length from the file itself: its samples are only ever streamed, never held.
     return await finish(clip, (await stat(clip)).size / 2, cut, output, m4a);
   } finally {

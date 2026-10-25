@@ -1,3 +1,4 @@
+import { ModelAligner, type Aligner } from "./align/model.ts";
 import type { Config } from "./config.ts";
 import type { Sql } from "./db.ts";
 import { createMailer, type Mailer } from "./email/mailer.ts";
@@ -23,6 +24,7 @@ export interface Ctx {
   renderWorker: { kick(): void }; // wakes the in-process render worker when a render is queued
   retention: { kick(): void; touch(): void }; // the content retention worker (retention.ts): dates changed, or a request arrived
   tts: TtsService | null; // null when TTS_DRIVER=off; otherwise it may still report itself unavailable
+  aligner: Aligner | null; // finds each take's words in its recording (align/); null when ALIGN_DRIVER=off
 }
 
 // `synthesizer` replaces Piper (tests pass a fake, or null for no TTS).
@@ -46,5 +48,11 @@ export function createCtx(config: Config, sql: Sql, log: Log, overrides: Partial
     renderWorker: overrides.renderWorker ?? { kick() {} },
     retention: overrides.retention ?? { kick() {}, touch() {} },
     tts: synthesizer ? new TtsService({ sql, storage, log, synthesizer, concurrency: config.tts.concurrency }) : null,
+    aligner:
+      overrides.aligner !== undefined
+        ? overrides.aligner
+        : config.align.driver === "wav2vec2"
+          ? new ModelAligner({ modelPath: config.align.modelPath, threads: config.align.threads, log })
+          : null,
   };
 }

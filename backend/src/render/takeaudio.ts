@@ -3,10 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Ctx } from "../context.ts";
 import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
-import { realignWordStarts } from "../realign.ts";
-import { flattenStretches, wordAnchors } from "../taketiming.ts";
+import { alignLine, type LineAlignment } from "../align/ctc.ts";
+import { flattenStretches } from "../taketiming.ts";
+import { TTS_PRIORITY } from "../tts/service.ts";
 import { encodeCue, normalizeClipCut } from "./ffmpeg.ts";
-import type { Stretch } from "./trim.ts";
 
 export interface TakeAudioRow {
   id: string;
@@ -21,7 +21,7 @@ export interface NormalizedTake {
   samples: number;
   streamKey: string | null; // AAC .m4a for line-by-line playback, when asked for
   // Made just now: where the voice is in the clip (flat [start, end, ...] ms), where the upload was cut,
-  // and the word starts re-timed on the voice (realign.ts), in ms of the upload.
+  // and when each word starts (align/ctc.ts), in ms of the upload; none when the line wasn't found.
   speechMs?: number[];
   trimStartMs?: number;
   wordStartsMs?: number[];
@@ -35,12 +35,14 @@ export interface NormalizedTake {
 // words when the app heard them (`wordBounds`), re-timed on the voice first. t6: one decode of the
 // upload (cleaned at 48 kHz beside the 16 kHz copy for the speech), loudness measured in-process.
 // t7: a quarter second kept on both sides of the speech (TRIM pads 250/250 ms, were 150/180).
-export const NORMALIZE_VERSION = "t7";
+// t8: the server finds the line's words in the recording itself (align/), and the cut follows them;
+// the app's word starts are no longer used for anything.
+export const NORMALIZE_VERSION = "t8";
 export const isCurrentNormalized = (key: string | null): key is string => Boolean(key?.endsWith(`.${NORMALIZE_VERSION}.flac`));
 
 // Each take is normalized as soon as it is uploaded (normalizeSoon), so the recorder, the cues and
-// the run-through get its cut, levelled clip and its words re-timed on the voice (realign.ts) at
-// once rather than on first play. One at a time, in upload order, at most MAX_WAITING waiting (the
+// the run-through get its cut, levelled clip and its words (align/) at once rather than on first
+// play. One at a time, in upload order, at most MAX_WAITING waiting (the
 // rest are normalized on first use, as before). Driven only by uploads: nothing polls or sleeps.
 export const MAX_WAITING = 200;
 const queues = new WeakMap<Ctx, { waiting: (() => Promise<unknown>)[]; draining: boolean }>();
@@ -83,12 +85,13 @@ const inflight = new Map<string, Promise<NormalizedTake>>();
 
 // A take's normalized audio, made and cached in storage on first use. The render passes `flacTo` to
 // get the FLAC written to its work directory; line playback passes `stream` to also get the .m4a.
-// Normalizing writes both files in one ffmpeg run, so whichever comes first makes both.
+// Normalizing writes both files in one ffmpeg run, so whichever comes first makes both. `priority`
+// orders the aligner's work (TTS_PRIORITY: a line someone is waiting to hear goes first).
 export async function normalizedTake(
   ctx: Ctx,
   productionId: string,
   take: TakeAudioRow,
-  opts: { stream?: boolean; flacTo?: string } = {},
+  opts: { stream?: boolean; flacTo?: string; priority?: number } = {},
 ): Promise<NormalizedTake> {
   const { storage } = ctx;
   const have =
@@ -99,7 +102,7 @@ export async function normalizedTake(
   }
   let running = inflight.get(take.id);
   if (!running) {
-    running = make(ctx, productionId, take, have).finally(() => inflight.delete(take.id));
+    running = make(ctx, productionId, take, have, opts.priority ?? TTS_PRIORITY.render).finally(() => inflight.delete(take.id));
     inflight.set(take.id, running);
   }
   const done = await running;
@@ -107,12 +110,30 @@ export async function normalizedTake(
   return done;
 }
 
-interface TakeWords {
-  wordStartsMs: number[] | null;
-  text: string;
+/**
+ * Finds the take's line in its recording (align/ctc.ts), for the cut and the word starts: null when
+ * there's no aligner or model, the line isn't there with confidence, or the aligner fails (the take
+ * is then cut by loudness, as without it).
+ */
+async function findLine(ctx: Ctx, takeId: string, text: string, pcm: Int16Array, priority: number): Promise<LineAlignment | null> {
+  try {
+    const em = await ctx.aligner?.emissions(pcm, priority);
+    const line = em ? alignLine(em, text) : null;
+    ctx.log.info({ takeId, found: !!line, fit: line ? Number(line.fit.toFixed(2)) : undefined }, "take aligned");
+    return line;
+  } catch (err) {
+    ctx.log.warn({ err, takeId }, "take alignment failed: cutting it by loudness");
+    return null;
+  }
 }
 
-async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { normalizedKey: string; samples: number } | null): Promise<NormalizedTake> {
+async function make(
+  ctx: Ctx,
+  productionId: string,
+  take: TakeAudioRow,
+  have: { normalizedKey: string; samples: number } | null,
+  priority: number,
+): Promise<NormalizedTake> {
   const { storage, sql } = ctx;
   const dir = await mkdtemp(path.join(tmpdir(), "offbooked-take-"));
   try {
@@ -130,18 +151,18 @@ async function make(ctx: Ctx, productionId: string, take: TakeAudioRow, have: { 
     }
     const source = path.join(dir, `source${path.extname(take.storageKey)}`);
     await writeFile(source, await storage.get(take.storageKey));
-    // The app's word starts are re-timed on the take's voice (realign.ts), and the cut follows those
-    // words (trim.ts `wordBounds`): one analysis, the same voiced stretches, so they agree.
-    const [words] = await sql<TakeWords[]>`select t.word_starts_ms, l.text from takes t join lines l on l.id = t.line_id where t.id = ${take.id}`;
+    // The line's words are found in the recording (align/ctc.ts) on the same 16 kHz samples the cut
+    // reads, and the cut follows them (trim.ts `alignedBounds`), so the cut and the words agree.
+    const [line] = ctx.aligner ? await sql<{ text: string }[]>`select l.text from takes t join lines l on l.id = t.line_id where t.id = ${take.id}` : [];
     let aligned: number[] | null = null;
-    const onVoice = words?.wordStartsMs?.length
-      ? (voice: Stretch[]) => {
-          aligned = realignWordStarts(words.wordStartsMs, words.text, voice);
-          // Live starts that don't fit the voice aren't re-timed, and don't guide the cut either.
-          return aligned && wordAnchors(aligned, words.text);
+    const align = line
+      ? async (pcm: Int16Array) => {
+          const found = await findLine(ctx, take.id, line.text, pcm, priority);
+          aligned = found?.wordStartsMs ?? null;
+          return found;
         }
       : null;
-    const { samples, cutStartMs, speech } = await normalizeClipCut(source, flac, m4a, { clean: true, words: onVoice });
+    const { samples, cutStartMs, speech } = await normalizeClipCut(source, flac, m4a, { clean: true, align });
     const normalizedKey = `productions/${productionId}/normalized/${take.id}.${NORMALIZE_VERSION}.flac`;
     await Promise.all([storage.put(normalizedKey, await readFile(flac), "audio/flac"), storage.put(streamKey, await readFile(m4a), "audio/mp4")]);
     if (await sweepIfDeleted(ctx, productionId)) throw new ContentDeletedError();

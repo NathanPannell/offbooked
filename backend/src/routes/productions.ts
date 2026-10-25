@@ -58,6 +58,7 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post("/api/productions", async (req) => {
     const user = await requireDirector(ctx, req);
+    if (!user.betaAccess) throw new HttpError(403, "beta_access_required", "Offbooked is in private beta. Enter your access code to set up a production.");
     const b = body(req.body);
     const title = requiredString(b, "title", 200);
     const dates = performanceDates(b);

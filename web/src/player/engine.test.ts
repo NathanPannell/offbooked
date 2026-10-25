@@ -199,6 +199,32 @@ describe("my role", () => {
     const rates = Object.fromEntries(audio.played.filter((p) => p.src.startsWith("clip:")).map((p) => [p.src.slice(5), p.rate]));
     expect(rates).toEqual({ a: 3, b: 1, c: 3, d: 3, e: 1, f: 3 });
   });
+
+  it("every new clip keeps the chosen speed, from 0.5× to 4×, with the voice's pitch kept", async () => {
+    const { audio, engine } = setup();
+    engine.setSpeed(0.5);
+    await flush();
+    engine.play();
+    await flush();
+    expect(audio.current).toEqual({ src: "clip:a", rate: 0.5 });
+    expect(audio.preservesPitch).toBe(true);
+    // A change mid-clip applies at once, and to every clip after it; the gaps stay at 1×.
+    engine.setSpeed(4);
+    expect(audio.playbackRate).toBe(4);
+    audio.finish(); // a
+    await flush();
+    expect(isSilence(audio.current.src)).toBe(true);
+    expect(audio.current.rate).toBe(1);
+    await playTo(audio, "f");
+    const rates = audio.played.filter((p) => p.src.startsWith("clip:")).map((p) => p.rate);
+    expect(rates).toEqual([0.5, 4, 4, 4, 4, 4]);
+    expect(audio.defaultPlaybackRate).toBe(4);
+    // Out of range: clamped to what the player offers.
+    engine.setSpeed(10);
+    expect(audio.playbackRate).toBe(4);
+    engine.setSpeed(0.1);
+    expect(audio.playbackRate).toBe(0.5);
+  });
 });
 
 describe("clip loader", () => {
