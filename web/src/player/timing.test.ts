@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { audioSourceTag, isSpeed, MIN_PAUSE_MS, myLinePauseMs, spokenText, wordCount } from "./timing";
+import { audioSourceTag, MIN_PAUSE_MS, myLinePauseMs, spokenText, wordCount } from "./timing";
 
 describe("my-line pauses", () => {
   it("counts words, ignoring punctuation", () => {
@@ -27,14 +27,6 @@ describe("my-line pauses", () => {
     expect(myLinePauseMs({ text: "anything", recordedMs: 2000 })).toBe(2500);
     expect(myLinePauseMs({ text: "anything", recordedMs: 10_000 })).toBe(11_500);
     expect(myLinePauseMs({ text: "anything", recordedMs: 0 })).toBe(MIN_PAUSE_MS);
-  });
-});
-
-describe("speeds", () => {
-  it("offers 1× to 3× and nothing else", () => {
-    expect([1, 1.25, 1.5, 2, 2.5, 3].every(isSpeed)).toBe(true);
-    expect(isSpeed(4)).toBe(false);
-    expect(isSpeed("2")).toBe(false);
   });
 });
 

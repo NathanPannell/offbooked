@@ -5,10 +5,10 @@ describe("run-through settings", () => {
   const roles = new Set([MY_PART, "c1", "c2"]);
 
   it("cast members start on their own part with a pause to say their lines; others just listen", () => {
-    expect(defaultSettings(true, "full")).toEqual({ role: MY_PART, mode: "pause", speed: 1 });
-    expect(defaultSettings(true, "mine")).toEqual({ role: MY_PART, mode: "pause", speed: 1 });
+    expect(defaultSettings(true, "full")).toEqual({ role: MY_PART, mode: "pause" });
+    expect(defaultSettings(true, "mine")).toEqual({ role: MY_PART, mode: "pause" });
     // A listener with no part (or the director): "Just listening", and a part picked later reads out.
-    expect(defaultSettings(false, "full")).toEqual({ role: "", mode: "read", speed: 1 });
+    expect(defaultSettings(false, "full")).toEqual({ role: "", mode: "read" });
     expect(defaultSettings(false, "mine").mode).toBe("pause");
   });
 
@@ -19,16 +19,17 @@ describe("run-through settings", () => {
   });
 
   it("doesn't let a mode saved along with another change stick", () => {
-    // Saved by an older version (or a speed tap) with the old default "read": the new default wins.
+    // Saved by an older version (or a speed tap, when speed was saved here) with the old default
+    // "read": the new default wins, and an old per-production speed is dropped.
     const actor = defaultSettings(true, "full");
-    expect(parseSettings(JSON.stringify({ role: MY_PART, mode: "read", speed: 1.5 }), actor, roles)).toEqual({ role: MY_PART, mode: "pause", speed: 1.5 });
-    // Changing speed or part saves the mode in force, but not as a choice.
-    const faster = changeSettings(actor, { speed: 2 });
-    expect(faster.modePicked).toBeUndefined();
-    expect(parseSettings(JSON.stringify({ ...faster, mode: "read" }), actor, roles).mode).toBe("pause");
+    expect(parseSettings(JSON.stringify({ role: MY_PART, mode: "read", speed: 1.5 }), actor, roles)).toEqual({ role: MY_PART, mode: "pause" });
+    // Changing part saves the mode in force, but not as a choice.
+    const moved = changeSettings(actor, { role: "c2" });
+    expect(moved.modePicked).toBeUndefined();
+    expect(parseSettings(JSON.stringify({ ...moved, mode: "read" }), actor, roles).mode).toBe("pause");
     // Once picked, it stays picked through later changes.
     const chosen = changeSettings(changeSettings(actor, { mode: "skip" }), { role: "c1" });
-    expect(parseSettings(JSON.stringify(chosen), actor, roles)).toEqual({ role: "c1", mode: "skip", speed: 1, modePicked: true });
+    expect(parseSettings(JSON.stringify(chosen), actor, roles)).toEqual({ role: "c1", mode: "skip", modePicked: true });
   });
 
   it("restores what was saved, and drops anything this production doesn't allow", () => {
@@ -36,7 +37,6 @@ describe("run-through settings", () => {
     expect(parseSettings(JSON.stringify({ role: "c2", mode: "skip", speed: 2.5, modePicked: true }), fallback, roles)).toEqual({
       role: "c2",
       mode: "skip",
-      speed: 2.5,
       modePicked: true,
     });
     expect(parseSettings(JSON.stringify({ role: "gone", mode: "loop", speed: 7 }), fallback, roles)).toEqual(fallback);

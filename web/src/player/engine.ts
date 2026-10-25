@@ -1,4 +1,5 @@
 import type { SpokenSegment } from "../api/types";
+import { applySpeed, clampSpeed } from "../audio/speed";
 import type { Clip, ClipLoader } from "./clips";
 import { gapBetweenMs, isMine, nextIndex, NO_PART, playableFrom, prefetchWindow, previousIndex, stepFor, type Part, type QueueLine } from "./queue";
 import { silenceUrl } from "./silence";
@@ -77,7 +78,7 @@ export class PlayerEngine {
     audio.addEventListener("play", this.onPlay);
     audio.addEventListener("pause", this.onPause);
     audio.addEventListener("error", this.onError);
-    audio.preservesPitch = true;
+    applySpeed(audio, 1);
   }
 
   getState = (): PlayerState => this.state;
@@ -120,9 +121,9 @@ export class PlayerEngine {
     if (this.lines.length) this.prefetchFrom(Math.max(0, this.state.index));
   }
 
-  /** Playback speed for other people's lines (1 to 3). */
+  /** Playback speed for other people's lines (0.5× to 4×). */
   setSpeed(speed: number) {
-    this.speed = Math.min(3, Math.max(1, speed));
+    this.speed = clampSpeed(speed);
     const phase = this.phase;
     if (phase?.kind === "line") this.applyRate(isMine(this.part, this.lines[phase.index]));
   }
@@ -204,10 +205,8 @@ export class PlayerEngine {
     } else {
       this.audio.currentTime = 0;
     }
-    // Loading a new src resets playbackRate to defaultPlaybackRate, so set both.
-    const rate = opts.rate ?? 1;
-    this.audio.defaultPlaybackRate = rate;
-    this.audio.playbackRate = rate;
+    // Loading a new src resets playbackRate to defaultPlaybackRate; applySpeed sets both.
+    applySpeed(this.audio, opts.rate ?? 1);
     void this.audio.play().catch((err: unknown) => {
       // A newer src aborts the previous play(); only a refusal (no user gesture yet) stops playback.
       if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false });
@@ -215,9 +214,7 @@ export class PlayerEngine {
   }
 
   private applyRate(mine: boolean) {
-    const rate = mine ? 1 : this.speed;
-    this.audio.defaultPlaybackRate = rate;
-    this.audio.playbackRate = rate;
+    applySpeed(this.audio, mine ? 1 : this.speed);
   }
 
   private cancelGap() {

@@ -183,6 +183,35 @@ test("the screen stays on while the run-through plays", async ({ page }) => {
   await expect.poll(wakeLock).toEqual({ requested: 1, released: 1 });
 });
 
+test("the run-through plays at the chosen speed, remembered on this device", async ({ page }) => {
+  await signInAsDirector(page);
+  await createProduction(page, "Hamlet (speed)");
+  await page.getByRole("button", { name: "Listen", exact: true }).click();
+  const controls = page.getByRole("group", { name: "Playback" });
+  const speed = controls.getByRole("button", { name: /^Speed: / });
+  await expect(speed).toHaveText("1×");
+  // A tap steps up; the keyboard works too.
+  await speed.click();
+  await expect(speed).toHaveText("1.25×");
+  await speed.focus();
+  await page.keyboard.press("Enter");
+  await expect(speed).toHaveText("1.5×");
+
+  const play = controls.getByRole("button", { name: "Play", exact: true });
+  await expect(play).toBeEnabled();
+  await play.click();
+  const rate = () => page.locator("audio").evaluate((a: HTMLAudioElement) => ({ rate: a.playbackRate, pitch: a.preservesPitch }));
+  await expect.poll(rate).toEqual({ rate: 1.5, pitch: true });
+
+  // Remembered on this device; a new choice plays from the first line.
+  await page.reload();
+  await expect(speed).toHaveText("1.5×");
+  await speed.click();
+  await expect(speed).toHaveText("2×");
+  await play.click();
+  await expect.poll(rate).toEqual({ rate: 2, pitch: true });
+});
+
 test("a take the server won't store stays on the phone through a reload, then goes up by itself", async ({ page, browser }, testInfo) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
   await signInAsDirector(page);
@@ -228,6 +257,10 @@ test("a take the server won't store stays on the phone through a reload, then go
   await phone.reload();
   await expect(kept).toBeVisible();
   await expect(phone.getByRole("button", { name: "Play your take, kept on this device" })).toBeVisible();
+  // Listen back has the playback speed beside it.
+  const speed = phone.getByRole("button", { name: /^Playback speed: 1×/ });
+  await speed.click();
+  await expect(phone.getByRole("button", { name: /^Playback speed: 1.25×/ })).toBeVisible();
 
   // The server is back: the take goes up without the actor doing anything.
   refusing = false;
