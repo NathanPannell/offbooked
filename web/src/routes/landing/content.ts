@@ -16,7 +16,7 @@ export const FAQ: Faq[] = [
   },
   {
     q: "What scripts work?",
-    a: "PDF or Word files with real text, up to 300 pages. Scanned pages don't work yet.",
+    a: "PDF (up to 300 pages) or Word files with real text. Scanned pages don't work yet.",
   },
   {
     q: "Does it work on Android?",

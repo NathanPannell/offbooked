@@ -800,19 +800,6 @@
   font-style: italic;
 }
 
-.mk-band p {
-  max-width: 34em;
-  margin: 0;
-  color: var(--ink-soft);
-}
-
-.mk-band .mk-band-works {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-2);
-  color: var(--muted);
-}
-
 /* Footer */
 
 .mk-footer {

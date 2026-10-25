@@ -150,7 +150,7 @@ export function Landing() {
           ))}
         </ul>
         <p className="mk-plans-note small muted">
-          Private beta: <a href={mailto("Offbooked access code")}>email {CONTACT_EMAIL}</a> for an access code.
+          Private beta: <a href={mailto("Offbooked access code")}>email {CONTACT_EMAIL}</a> for an access code. Your cast never need one.
         </p>
       </section>
 
