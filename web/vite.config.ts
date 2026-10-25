@@ -24,12 +24,14 @@ function dropUnusedOrtWasm(): Plugin {
  */
 function serveLikeVercel(): Plugin {
   const pages = new Set(["/", "/privacy", "/terms"]);
+  // What vercel.json leaves to the files themselves. Not "anything with a dot": invite tokens have dots.
+  const files = /^\/(assets\/|models\/|\.well-known\/|robots\.txt|sitemap\.xml|og\.png|favicon\.svg|\w+\.html)/;
   return {
     name: "serve-like-vercel",
     configurePreviewServer(server) {
       server.middlewares.use((req, _res, next) => {
         const [path = "/", query] = (req.url ?? "/").split("?");
-        if (req.method === "GET" && !pages.has(path) && !/\.[a-z0-9]+$/i.test(path)) req.url = `/shell.html${query ? `?${query}` : ""}`;
+        if (req.method === "GET" && !pages.has(path) && !files.test(path)) req.url = `/shell.html${query ? `?${query}` : ""}`;
         next();
       });
     },

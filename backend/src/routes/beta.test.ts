@@ -45,6 +45,7 @@ describe("beta access", { skip: dbSkip }, () => {
     assert.equal(renamed.json().user.betaAccess, true);
     // Entering a code again once it has access is harmless, even a wrong one.
     assert.equal((await enter(later, "anything")).json().user.betaAccess, true);
+    assert.equal((await enter(later, "")).statusCode, 200);
   });
 
   test("tries are rate limited per account, right or wrong", async () => {

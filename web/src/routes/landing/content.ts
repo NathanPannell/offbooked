@@ -21,7 +21,7 @@ export const FAQ: Faq[] = [
   },
   {
     q: "What if someone never records?",
-    a: "Their lines are read by an AI voice, a different one for each character, so the play is fully voiced from the day you upload it. Anyone can also record those lines in the meantime, you included, and the newest recording is the one that plays.",
+    a: "Their lines are read by an AI voice, with the voices spread across the characters, so the play is fully voiced from the day you upload it. Anyone can also record those lines in the meantime, you included, and the newest recording is the one that plays.",
   },
   {
     q: "Can two people record the same part?",

@@ -25,7 +25,8 @@ type Errors = { title?: string; dates?: string; file?: string; form?: string };
 /** Setting up a play needs beta access; an account without it is asked for the code first. */
 export default function NewProduction() {
   const { user, setUser } = useDirector();
-  return user.betaAccess ? <SetUpProduction /> : <BetaGate onGranted={setUser} />;
+  // Only an explicit false gates: an API from before the beta gate sends no betaAccess at all.
+  return user.betaAccess !== false ? <SetUpProduction /> : <BetaGate onGranted={setUser} />;
 }
 
 /**

@@ -16,13 +16,18 @@ export function useCta(): { to: string; label: string } {
   return signedIn ? { to: "/app", label: "Your productions" } : { to: "/signin", label: "Set up your show, free" };
 }
 
+// The page a visit lands on keeps the scroll position the browser restores (a reload, Back); moving
+// to another marketing page inside the app starts it at the top.
+let landed = false;
+
 /** The marketing pages' frame: the top bar and the footer, with the page's title kept in the tab. */
 export function MarketingLayout({ path, children, navCta = true }: { path: string; children: ReactNode; navCta?: boolean }) {
   const cta = useCta();
   useEffect(() => {
     const page = pageFor(path);
     if (page) document.title = page.title;
-    if (!window.location.hash) window.scrollTo(0, 0);
+    if (landed && !window.location.hash) window.scrollTo(0, 0);
+    landed = true;
     return () => {
       document.title = SITE_NAME;
     };
@@ -67,7 +72,7 @@ export function MarketingLayout({ path, children, navCta = true }: { path: strin
             <Link to="/signin">Sign in</Link>
           </li>
         </ul>
-        <p className="mk-footer-small small muted">© 2026 Offbooked. Break a leg.</p>
+        <p className="mk-footer-small small muted">© 2026 Offbooked</p>
       </footer>
     </div>
   );

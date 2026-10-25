@@ -57,8 +57,8 @@ export function Privacy() {
         <h3>Technical information</h3>
         <ul>
           <li>
-            IP addresses, used briefly to stop abuse (for example, too many sign-in attempts). These counters are deleted within two days, and our servers keep
-            short-lived technical logs.
+            IP addresses, used briefly to stop abuse (for example, too many sign-in attempts). These counters are deleted after about two days, and our servers
+            keep short-lived technical logs.
           </li>
           <li>
             On your device, the app stores your sign-in session, your preferences and the speech recognition model, and keeps each recording until it has
@@ -108,8 +108,8 @@ export function Privacy() {
           <li>
             <strong>7 days after the final performance</strong>, at noon UTC, a production's script, every recording (re-records and deleted takes included),
             every line and every synthesized clip only it used are deleted for good. Cast members' names are cleared then too, unless they verified an email,
-            and so is any address still waiting for confirmation. Invite links stop working at the same moment. Only the production's title is kept, so links to
-            it can say it has ended.
+            and so is any address still waiting for confirmation. Invite links stop working at the same moment. The production's title is kept, so links to it
+            can say it has ended, with the names and confirmed emails of cast members who verified one.
           </li>
           <li>
             <strong>Deleting a recording</strong> in the app hides it straight away; it is deleted for good with everything else after the show.
@@ -131,7 +131,7 @@ export function Privacy() {
         <p>
           You can see and change your name and email in the app, delete recordings and delete your account. To ask for a copy of your data, a correction or
           deletion, or anything else about your privacy, email {email}. We'll answer within 30 days. If you're in a cast, your director can also delete your
-          recordings or the whole production.
+          recordings.
         </p>
 
         <h2>Changes</h2>

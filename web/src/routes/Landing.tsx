@@ -67,7 +67,7 @@ const ACTORS: { icon: LucideIcon; title: string; text: string }[] = [
   {
     icon: AudioLines,
     title: "Hands-free recording",
-    text: "The app follows along as you speak and moves to your next line by itself. A dramatic pause won't cut you off.",
+    text: "The app follows along as you speak and moves to your next line by itself. A beat in the middle of a line won't cut you off.",
   },
   {
     icon: UserRoundPen,
@@ -84,7 +84,7 @@ const ACTORS: { icon: LucideIcon; title: string; text: string }[] = [
   {
     icon: ShieldCheck,
     title: "Safe on bad Wi-Fi",
-    text: "Every take stays on your phone until it's uploaded, through a dropped connection or a closed tab.",
+    text: "Every take is saved on your phone first and uploaded when there's signal, even through a dropped connection.",
   },
 ];
 

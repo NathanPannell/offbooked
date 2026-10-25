@@ -72,8 +72,8 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
   // lets this account set up productions, for good. Every try counts toward the limits, right or wrong.
   app.post("/api/me/beta-access", async (req) => {
     const director = await requireDirector(ctx, req);
-    const code = requiredString(body(req.body), "code", 200);
     if (director.betaAccess) return { user: director };
+    const code = requiredString(body(req.body), "code", 200);
     await enforce(ctx.sql, ctx.log, `beta-code-ip:${req.ip}`, LIMITS.betaCodeIp, BETA_TOO_MANY);
     await enforce(ctx.sql, ctx.log, `beta-code-user:${director.id}`, LIMITS.betaCodeUser, BETA_TOO_MANY);
     if (!codeMatches(code, ctx.config.betaAccessCode)) throw new HttpError(400, "wrong_code", "That code doesn't match. Check it and try again.");
