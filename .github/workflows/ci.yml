@@ -25,6 +25,9 @@ env:
   FFMPEG_RELEASE: https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1
   FFMPEG_SHA256: bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa
   FFPROBE_SHA256: 25d9b6ccb05e3d9de9e04e31e2506d8dd7f9f0418981965ac6df12e8d3afd067
+  # onnxruntime-node (the speech aligner, backend/src/align) downloads CUDA libraries on Linux by
+  # default; the aligner only ever runs on the CPU.
+  ONNXRUNTIME_NODE_INSTALL: skip
 
 jobs:
   backend:
@@ -163,9 +166,10 @@ jobs:
           retention-days: 14
 
   docker:
-    name: Docker image (build, Piper speaks)
-    # Builds the Railway image and checks Piper can synthesize inside it, since the TTS
-    # binary and voices are only exercised in the container.
+    name: Docker image (build, Piper speaks, the aligner hears)
+    # Builds the Railway image and checks Piper can synthesize inside it and the aligner finds a line
+    # in what it said, since the TTS binary, the voices and the aligner's model are only exercised in
+    # the container.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -178,6 +182,9 @@ jobs:
         run: |
           docker run --rm --entrypoint sh offbooked-api -c \
             'echo "To be, or not to be." | /opt/piper/piper -q -m /opt/piper/voices/en_GB-alan-medium.onnx -f /tmp/t.wav && test -s /tmp/t.wav && ls -la /tmp/t.wav && ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/t.wav'
+      - name: The aligner finds a spoken line inside the image
+        run: |
+          docker run --rm --entrypoint sh offbooked-api -c             'echo "To be, or not to be, that is the question." | /opt/piper/piper -q -m /opt/piper/voices/en_GB-alan-medium.onnx -f /tmp/t.wav && node src/align/smoke.ts /tmp/t.wav "To be, or not to be, that is the question:"'
 
   security:
     name: Security (audit, secrets, no .env)

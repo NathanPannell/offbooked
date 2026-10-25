@@ -42,7 +42,7 @@ export interface VoiceTake extends TakeAudioRow {
 export async function voiceTakes(sql: Sql, productionId: string, lineIds?: string[]): Promise<Map<string, VoiceTake[]>> {
   const rows = await sql<VoiceTake[]>`
     select lv.line_id, lv.character_id, t.id, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.recorded_by,
-      t.speech_ms, t.trim_start_ms, coalesce(t.aligned_word_starts_ms, t.word_starts_ms) as word_starts_ms
+      t.speech_ms, t.trim_start_ms, t.aligned_word_starts_ms as word_starts_ms
     from line_voices lv join takes t on t.id = voice_take(lv.line_id, true, lv.character_id)
     where lv.production_id = ${productionId} and lv.shared ${lineIds ? sql`and lv.line_id = any(${lineIds}::uuid[])` : sql``}
     order by lv.seq, lv.ord`;

@@ -24,20 +24,31 @@ RUN set -e; \
   fetch en_GB/vctk/medium en_GB-vctk-medium.onnx.json 7f85e6391ed0f7f46e4abd19345929a16be931a0c9945086f96692dce2087fa8
 RUN /opt/piper/piper --version
 
+# The speech aligner's model (backend/src/align/model.ts): wav2vec2-base-960h as ONNX with its matrix
+# products in 4 bits (Xenova's export on Hugging Face), pinned by revision and SHA-256.
+FROM piper AS align
+ARG ALIGN_REV=a19f851b3d42865797e410752b4c570c871e4825
+ARG ALIGN_SHA256=337db946188e4b3d0b4a2641dc30727a4792f70aeb1750f65a20fae471f9f217
+RUN mkdir -p /opt/align   && curl -fsSL -o /opt/align/wav2vec2-base-960h-q4.onnx "https://huggingface.co/Xenova/wav2vec2-base-960h/resolve/${ALIGN_REV}/onnx/model_q4.onnx"   && echo "${ALIGN_SHA256}  /opt/align/wav2vec2-base-960h-q4.onnx" | sha256sum -c -
+
 FROM node:24-bookworm-slim
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=piper /opt/piper /opt/piper
+COPY --from=align /opt/align /opt/align
 
 WORKDIR /app
 COPY backend/package.json backend/package-lock.json ./
-RUN npm ci --omit=dev
+# ONNX Runtime (the aligner) runs on the CPU only: no CUDA download, and only its linux/x64 library kept.
+RUN ONNXRUNTIME_NODE_INSTALL=skip npm ci --omit=dev \
+  && find node_modules/onnxruntime-node/bin -mindepth 3 -maxdepth 3 -type d ! -path '*/linux/x64' -exec rm -rf {} + \
+  && npm cache clean --force
 COPY backend/migrations ./migrations
 COPY backend/src ./src
 
-ENV NODE_ENV=production PORT=8080 PIPER_BIN=/opt/piper/piper PIPER_VOICES_DIR=/opt/piper/voices
+ENV NODE_ENV=production PORT=8080 PIPER_BIN=/opt/piper/piper PIPER_VOICES_DIR=/opt/piper/voices ALIGN_MODEL=/opt/align/wav2vec2-base-960h-q4.onnx ORT_DISABLE_TELEMETRY=1
 EXPOSE 8080
 USER node
 CMD ["node", "src/server.ts"]

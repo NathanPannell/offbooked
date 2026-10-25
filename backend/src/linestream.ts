@@ -59,7 +59,7 @@ async function rowsFor(ctx: Ctx, productionId: string, lineIds: string[]): Promi
   if (!lineIds.length) return [];
   return ctx.sql<LineAudioRow[]>`
     select l.id, l.kind, l.character_id, l.text, case when l.kind = 'dialogue' then l.current_take_id end as take_id,
-      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.speech_ms, t.trim_start_ms, coalesce(t.aligned_word_starts_ms, t.word_starts_ms) as word_starts_ms,
+      t.recorded_by, t.storage_key, t.normalized_key, t.normalized_samples, t.stream_key, t.speech_ms, t.trim_start_ms, t.aligned_word_starts_ms as word_starts_ms,
       l.voice_ids is not null as shared
     from lines l left join takes t on t.id = l.current_take_id and l.kind = 'dialogue'
     where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') and l.id = any(${lineIds}::uuid[])`;
@@ -125,7 +125,9 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       ctx.jobs.run("work out a take's speech", () => backfillTiming(ctx, take, durationMs));
     }
     const speech = servedSpeech(speechMs, durationMs);
-    const wordStartsMs = servedWordStarts(fresh.wordStartsMs ?? r.wordStartsMs, fresh.trimStartMs ?? r.trimStartMs, durationMs, r.text);
+    // Normalized just now (`fresh` has its cut): its own word starts or none, never the row's from before.
+    const made = fresh.trimStartMs !== undefined;
+    const wordStartsMs = servedWordStarts(made ? (fresh.wordStartsMs ?? null) : r.wordStartsMs, made ? fresh.trimStartMs! : r.trimStartMs, durationMs, r.text);
     return { ...(speech ? { speech } : {}), ...(wordStartsMs ? { wordStartsMs } : {}) };
   };
 
@@ -169,7 +171,7 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       });
       continue;
     }
-    const job = normalizedTake(ctx, productionId, row, { stream: true }).then(
+    const job = normalizedTake(ctx, productionId, row, { stream: true, priority: opts.priority }).then(
       async (t) => {
         const durationMs = samplesToMs(t.samples);
         takeViews.set(r.id, {
