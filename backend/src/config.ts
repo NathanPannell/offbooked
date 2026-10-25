@@ -1,4 +1,5 @@
 import { availableParallelism } from "node:os";
+import { DEFAULT_BETA_ACCESS_CODE } from "./beta.ts";
 
 export type StorageConfig =
   { driver: "local"; dir: string } | { driver: "s3"; endpoint: string; bucket: string; region: string; accessKeyId: string; secretAccessKey: string };
@@ -25,6 +26,8 @@ export interface Config {
   /** Normalize each take as soon as it is uploaded (its cut, levelled clip and re-timed words), one at a time. */
   normalizeOnUpload: boolean;
   tts: TtsConfig;
+  /** The phrase a director enters once for beta access, which setting up a production needs (src/beta.ts). */
+  betaAccessCode: string;
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -83,5 +86,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       concurrency: Math.max(1, Number(env.TTS_CONCURRENCY) || Math.min(2, availableParallelism())),
       cueWaitMs: Math.max(0, Number(env.TTS_CUE_WAIT_MS ?? 2500)),
     },
+    betaAccessCode: env.BETA_ACCESS_CODE?.trim() || DEFAULT_BETA_ACCESS_CODE,
   };
 }
