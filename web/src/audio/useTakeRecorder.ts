@@ -134,6 +134,8 @@ export function useTakeRecorder({ onLimit }: { onLimit?: (lineId: string) => voi
     stop,
     handoff,
     setDevice,
+    /** A soft chime on the open mic's audio (see `MicSession.chime`); nothing before the mic opened. */
+    chime: () => micRef.current?.chime(),
   };
 }
 

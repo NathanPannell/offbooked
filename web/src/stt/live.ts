@@ -247,6 +247,28 @@ export function tailHeard(tokens: readonly string[], heard: readonly string[]): 
   return false;
 }
 
+/** A heard word moves the cursor on its own when it is the next word, or the one after (one missed). */
+export const NEXT_WORDS = 2;
+/** Further ahead, up to this many words past the cursor, only with the word after it heard too. */
+export const LOOKAHEAD_WORDS = 5;
+
+/**
+ * Traces along the line: the cursor moves only when the words heard are the next ones expected.
+ * The alignment finds which of the line's words were heard; a match counts when it is the next
+ * word (or the one after it), or a little further on when the next match follows close behind it.
+ * So a stray word that happens to be in the line further on (the "and" of a cue read aloud) never
+ * lights up everything before it.
+ */
+export function traceCursor(cursor: number, matched: readonly number[]): number {
+  let c = cursor;
+  matched.forEach((i, k) => {
+    if (i < c) return;
+    const after = matched[k + 1];
+    if (i - c < NEXT_WORDS || (i - c <= LOOKAHEAD_WORDS && after !== undefined && after - i < NEXT_WORDS + 1)) c = i + 1;
+  });
+  return c;
+}
+
 /** How far back from the cursor a windowed transcript (the last few seconds only) may start. */
 export const WINDOW_BACK_TOKENS = 12;
 
@@ -261,7 +283,7 @@ export function applyPass(progress: LiveProgress, tokens: readonly string[], tra
   const { matched } = alignPartial(tokens, heard, anchor, progress.cursor);
   const next = progress.matched.slice();
   for (const i of matched) next[i] = true;
-  let cursor = Math.max(progress.cursor, matched.length ? matched[matched.length - 1] + 1 : 0);
+  let cursor = traceCursor(progress.cursor, matched);
   // The line's last words, heard just now: the line is said, whatever was missed on the way.
   if (cursor < tokens.length && cursor >= tokens.length * TAIL_MIN_SHARE && tailHeard(tokens, heard)) cursor = tokens.length;
   if (cursor === progress.cursor && matched.length === 0) return progress;
@@ -270,6 +292,61 @@ export function applyPass(progress: LiveProgress, tokens: readonly string[], tra
 
 export function matchedCount(progress: LiveProgress): number {
   return progress.matched.filter(Boolean).length;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The wrong-line check: was the take this line at all? Lenient on purpose: misspoken, swapped or
+// paraphrased words are the line. Only a real flub counts: most of the line never heard, or what
+// was heard is clearly a nearby line instead (the cue read aloud, the speaker's next line, the line
+// after this one).
+
+/** Under this share of the line's words heard, the take wasn't the line. */
+export const FLUB_HEARD_SHARE = 1 / 3;
+/** A nearby line heard at least this much (and at least OTHER_MIN_WORDS words of it)... */
+export const OTHER_HEARD_SHARE = 0.6;
+const OTHER_MIN_WORDS = 3;
+/** ...and by this much more than the line itself, was said instead of it... */
+export const OTHER_MARGIN = 0.3;
+/** ...unless most of the line was heard too (the cue read aloud before the line is fine). */
+const LINE_HEARD_SHARE = 0.75;
+
+export interface LineCheck {
+  /** Nearby lines, followed through the same passes as the line. */
+  others: { tokens: string[]; progress: LiveProgress }[];
+  /** The most words any pass heard: a take nothing was heard in can't be judged. */
+  mostHeard: number;
+}
+
+export function startLineCheck(others: readonly string[]): LineCheck {
+  return {
+    others: others.flatMap((text) => {
+      const { tokens } = segmentLine(text);
+      return tokens.length ? [{ tokens, progress: startProgress(tokens.length) }] : [];
+    }),
+    mostHeard: 0,
+  };
+}
+
+/** Folds one pass into the check, as `applyPass` does into the line's progress. */
+export function checkPass(check: LineCheck, lineTokens: readonly string[], transcript: string, windowed = false): LineCheck {
+  return {
+    others: check.others.map((o) => ({ ...o, progress: applyPass(o.progress, o.tokens, transcript, windowed) })),
+    mostHeard: Math.max(check.mostHeard, heardWords(transcript, lineTokens).length),
+  };
+}
+
+const heardShare = (progress: LiveProgress) => (progress.matched.length ? matchedCount(progress) / progress.matched.length : 0);
+
+/** Whether the take was a flub, not the line: see the section comment. */
+export function flubbed(check: LineCheck, progress: LiveProgress): boolean {
+  const tokens = progress.matched.length;
+  if (tokens === 0 || check.mostHeard < Math.min(OTHER_MIN_WORDS, tokens)) return false;
+  const share = heardShare(progress);
+  if (share < FLUB_HEARD_SHARE) return true;
+  if (share >= LINE_HEARD_SHARE) return false;
+  return check.others.some(
+    (o) => matchedCount(o.progress) >= OTHER_MIN_WORDS && heardShare(o.progress) >= OTHER_HEARD_SHARE && heardShare(o.progress) - share >= OTHER_MARGIN,
+  );
 }
 
 // ---------------------------------------------------------------------------------------------

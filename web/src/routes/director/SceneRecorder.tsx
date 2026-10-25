@@ -15,10 +15,11 @@ import { useToast } from "../../components/Toast";
 import { useResource } from "../../lib/useResource";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
-import { listenEndMs, takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
+import { listenEndMs, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
+import { nearbyLines, useFlubPrompt } from "../actor/flub";
 import { LineCard, type LocalTake } from "../actor/LineCard";
 import { takeAuthor } from "../actor/recordedBy";
 import { revealAfterTakeIn, studioBand, useFollowWhileRecording } from "../actor/recorderFollow";
@@ -123,6 +124,14 @@ function ListenThrough({ productionId }: { productionId: string }) {
   );
 }
 
+/** A take the wrong-line check flagged, held until the director says to keep it or read the line again. */
+interface HeldTake {
+  lineId: string;
+  take: FinishedTake;
+  timing: TakeTiming | null;
+  recordNext: boolean;
+}
+
 function SceneLines({
   productionId,
   cacheKey,
@@ -182,7 +191,7 @@ function SceneLines({
   // the line stops the take and moves on (mic settings turn that off, or record the next line too).
   const { session: stt, state: sttState } = useSttSession();
   const options = useRecordOptions();
-  const { autoAdvance, keepRecording } = options;
+  const { autoAdvance, keepRecording, checkLine } = options;
   const [firstTakeHint, setFirstTakeHint] = useState(false);
   /** What timing the take's words needs, filled by the live take. */
   const timingRef = useRef<TakeTiming | null>(null);
@@ -200,18 +209,28 @@ function SceneLines({
   }, [all]);
   const shown = who === "all" ? all : all.filter((l) => (l.line.characterId ?? l.characterName) === who);
   const myItems = useMemo(() => items.filter((i) => i.kind === "director" && i.token === productionId), [items, productionId]);
+  const recordingIndex = all.findIndex((l) => l.line.id === recorder.recording?.lineId);
   const live = useLiveTake({
     recording: recorder.recording,
     capture: recorder.capture,
     analyser: recorder.analyser,
     stt,
-    text: all.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
+    text: all[recordingIndex]?.line.text ?? "",
+    nearby: nearbyLines(all, recordingIndex),
     autoAdvance,
-    onAdvance: (_lineId, mode) => {
+    checkLine,
+    onAdvance: (_lineId, mode, flub) => {
       const recordNext = keepRecording && mode === "live";
-      if (!(recordNext && handOffRef.current())) stopRef.current({ recordNext });
+      if (flub) void holdFlubRef.current(recordNext);
+      else if (!(recordNext && handOffRef.current())) stopRef.current({ recordNext });
     },
     timingRef,
+  });
+  /** The latest holdFlub, for the live take's advance. */
+  const holdFlubRef = useRef<(recordNext: boolean) => Promise<void>>(async () => {});
+  const flubs = useFlubPrompt<HeldTake>({
+    onKeep: (held) => void keepTake(held.lineId, held.take, held.timing).then((kept) => kept && moveOn(held.lineId, held.recordNext)),
+    onRetake: (held) => void startRef.current(held.lineId),
   });
 
   useEffect(() => {
@@ -245,6 +264,8 @@ function SceneLines({
 
   const start = async (lineId: string) => {
     if (recorder.recording) return;
+    // Recording anything else means the flagged take wasn't wanted.
+    flubs.drop();
     playback.pause();
     setCurrentId(lineId);
     if (!(await recorder.start(lineId))) return;
@@ -277,8 +298,8 @@ function SceneLines({
         characterId: voiceId,
         audio: take.blob,
         durationMs: take.durationMs,
-        wordStartsMs: takeWordStarts(timing, lineId, take.durationMs),
       });
+      flubs.settled(lineId);
       setLocalTakes((m) => {
         const next = new Map(m);
         const old = next.get(lineId);
@@ -312,7 +333,7 @@ function SceneLines({
     const lineId = recorder.recording?.lineId;
     const next = lineId ? nextAfter(lineId).unrecorded : undefined;
     if (!lineId || !next) return false;
-    // This take's word timing; the next take's live tracking replaces it in a moment.
+    // This take's Listen back timing; the next take's live tracking replaces it in a moment.
     const timing = timingRef.current;
     const done = recorder.handoff(next.line.id);
     if (!done) return false;
@@ -335,18 +356,34 @@ function SceneLines({
     setFirstTakeHint(false);
     const take = await recorder.stop();
     if (!take || !lineId) return;
-    if (!(await keepTake(lineId, take, timing))) return;
-    const { next, unrecorded } = nextAfter(lineId);
-    if (next) {
-      advanceTimer.current = setTimeout(() => {
-        advanceTimer.current = null;
-        setCurrentId(next.line.id);
-        pendingReveal.current = { from: lineId, to: next.line.id };
-        if (recordNext && unrecorded) void startRef.current(next.line.id);
-      }, 600);
-    }
+    if (await keepTake(lineId, take, timing)) moveOn(lineId, recordNext);
   };
   stopRef.current = (opts) => void stop(opts);
+
+  /** On to the next line after a kept take; with `recordNext`, records it too when nobody has. */
+  const moveOn = (lineId: string, recordNext: boolean) => {
+    const { next, unrecorded } = nextAfter(lineId);
+    if (!next) return;
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null;
+      setCurrentId(next.line.id);
+      pendingReveal.current = { from: lineId, to: next.line.id };
+      if (recordNext && unrecorded) void startRef.current(next.line.id);
+    }, 600);
+  };
+
+  /** The wrong-line check flagged the take: stop without moving on, chime and ask on the card. */
+  const holdFlub = async (recordNext: boolean) => {
+    const lineId = recorder.recording?.lineId;
+    const timing = timingRef.current;
+    setFirstTakeHint(false);
+    const take = await recorder.stop();
+    if (!take || !lineId) return;
+    recorder.chime();
+    setCurrentId(lineId);
+    flubs.raise({ lineId, take, timing, recordNext });
+  };
+  holdFlubRef.current = holdFlub;
 
   /** Deletes the take shown on a line (anyone's), with Undo. One kept a moment ago is deleted once it lands. */
   const remove = async (lineId: string) => {
@@ -439,7 +476,7 @@ function SceneLines({
           </div>
         )}
       </div>
-      <main className="record-main">
+      <main className="record-main" data-stt={sttState.status}>
         <ol className="line-list">
           {shown.map((l, i) => {
             const actorLine: ActorLine = { line: l.line, sectionTitle: "", cue: l.cue, directions: [], take: l.take, together: l.together };
@@ -468,6 +505,7 @@ function SceneLines({
                   playing={playback.playing}
                   liveCursor={live?.lineId === l.line.id && live.mode === "live" ? live.cursor : null}
                   liveHint={live?.lineId === l.line.id && !autoAdvance && live.mode === "live" ? "Tap stop when you're done." : undefined}
+                  flub={flubs.view?.lineId === l.line.id ? { secondsLeft: flubs.view.secondsLeft, onRetake: flubs.retake, onKeep: flubs.keep } : null}
                   noCueLabel="Opens the scene"
                   author={l.take ? takeAuthor(l.take) : null}
                   progress={playback.progress}

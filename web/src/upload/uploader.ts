@@ -17,8 +17,6 @@ export interface NewTake {
   characterId?: string | null;
   audio: Blob;
   durationMs: number;
-  /** When each spoken word starts, in ms of the recording (from `takeWordStarts`), if the live take heard them. */
-  wordStartsMs?: number[] | null;
 }
 
 /** A take bigger than this goes up in parts (the server takes up to 8 MB a request). */
@@ -59,8 +57,8 @@ export type SendTake = (item: UploadItem, body: Blob, part: TakePart | undefined
 
 const sendTake: SendTake = (item, body, part, signal) =>
   item.kind === "director"
-    ? standins.putTake(item.lineId, body, item.takeId, item.durationMs, signal, item.characterId, part, item.wordStartsMs)
-    : actorApi(item.token).putTake(item.lineId, body, item.takeId, item.durationMs, signal, part, item.wordStartsMs);
+    ? standins.putTake(item.lineId, body, item.takeId, item.durationMs, signal, item.characterId, part)
+    : actorApi(item.token).putTake(item.lineId, body, item.takeId, item.durationMs, signal, part);
 
 /**
  * How long one request may take before it counts as stalled: 30 s, plus the time to send the body
@@ -155,7 +153,6 @@ export class Uploader {
       characterId: take.characterId ?? null,
       mime: take.audio.type,
       durationMs: take.durationMs,
-      wordStartsMs: take.wordStartsMs ?? null,
       createdAt: Date.now(),
       status: "queued",
       attempts: 0,

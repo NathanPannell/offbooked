@@ -61,6 +61,12 @@ export function micConstraints(deviceId: string | null): MediaTrackConstraints {
   return { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(deviceId ? { deviceId: { ideal: deviceId } } : {}) };
 }
 
+/** The chime's notes: [Hz, seconds in], a falling major third. */
+const CHIME = [
+  [660, 0],
+  [523, 0.2],
+] as const;
+
 export class MicSession {
   private stream: MediaStream | null = null;
   private context: AudioContext | null = null;
@@ -145,6 +151,29 @@ export class MicSession {
         if (recorder.state !== "inactive") recorder.stop();
       },
     };
+  }
+
+  /**
+   * A soft two-note chime, for when the app needs the actor to look (a take that wasn't the line).
+   * On the mic's own audio context, which a tap started, so it plays on iOS without another tap.
+   * Play it only between takes: the mic would hear it.
+   */
+  chime(): void {
+    const ctx = this.context;
+    if (!ctx || ctx.state === "closed") return;
+    const t = ctx.currentTime + 0.02;
+    for (const [freq, at] of CHIME) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, t + at);
+      gain.gain.linearRampToValueAtTime(0.12, t + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.5);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t + at);
+      osc.stop(t + at + 0.55);
+    }
   }
 
   close(): void {
