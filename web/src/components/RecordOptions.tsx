@@ -11,6 +11,8 @@ export const AUTO_ADVANCE_KEY = "offbooked.autoAdvance";
  * afresh under a new key so every device gets it.
  */
 export const KEEP_RECORDING_KEY = "offbooked.recordNext";
+/** "Check I read the right line": the wrong-line check before moving on, on by default. */
+export const CHECK_LINE_KEY = "offbooked.checkLine";
 
 /** The one line on the device's first take: what happens when the line is said. */
 export function firstTakeHint(recordsNext: boolean): string {
@@ -36,16 +38,20 @@ export function useStoredFlag(key: string, fallback: boolean) {
   return [value, set] as const;
 }
 
-/** Stop and move on when the line is said, and record the next one straight away: both on by default, so recording is hands-free. */
+/**
+ * Stop and move on when the line is said, and record the next one straight away: both on by default,
+ * so recording is hands-free. Before moving on, check the take was the line (also on by default).
+ */
 export function useRecordOptions() {
   const [autoAdvance, setAutoAdvance] = useStoredFlag(AUTO_ADVANCE_KEY, true);
   const [keepRecording, setKeepRecording] = useStoredFlag(KEEP_RECORDING_KEY, true);
-  return { autoAdvance, setAutoAdvance, keepRecording, setKeepRecording };
+  const [checkLine, setCheckLine] = useStoredFlag(CHECK_LINE_KEY, true);
+  return { autoAdvance, setAutoAdvance, keepRecording, setKeepRecording, checkLine, setCheckLine };
 }
 
 /** The options in mic settings, with any the screen adds after them. */
 export function RecordOptions({ options, children }: { options: ReturnType<typeof useRecordOptions>; children?: ReactNode }) {
-  const { autoAdvance, setAutoAdvance, keepRecording, setKeepRecording } = options;
+  const { autoAdvance, setAutoAdvance, keepRecording, setKeepRecording, checkLine, setCheckLine } = options;
   return (
     <>
       <h3 className="eyebrow">While you record</h3>
@@ -56,6 +62,13 @@ export function RecordOptions({ options, children }: { options: ReturnType<typeo
       <label className={`checkbox${autoAdvance ? "" : " is-off"}`}>
         <input type="checkbox" checked={keepRecording} disabled={!autoAdvance} onChange={(e) => setKeepRecording(e.target.checked)} />
         Keep recording the next line
+      </label>
+      <label className={`checkbox${autoAdvance ? "" : " is-off"}`}>
+        <input type="checkbox" checked={checkLine} disabled={!autoAdvance} onChange={(e) => setCheckLine(e.target.checked)} />
+        <span>
+          Check I read the right line
+          <span className="field-hint checkbox-hint">Asks before moving on when a take doesn't sound like the line.</span>
+        </span>
       </label>
       {children}
     </>

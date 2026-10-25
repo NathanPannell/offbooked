@@ -22,12 +22,13 @@ import { useResource } from "../../lib/useResource";
 import { recorderBand, revealAfterTake } from "../../player/follow";
 import { useLiveTake } from "../../stt/useLiveTake";
 import { useSttSession } from "../../stt/useStt";
-import { listenEndMs, takeWordStarts, type TakeTiming } from "../../stt/wordTiming";
+import { listenEndMs, type TakeTiming } from "../../stt/wordTiming";
 import { latestForLine, uploadState } from "../../upload/queue";
 import { savedTakeId } from "../../upload/uploader";
 import { useUploads } from "../../upload/useUploads";
 import { LineCard, type LocalTake } from "./LineCard";
 import { CastProfile } from "./CastProfile";
+import { nearbyLines, useFlubPrompt } from "./flub";
 import { PickUpParts } from "./PickUpParts";
 import { useFollowWhileRecording } from "./recorderFollow";
 import { lineRecorded, lineTake, nextToRecord, opensOnWrapped, ownTake, partInView, saysPart } from "./recordedBy";
@@ -39,6 +40,16 @@ const HEAR_PARTNERS_KEY = "offbooked.hearPartners";
 export interface Score {
   takeKey: string;
   result: SttResult;
+}
+
+/** A take the wrong-line check flagged, held until the actor says to keep it or read the line again. */
+interface HeldTake {
+  lineId: string;
+  take: FinishedTake;
+  timing: TakeTiming | null;
+  /** Hands-free would have recorded the next line: keeping it carries on doing so. */
+  recordNext: boolean;
+  overOthers: boolean;
 }
 
 const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -95,7 +106,7 @@ export function RecordSession({
     };
   }, []);
   const options = useRecordOptions();
-  const { autoAdvance, keepRecording } = options;
+  const { autoAdvance, keepRecording, checkLine } = options;
   /** Hear scene partners: the cue plays before each take, and on a shared line the others play along. */
   const [hearPartners, setHearPartners] = useStoredFlag(HEAR_PARTNERS_KEY, false);
   /** A line whose cue is playing before its take starts. */
@@ -153,18 +164,29 @@ export function RecordSession({
     .filter((p) => p.id !== activePart)
     .map((p) => ({ ...p, left: allLines.filter((l) => saysPart(l, p.id) && !lineRecorded(l)).length }));
 
+  const recordingIndex = actorLines.findIndex((l) => l.line.id === recorder.recording?.lineId);
   const live = useLiveTake({
     recording: recorder.recording,
     capture: recorder.capture,
     analyser: recorder.analyser,
     stt,
-    text: actorLines.find((l) => l.line.id === recorder.recording?.lineId)?.line.text ?? "",
+    text: actorLines[recordingIndex]?.line.text ?? "",
+    nearby: nearbyLines(actorLines, recordingIndex),
     autoAdvance,
-    onAdvance: (_lineId, mode) => {
+    checkLine,
+    onAdvance: (_lineId, mode, flub) => {
       const recordNext = keepRecording && mode === "live";
-      if (!(recordNext && handOff())) void stopRecording({ recordNext });
+      if (flub) void holdFlub(recordNext);
+      else if (!(recordNext && handOff())) void stopRecording({ recordNext });
     },
     timingRef,
+  });
+  const flubs = useFlubPrompt<HeldTake>({
+    onKeep: (held) =>
+      void keepTake(held.lineId, held.take, held.timing).then(
+        (kept) => kept && goToNext(held.lineId, { recordNext: held.recordNext, overOthers: held.overOthers }),
+      ),
+    onRetake: (held) => void startRef.current(held.lineId),
   });
   const myItems = useMemo(() => items.filter((i) => i.token === token && (i.kind ?? "invite") === "invite"), [items, token]);
 
@@ -290,6 +312,8 @@ export function RecordSession({
 
   const startRecording = async (lineId: string) => {
     if (recorder.recording || cueing) return;
+    // Recording anything else means the flagged take wasn't wanted.
+    flubs.drop();
     // Still inside the tap: lets the cue before a later take play when "Keep recording" moves on by itself.
     accompaniment.unlock();
     playback.pause();
@@ -404,10 +428,8 @@ export function RecordSession({
     }
     const url = URL.createObjectURL(recorded.blob);
     let clientTakeId: string;
-    // When each word started, from following the take as it recorded (null when nothing was heard).
-    const wordStartsMs = takeWordStarts(timing, lineId, recorded.durationMs);
     try {
-      clientTakeId = await uploader.add({ token, lineId, audio: recorded.blob, durationMs: recorded.durationMs, wordStartsMs });
+      clientTakeId = await uploader.add({ token, lineId, audio: recorded.blob, durationMs: recorded.durationMs });
     } catch {
       URL.revokeObjectURL(url);
       toast("Couldn't save that take on this device. Try again.");
@@ -426,6 +448,7 @@ export function RecordSession({
       return next;
     });
     if (announce) setAnnouncement("Take saved.");
+    flubs.settled();
 
     const text = actorLines.find((l) => l.line.id === lineId)?.line.text ?? "";
     void stt.score(lineId, recorded.blob, text).then((result) => {
@@ -447,7 +470,7 @@ export function RecordSession({
     const next = lineId ? nextLine(lineId) : null;
     const item = actorLines.find((l) => l.line.id === next);
     if (!lineId || !next || !item || (hearPartners && item.cue)) return false;
-    // This take's word timing; the next take's live tracking replaces it in a moment.
+    // This take's Listen back timing; the next take's live tracking replaces it in a moment.
     const timing = timingRef.current;
     accompaniment.stop();
     const done = recorder.handoff(next);
@@ -486,6 +509,24 @@ export function RecordSession({
     if (await keepTake(lineId, recorded, timing)) goToNext(lineId, { overOthers });
   };
   stopRef.current = () => void stopRecording();
+
+  /**
+   * The wrong-line check flagged the take: stop without moving on, chime (people often aren't
+   * looking) and ask on the card. The take is kept only if the actor says so.
+   */
+  const holdFlub = async (recordNext: boolean) => {
+    const lineId = recorder.recording?.lineId;
+    const timing = timingRef.current;
+    const overOthers = !!actorLines.find((l) => l.line.id === lineId)?.current;
+    accompaniment.stop();
+    setFirstTakeHint(false);
+    const recorded = await recorder.stop();
+    if (!recorded || !lineId || !alive.current) return;
+    recorder.chime();
+    setCurrentId(lineId);
+    setAnnouncement("Did you mean to say something else? Keep the take, or read the line again.");
+    flubs.raise({ lineId, take: recorded, timing, recordNext, overOthers });
+  };
 
   /** On to the next line to record, or "You're wrapped" when every line of the part is recorded. */
   const goToNext = (lineId: string, { recordNext = false, delayMs = ADVANCE_DELAY_MS, overOthers = false } = {}) => {
@@ -599,7 +640,8 @@ export function RecordSession({
   }
 
   return (
-    <div className="actor-shell recorder">
+    // data-stt: where the speech model stands, for the e2e journeys to wait on.
+    <div className="actor-shell recorder" data-stt={sttState.status}>
       <header className="record-header">
         <div className="record-header-row">
           <div className="grow">
@@ -726,6 +768,7 @@ export function RecordSession({
                       playing={playback.playing}
                       liveCursor={live?.lineId === l.line.id && live.mode === "live" ? live.cursor : null}
                       liveHint={live?.lineId === l.line.id && !autoAdvance && live.mode === "live" ? "Tap stop when you're done." : undefined}
+                      flub={flubs.view?.lineId === l.line.id ? { secondsLeft: flubs.view.secondsLeft, onRetake: flubs.retake, onKeep: flubs.keep } : null}
                       progress={playback.progress}
                       onPlay={playback.play}
                       onPlayTogether={playback.playTogether}

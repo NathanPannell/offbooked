@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type { ActorLine } from "../../api/types";
 import { AccuracyChip } from "../../components/AccuracyChip";
 import { CharacterName } from "../../components/CharacterName";
+import { FlubPrompt } from "../../components/FlubPrompt";
 import { SpeedButton } from "../../components/SpeedButton";
 import { WordDiff } from "../../components/WordDiff";
 import { pieceStates, segmentLine } from "../../stt/live";
@@ -41,6 +42,7 @@ export function LineCard({
   noCueLabel = "You open the scene",
   liveCursor = null,
   liveHint,
+  flub = null,
   progress = 0,
   onPlay,
   onPlayTogether,
@@ -69,6 +71,8 @@ export function LineCard({
   liveCursor?: number | null;
   /** A short note under the line while it records, e.g. how the take will end. */
   liveHint?: string;
+  /** The take just recorded wasn't the line, by the wrong-line check: ask (`FlubPrompt`). */
+  flub?: { secondsLeft: number | null; onRetake: () => void; onKeep: () => void } | null;
   /** How far the playing preview has got, 0 to 1. */
   progress?: number;
   onPlay: (key: string, url: string, endMs?: number | null) => void;
@@ -96,7 +100,7 @@ export function LineCard({
   const v = score ? verdict(score.result) : null;
   const showTogether = !!takeUrl && othersAudio.length > 0 && !!onPlayTogether;
 
-  const state = recording ? "is-recording" : current ? "is-current" : recorded ? "is-recorded" : "";
+  const state = recording ? "is-recording" : flub ? "is-current is-flub" : current ? "is-current" : recorded ? "is-recorded" : "";
 
   return (
     <article className={`line-card ${state}`} aria-current={current ? "step" : undefined}>
@@ -151,8 +155,9 @@ export function LineCard({
         <LineText text={line.text} cursor={recording ? liveCursor : null} tracked={recording} />
       </button>
       {recording && liveHint && <p className="live-hint">{liveHint}</p>}
+      {flub && !recording && <FlubPrompt secondsLeft={flub.secondsLeft} onRetake={flub.onRetake} onKeep={flub.onKeep} />}
 
-      {recorded && !recording && (
+      {recorded && !recording && !flub && (
         <div className="take-bar">
           <div className="take-actions">
             {takeUrl ? (

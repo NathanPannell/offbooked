@@ -2677,6 +2677,54 @@
   box-shadow: 0 0 0 8px var(--marker);
 }
 
+/* A take the wrong-line check flagged: the card turns amber and asks. */
+.line-card.is-flub {
+  border-color: var(--sun);
+  background: var(--flag-soft);
+  box-shadow:
+    0 0 0 2px var(--sun),
+    var(--shadow);
+}
+
+.flub-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  padding-top: var(--s-2);
+}
+
+.flub-question {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 20px;
+  color: var(--flag);
+}
+
+.flub-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+}
+
+.flub-btn {
+  min-height: 64px;
+  justify-content: center;
+  gap: var(--s-2);
+  text-align: left;
+  white-space: normal;
+}
+
+.flub-btn > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.flub-countdown {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
 .recorded-by {
   display: inline-flex;
   align-items: center;
