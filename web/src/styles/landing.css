@@ -101,19 +101,18 @@
 /* Hero */
 
 .mk-hero {
-  max-width: 1160px;
+  max-width: 880px;
   margin: 0 auto;
-  padding: var(--s-8) var(--s-4) var(--s-12);
-  display: grid;
-  gap: var(--s-10);
+  padding: var(--s-12) var(--s-4) var(--s-8);
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  text-align: center;
 }
 
 @media (min-width: 960px) {
   .mk-hero {
-    grid-template-columns: 1.1fr 1fr;
     padding-top: var(--s-16);
-    padding-bottom: var(--s-16);
   }
 }
 
@@ -137,7 +136,7 @@
 }
 
 .mk-hero-lede {
-  max-width: 34em;
+  max-width: 30em;
   margin: 0;
   font-size: var(--text-md);
   line-height: 1.55;
@@ -148,6 +147,7 @@
   margin-top: var(--s-6);
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--s-3);
 }
 
@@ -161,9 +161,10 @@
   margin: var(--s-6) 0 0;
   padding: 0;
   list-style: none;
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--s-2) var(--s-5);
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   font-size: var(--text-sm);
   color: var(--ink-soft);
 }
@@ -187,203 +188,6 @@
   font-style: italic;
   font-family: var(--font-display);
   font-size: var(--text-md);
-}
-
-/* The hero's phone */
-
-.mk-hero-scene {
-  position: relative;
-  display: flex;
-  justify-content: center;
-}
-
-.mk-hero-scene::before {
-  content: "";
-  position: absolute;
-  inset: 4% 8% auto;
-  height: 82%;
-  background: radial-gradient(closest-side, var(--marker), transparent);
-  opacity: 0.55;
-  z-index: -1;
-}
-
-.mk-phone {
-  width: min(100%, 360px);
-  padding: var(--s-8) var(--s-4) var(--s-4);
-  border: 1px solid var(--edge);
-  border-radius: 36px;
-  background: var(--card);
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-  position: relative;
-}
-
-.mk-phone-notch {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  width: 72px;
-  height: 6px;
-  margin-left: -36px;
-  border-radius: var(--radius-pill);
-  background: var(--paper-deep);
-}
-
-.mk-phone-title {
-  margin: 0;
-  text-align: center;
-}
-
-.mk-phone-part {
-  margin: 0 0 var(--s-2);
-  text-align: center;
-  font-size: var(--text-sm);
-  color: var(--ink-soft);
-}
-
-.mk-phone-lines {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-}
-
-.mk-phone-line {
-  padding: var(--s-2) var(--s-3);
-  border-left: 3px solid transparent;
-  border-radius: var(--radius-sm);
-  transition:
-    background var(--medium) var(--ease),
-    border-color var(--medium) var(--ease);
-}
-
-.mk-phone-line.is-mine .mk-phone-text {
-  background: var(--marker);
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
-
-.mk-phone-line.is-current {
-  border-left-color: var(--ink);
-  background: var(--paper);
-}
-
-.mk-phone-who {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px var(--s-2);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--ink-soft);
-}
-
-.mk-phone-by {
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-}
-
-.mk-phone-by.is-ai {
-  font-style: italic;
-}
-
-.mk-phone-line.is-mine .mk-phone-by {
-  color: var(--accent-text);
-  font-weight: 700;
-}
-
-.mk-phone-text {
-  display: inline;
-  font-family: var(--font-serif);
-  font-size: 16px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  color: var(--muted);
-}
-
-.mk-phone-line.is-past .mk-phone-text {
-  color: var(--ink-soft);
-}
-
-/* The line playing: its words go ink in turn (colour only, so the lines never reflow). */
-.mk-phone-line.is-current .mk-phone-text span {
-  animation: mk-word-on 0.25s var(--ease) both;
-}
-
-@keyframes mk-word-on {
-  from {
-    color: var(--muted);
-  }
-  to {
-    color: var(--ink);
-  }
-}
-
-.mk-phone-gap {
-  display: block;
-  height: 4px;
-  margin-top: var(--s-2);
-  border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, var(--ink) 50%, var(--paper-deep) 50%) right / 200% 100%;
-  animation: mk-gap 3.4s linear both;
-}
-
-@keyframes mk-gap {
-  to {
-    background-position: left;
-  }
-}
-
-.mk-phone-player {
-  margin-top: var(--s-3);
-  padding: var(--s-2) var(--s-3);
-  border-radius: var(--radius-pill);
-  background: var(--paper);
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  font-size: var(--text-sm);
-}
-
-.mk-phone-pause {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--ink);
-  color: #fff;
-}
-
-.mk-phone-mode {
-  flex: 1;
-  font-weight: 600;
-}
-
-/* The problem */
-
-.mk-problem {
-  max-width: 1160px;
-  margin: 0 auto;
-  padding: var(--s-10) var(--s-4);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
-.mk-problem p {
-  max-width: 30em;
-  margin: 0 auto;
-  text-align: center;
-  font-family: var(--font-display);
-  font-size: clamp(22px, 3.4vw, 32px);
-  line-height: 1.3;
-  letter-spacing: -0.01em;
 }
 
 /* Sections */
@@ -414,6 +218,11 @@
   font-weight: 400;
   line-height: 1.1;
   letter-spacing: -0.015em;
+}
+
+/* A section whose intro is just its heading. */
+.mk-title.mk-intro {
+  margin-bottom: var(--s-8);
 }
 
 /* How it works */
@@ -450,10 +259,6 @@
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 500;
-}
-
-.mk-step > p.muted {
-  margin: 0;
 }
 
 .mk-step-ui {
@@ -565,21 +370,10 @@
 /* The demo */
 
 .mk-demo-section {
-  display: grid;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
   gap: var(--s-6);
-  align-items: start;
-}
-
-@media (min-width: 960px) {
-  .mk-demo-section {
-    grid-template-columns: 1fr 1.25fr;
-    gap: var(--s-12);
-  }
-
-  .mk-demo-section .mk-intro {
-    position: sticky;
-    top: 96px;
-  }
 }
 
 .mk-demo {
@@ -597,14 +391,13 @@
   background: var(--flag-soft);
   color: var(--flag);
   display: flex;
+  align-items: center;
   gap: var(--s-3);
   font-size: var(--text-sm);
-  line-height: 1.45;
 }
 
 .mk-demo-placeholder svg {
   flex: none;
-  margin-top: 2px;
 }
 
 .mk-demo-bar {
@@ -746,10 +539,6 @@
   margin: var(--s-1) var(--s-3) var(--s-2);
 }
 
-.mk-demo-note {
-  margin: 0;
-}
-
 /* Feature grids */
 
 .mk-features {
@@ -863,27 +652,6 @@
   color: var(--accent-text);
 }
 
-.mk-privacy-points {
-  margin: 0 0 var(--s-4);
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: var(--s-4) var(--s-8);
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-}
-
-.mk-privacy-points li {
-  display: flex;
-  gap: var(--s-3);
-  line-height: 1.5;
-}
-
-.mk-privacy-points svg {
-  flex: none;
-  margin-top: 3px;
-  color: var(--accent-text);
-}
-
 /* Pricing */
 
 .mk-plans {
@@ -953,31 +721,6 @@
 
 .mk-plan > p.small {
   margin: 0;
-}
-
-.mk-plan-features {
-  margin: 0 0 var(--s-2);
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-1);
-  font-size: var(--text-sm);
-}
-
-.mk-plan-features li {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
-}
-
-.mk-plan-features svg {
-  flex: none;
-  color: var(--good);
-}
-
-.mk-plan.is-soon .mk-plan-features svg {
-  color: var(--faint);
 }
 
 .mk-plan .btn {
@@ -1149,15 +892,4 @@
 
 .mk-legal a {
   overflow-wrap: anywhere;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mk-phone-line.is-current .mk-phone-text span,
-  .mk-phone-gap {
-    animation: none;
-  }
-
-  .mk-phone-line.is-current .mk-phone-text span {
-    color: var(--ink);
-  }
 }

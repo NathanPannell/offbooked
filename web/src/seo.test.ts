@@ -35,7 +35,9 @@ describe("marketing page metadata", () => {
 describe("the site's promises", () => {
   it("answers the questions people ask, including that it isn't the Off Book! app", () => {
     expect(FAQ.some((f) => /Off Book!/.test(f.q) && f.a.startsWith("No."))).toBe(true);
-    expect(FAQ.every((f) => f.q.endsWith("?") && f.a.length > 40)).toBe(true);
+    expect(FAQ.length).toBeLessThanOrEqual(5);
+    // Short answers: at most two sentences each.
+    for (const f of FAQ) expect([f.q.endsWith("?"), f.a.split(/(?<=[.!?])\s+(?=[A-Z])/).length <= 2]).toEqual([true, true]);
   });
 
   it("only the free beta can be chosen; paid plans are shown as coming", () => {
