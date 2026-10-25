@@ -28,7 +28,8 @@ const load = (id) => {
   const raw = path.join(SP, `${id}.wav`);
   const sil = spawnSync("ffmpeg", ["-hide_banner", "-nostdin", "-i", raw, "-af", "silencedetect=noise=-50dB:d=0.05", "-f", "null", "-"], { encoding: "utf8" }).stderr;
   const lead = /silence_start: 0\b/.test(sil) ? Number(sil.match(/silence_end: ([\d.]+)/)[1]) * 1000 : 0;
-  const words = JSON.parse(readFileSync(path.join(SP, `${id}.words.json`), "utf8").replace(/^﻿/, ""));
+  // PowerShell writes the JSON with a byte order mark, which trimStart drops.
+  const words = JSON.parse(readFileSync(path.join(SP, `${id}.words.json`), "utf8").trimStart());
   const file = path.join(OUT, `_${id}.wav`);
   ff(["-i", raw, "-af", `atrim=start=${lead / 1000},asetpts=PTS-STARTPTS,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse,aresample=16000,volume=-4dB`, "-ac", "1", file]);
   return (utt[id] = { file, ms: dur(file), words: [].concat(words).map((w) => ({ text: w.text, ms: Math.max(0, w.ms * SAPI - lead) })) });

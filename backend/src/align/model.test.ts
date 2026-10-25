@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { after, before, describe, test } from "node:test";
+import type { Log } from "../log.ts";
 import { bearer, createTestApp, dbSkip, productionWithScript, signIn, type TestApp } from "../test/helpers.ts";
 import { VOCAB_SIZE } from "./ctc.ts";
 import { MODEL, ModelAligner, scaled, windowedEmissions, type LoadSession, type ModelSession } from "./model.ts";
 
-const silentLog = { info() {}, warn() {}, error() {}, debug() {} } as never;
+const silentLog: Log = { info() {}, warn() {}, error() {} };
 
 /** A model whose frame f of a window says, in token 1's logit, where the frame is in the whole take. */
 function fakeSession(runs: { length: number }[] = []): ModelSession & { released: number } {

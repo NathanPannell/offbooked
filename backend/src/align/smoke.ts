@@ -27,5 +27,7 @@ const em = await aligner.emissions(pcm);
 const line = em ? alignLine(em, text) : null;
 const ms = Math.round(performance.now() - started);
 await aligner.close();
-console.log(JSON.stringify({ audioMs: Math.round(pcm.length / 16), alignMs: ms, maxRssMb: Math.round(process.resourceUsage().maxRSS / 1024), found: !!line, ...line }));
+console.log(
+  JSON.stringify({ audioMs: Math.round(pcm.length / 16), alignMs: ms, maxRssMb: Math.round(process.resourceUsage().maxRSS / 1024), found: !!line, ...line }),
+);
 if (!line) process.exit(1);

@@ -36,8 +36,11 @@ function truthPerPiece(t) {
     for (let j = said.length - 1; j >= 0; j--) L[i][j] = pieces[i] && pieces[i] === said[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
   const out = new Array(pieces.length).fill(null);
   for (let i = 0, j = 0; i < pieces.length && j < said.length; ) {
-    if (pieces[i] && pieces[i] === said[j]) (out[i] = t.words[j].ms), i++, j++;
-    else if (L[i + 1][j] >= L[i][j + 1]) i++;
+    if (pieces[i] && pieces[i] === said[j]) {
+      out[i] = t.words[j].ms;
+      i++;
+      j++;
+    } else if (L[i + 1][j] >= L[i][j + 1]) i++;
     else j++;
   }
   return out;
