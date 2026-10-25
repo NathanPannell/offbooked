@@ -36,9 +36,8 @@ export const TRIM = {
   neighbourDb: 15, // sound across such a gap counts with the word when it is within this of the speech level (an "s" is; a breath isn't)
   loudDb: 12, // after the last voiced part, sound this close to the speech level is still the line (a word said too fast to show its pitch)
   loudGapMs: 300, // ...in the same run, or in one starting this soon after
-  wordNearMs: 400, // with word starts: sound ending more than this before the first word isn't the line
-  lineGapMs: 400, // ...nor sound after the last word's start once a quiet gap this long has passed
-  minLastWordMs: 150, // the cut never ends sooner than this after the last word starts
+  alignedNearMs: 200, // with the line's words found (alignedBounds): sound runs this close to them may hold the line's edges
+  alignedTailMs: 400, // ...the cut reaching at most this far past the end of the last word's letters (its release, a voice dying away)
   maxVoicingScanMs: 120_000, // the pitch check looks at no more sound than this (from both ends together) before falling back to the sound itself
 } as const;
 
@@ -89,67 +88,34 @@ export function speechBounds(levels: number[], frameMs: number = TRIM.frameMs, v
   return { startMs, endMs, ...l };
 }
 
-/** When the line's first and last words start (ms of the clip), from following the take live or re-timing it. */
-export interface WordAnchors {
+/** Where the line's words were found in a clip by the aligner (align/ctc.ts): when the first starts and the last ends, ms of the clip. */
+export interface LineSpan {
   firstMs: number;
-  lastMs: number;
+  lastEndMs: number;
 }
 
 /**
- * The line's words for a clip, given where its voice is (stretches of sound with a voice in them,
- * ms of the clip): when the first and last words start, or null when they aren't known.
+ * The span to keep when the aligner found the line: from its first word to its last, the ends set
+ * on the voice as `speechBounds` sets them (voiced sound, an unvoiced onset or release, a stop's
+ * closure, loud sound the pitch check missed) but only from the sound runs reaching into the line,
+ * within TRIM.alignedNearMs of its words, and never further than TRIM.onsetMs before the first
+ * word or TRIM.alignedTailMs after the last: a cue read aloud just before the line, an "um" or a
+ * false start, an "Okay." after it, a bump or a scrape never move the cut. It never starts after
+ * the first word or ends before the last. Then padded as always. Null when the clip has no clear
+ * speech (it is kept whole, as by `speechBounds`).
  */
-export type WordsOnVoice = (voice: Stretch[]) => WordAnchors | null;
-
-/** The stretches with a voice in them (a voiced run of TRIM.voicedRunMs): breaths, bumps and scrapes left out. */
-function voicedStretches(stretches: Stretch[], voiced: (frame: number) => boolean, frameMs: number): Stretch[] {
-  const need = Math.max(1, Math.round(TRIM.voicedRunMs / frameMs));
-  let budget = Math.round(TRIM.maxVoicingScanMs / frameMs);
-  return stretches.filter((s) => {
-    let n = 0;
-    for (let i = Math.floor(s.startMs / frameMs); i < Math.ceil(s.endMs / frameMs); i++) {
-      // Past the pitch check's budget, a stretch counts as voice: never leave speech out.
-      if (--budget < 0) return true;
-      n = voiced(i) ? n + 1 : 0;
-      if (n >= need) return true;
-    }
-    return false;
-  });
-}
-
-/**
- * The span to keep, anchored on the line's words rather than on loudness: only the sound runs of
- * the line count, from the first one reaching within TRIM.wordNearMs before the first word, through
- * every run starting up to TRIM.wordNearMs after the last word's start (a beat inside the line is
- * kept, however long), then on
- * while the gaps stay shorter than TRIM.lineGapMs: the silence after the last word ends it. Within
- * those runs the ends are found as `speechBounds` finds them (voiced, an unvoiced onset or release,
- * a stop's closure), so the cut sits on the voice just before the first word and just after the
- * last. A bump, a cough, a "hmm" or anyone speaking seconds before the line, or a scrape or an
- * "okay" after it, never moves the cut. The cut never ends before TRIM.minLastWordMs into the last
- * word. Null when the clip has no clear speech or no sound near the words (then `speechBounds`).
- */
-export function wordBounds(levels: number[], words: WordAnchors, frameMs: number = TRIM.frameMs, voiced?: (frame: number) => boolean): SpeechBounds | null {
+export function alignedBounds(levels: number[], line: LineSpan, frameMs: number = TRIM.frameMs, voiced?: (frame: number) => boolean): SpeechBounds | null {
   const l = levelsOf(levels);
   if (!l) return null;
-  const runs = soundRuns(levels, l.thresholdDb, frameMs);
-  const first = Math.floor(words.firstMs / frameMs);
-  const last = Math.floor(words.lastMs / frameMs);
-  const near = Math.round(TRIM.wordNearMs / frameMs);
-  const gap = Math.round(TRIM.lineGapMs / frameMs);
-  const from = runs.findIndex((r) => r[1] >= first - near);
-  if (from < 0 || runs[from]![0] > last + gap) return null;
-  const line: [number, number][] = [];
-  for (let k = from; k < runs.length; k++) {
-    const r = runs[k]!;
-    // A run starting just after the last word's anchor is still the line (the anchor may be early).
-    if (line.length && r[0] > last + near && r[0] - line[line.length - 1]![1] - 1 > gap) break;
-    line.push(r);
-  }
-  const span = (voiced && voicedSpan(line, voiced, frameMs, levels, l.speechDb)) ?? [line[0]![0], line[line.length - 1]![1]];
-  const end = Math.max(span[1], Math.min(levels.length - 1, last + Math.round(TRIM.minLastWordMs / frameMs)));
+  const first = Math.max(0, Math.floor(line.firstMs / frameMs));
+  const last = Math.min(levels.length - 1, Math.max(first, Math.ceil(line.lastEndMs / frameMs) - 1));
+  const near = Math.round(TRIM.alignedNearMs / frameMs);
+  const runs = soundRuns(levels, l.thresholdDb, frameMs).filter((r) => r[1] >= first - near && r[0] <= last + near);
+  const span = runs.length ? ((voiced && voicedSpan(runs, voiced, frameMs, levels, l.speechDb)) ?? [runs[0]![0], runs[runs.length - 1]![1]]) : [first, last];
+  const start = Math.min(first, Math.max(span[0], first - Math.round(TRIM.onsetMs / frameMs)));
+  const end = Math.max(last, Math.min(span[1], last + Math.round(TRIM.alignedTailMs / frameMs)));
   const totalMs = levels.length * frameMs;
-  return { startMs: Math.max(0, span[0] * frameMs - TRIM.leadPadMs), endMs: Math.min(totalMs, (end + 1) * frameMs + TRIM.tailPadMs), ...l };
+  return { startMs: Math.max(0, start * frameMs - TRIM.leadPadMs), endMs: Math.min(totalMs, (end + 1) * frameMs + TRIM.tailPadMs), ...l };
 }
 
 /**
@@ -376,7 +342,7 @@ export function shiftStretches(stretches: readonly Stretch[], startMs: number, l
 export interface SpeechAnalysis {
   bounds: SpeechBounds | null;
   stretches: Stretch[];
-  /** The bounds come from the line's words (`wordBounds`), not loudness alone. */
+  /** The bounds come from the line's words (`alignedBounds`), not loudness alone. */
   byWords?: boolean;
 }
 
@@ -386,13 +352,13 @@ export async function detectSpeech(file: string): Promise<SpeechBounds | null> {
 }
 
 /** Decodes a clip to 16 kHz mono PCM once and finds both its trim and its stretches of voice. */
-export async function analyzeSpeech(file: string, words?: WordsOnVoice | null): Promise<SpeechAnalysis> {
+export async function analyzeSpeech(file: string): Promise<SpeechAnalysis> {
   const { stdout } = await exec(
     "ffmpeg",
     ["-hide_banner", "-nostdin", "-i", file, "-vn", "-ac", "1", "-ar", String(TRIM.analysisRate), "-f", "s16le", "-acodec", "pcm_s16le", "-"],
     { encoding: "buffer", maxBuffer: 64 * 1024 * 1024, timeout: 2 * 60_000 },
   );
-  return analyzePcm(pcmOf(stdout as Buffer), words);
+  return analyzePcm(pcmOf(stdout as Buffer));
 }
 
 /** 16-bit little-endian samples from a buffer ffmpeg wrote: a view of it when it is aligned (this is little-endian Node), else a copy. */
@@ -404,13 +370,12 @@ export function pcmOf(bytes: Buffer): Int16Array {
   return pcm;
 }
 
-/** `analyzeSpeech` on 16 kHz mono samples already decoded. */
-export function analyzePcm(pcm: Int16Array, words?: WordsOnVoice | null): SpeechAnalysis {
+/** `analyzeSpeech` on 16 kHz mono samples already decoded; with `line`, where the aligner found the line in them. */
+export function analyzePcm(pcm: Int16Array, line?: LineSpan | null): SpeechAnalysis {
   const levels = frameLevels(pcm);
   const voiced = voicing(pcm);
   const stretches = speechStretches(levels);
-  // The line's words when they're known, laid on the voice; loudness (and voice) alone otherwise.
-  const anchors = words ? words(voicedStretches(stretches, voiced, TRIM.frameMs)) : null;
-  const byWords = anchors ? wordBounds(levels, anchors, TRIM.frameMs, voiced) : null;
+  // The line's words when the aligner found them; loudness (and voice) alone otherwise.
+  const byWords = line ? alignedBounds(levels, line, TRIM.frameMs, voiced) : null;
   return { bounds: byWords ?? speechBounds(levels, TRIM.frameMs, voiced), stretches, byWords: !!byWords };
 }
