@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { promisify } from "node:util";
 import { normalizeClip } from "./ffmpeg.ts";
 import { RENDER_SETTINGS } from "./plan.ts";
-import { detectSpeech, frameLevels, speechBounds, TRIM, voicing, wordBounds } from "./trim.ts";
+import { alignedBounds, detectSpeech, frameLevels, speechBounds, TRIM, voicing } from "./trim.ts";
 
 const exec = promisify(execFile);
 
@@ -133,14 +133,15 @@ describe("ends anchored on the voice", () => {
   });
 });
 
-describe("cut by the line's words", () => {
+describe("cut by the line's words, where the aligner found them", () => {
   // A voiced "hmm" 2.6 s before the line, the line (with a 3 s beat before its last word), and an
   // "okay" 1.3 s after it: all loud and voiced, so loudness alone keeps them all.
   const take = levels([-70, 500], [-22, 300], [-70, 2600], [-20, 800], [-70, 3000], [-20, 400], [-70, 1300], [-24, 300], [-70, 800]);
   const voice = voicedIn([500, 800], [3400, 4200], [7200, 7600], [8900, 9200]);
 
-  test("starts just before the first word and ends where the silence after the last word begins", () => {
-    const b = wordBounds(take, { firstMs: 3400, lastMs: 7250 }, 10, voice)!;
+  test("starts just before the first word and ends just after the last, on the voice", () => {
+    // The model hears the first letter a little after the voice starts, and the last ends a little before it fades.
+    const b = alignedBounds(take, { firstMs: 3420, lastEndMs: 7500 }, 10, voice)!;
     assert.equal(b.startMs, 3400 - TRIM.leadPadMs);
     assert.equal(b.endMs, 7600 + TRIM.tailPadMs);
     const loud = speechBounds(take, 10, voice)!;
@@ -148,19 +149,24 @@ describe("cut by the line's words", () => {
     assert.equal(loud.endMs, 9200 + TRIM.tailPadMs, "and ends after the okay");
   });
 
-  test("anchors a little off still land on the voice: the words' own sound sets the edges", () => {
-    const b = wordBounds(take, { firstMs: 3600, lastMs: 7100 }, 10, voice)!;
-    assert.equal(b.startMs, 3400 - TRIM.leadPadMs);
-    assert.equal(b.endMs, 7600 + TRIM.tailPadMs);
+  test("a cue read straight into the line, with no pause, never pulls the cut back more than TRIM.onsetMs", () => {
+    const joined = levels([-70, 500], [-20, 3700], [-70, 1000]);
+    const b = alignedBounds(joined, { firstMs: 3000, lastEndMs: 4100 }, 10, voicedIn([500, 4200]))!;
+    assert.equal(b.startMs, 3000 - TRIM.onsetMs - TRIM.leadPadMs);
+    assert.equal(b.endMs, 4200 + TRIM.tailPadMs);
   });
 
-  test("never ends before the last word has had time to be said", () => {
-    const b = wordBounds(levels([-70, 500], [-20, 800], [-70, 1500]), { firstMs: 500, lastMs: 1250 }, 10, voicedIn([500, 1300]))!;
-    assert.ok(b.endMs >= 1250 + TRIM.minLastWordMs + TRIM.tailPadMs);
+  test("never starts after the first word or ends before the last, and never runs far past it", () => {
+    const b = alignedBounds(take, { firstMs: 3000, lastEndMs: 7300 }, 10, voice)!;
+    assert.ok(b.startMs <= 3000 - TRIM.leadPadMs, "an early first word: the cut starts with it");
+    const long = alignedBounds(levels([-70, 500], [-20, 4000], [-70, 500]), { firstMs: 500, lastEndMs: 1500 }, 10, voicedIn([500, 4500]))!;
+    assert.equal(long.endMs, 1500 + TRIM.alignedTailMs + TRIM.tailPadMs, "speech running on after the last word isn't the line");
+    const quiet = alignedBounds(take, { firstMs: 1500, lastEndMs: 2000 }, 10, voice)!;
+    assert.deepEqual([quiet.startMs, quiet.endMs], [1500 - TRIM.leadPadMs, 2000 + TRIM.tailPadMs], "no sound near the words: the words themselves");
   });
 
-  test("gives up (loudness decides) when there is no sound near the words", () => {
-    assert.equal(wordBounds(take, { firstMs: 12_000, lastMs: 13_000 }, 10, voice), null);
+  test("no clear speech: kept whole", () => {
+    assert.equal(alignedBounds(levels([-60, 2000]), { firstMs: 500, lastEndMs: 1500 }, 10, voice), null);
   });
 });
 

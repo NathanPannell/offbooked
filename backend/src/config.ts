@@ -12,6 +12,12 @@ export interface TtsConfig {
   cueWaitMs: number; // how long a lines request waits for missing TTS cue clips
 }
 
+export interface AlignConfig {
+  driver: "wav2vec2" | "off";
+  modelPath: string; // the aligner's ONNX model (align/model.ts), as in the Docker image
+  threads: number; // CPU threads one alignment uses
+}
+
 export interface Config {
   databaseUrl: string;
   appUrl: string;
@@ -26,6 +32,7 @@ export interface Config {
   /** Normalize each take as soon as it is uploaded (its cut, levelled clip and re-timed words), one at a time. */
   normalizeOnUpload: boolean;
   tts: TtsConfig;
+  align: AlignConfig;
   /** The phrase a director enters once for beta access, which setting up a production needs (src/beta.ts). */
   betaAccessCode: string;
 }
@@ -85,6 +92,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       voicesDir: env.PIPER_VOICES_DIR?.trim() || "/opt/piper/voices",
       concurrency: Math.max(1, Number(env.TTS_CONCURRENCY) || Math.min(2, availableParallelism())),
       cueWaitMs: Math.max(0, Number(env.TTS_CUE_WAIT_MS ?? 2500)),
+    },
+    align: {
+      driver: env.ALIGN_DRIVER?.trim() === "off" ? "off" : "wav2vec2",
+      modelPath: env.ALIGN_MODEL?.trim() || "/opt/align/wav2vec2-base-960h-q4.onnx",
+      threads: Math.max(1, Number(env.ALIGN_THREADS) || Math.min(2, availableParallelism())),
     },
     betaAccessCode: env.BETA_ACCESS_CODE?.trim() || DEFAULT_BETA_ACCESS_CODE,
   };

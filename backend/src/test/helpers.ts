@@ -11,6 +11,7 @@ import { silentLog } from "../log.ts";
 import type { Labeler } from "../parse/label.ts";
 import type { EnsembleInferrer } from "../shared.ts";
 import type { Synthesizer } from "../tts/piper.ts";
+import type { Aligner } from "../align/model.ts";
 
 process.env.NODE_ENV = "test";
 
@@ -27,9 +28,16 @@ export interface TestApp {
 }
 
 // Each test file gets its own throwaway schema, migrated from scratch and dropped afterwards.
-// TTS is off unless a test passes a synthesizer (see FakeSynthesizer in ./tts.ts).
+// TTS is off unless a test passes a synthesizer (see FakeSynthesizer in ./tts.ts), and so is the
+// aligner unless a test passes one (FakeAligner in ./align.ts).
 export async function createTestApp(
-  opts: { labeler?: Labeler | null; ensemble?: EnsembleInferrer | null; env?: Record<string, string>; synthesizer?: Synthesizer | null } = {},
+  opts: {
+    labeler?: Labeler | null;
+    ensemble?: EnsembleInferrer | null;
+    env?: Record<string, string>;
+    synthesizer?: Synthesizer | null;
+    aligner?: Aligner | null;
+  } = {},
 ): Promise<TestApp> {
   const url = process.env.DATABASE_URL!;
   const schema = `test_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -64,6 +72,7 @@ export async function createTestApp(
     labeler: opts.labeler ?? null,
     ensemble: opts.ensemble ?? null,
     synthesizer: opts.synthesizer ?? null,
+    aligner: opts.aligner ?? null,
   });
   const app = buildApp({ ctx, probeFfmpeg: async () => "ffmpeg test" });
   await app.ready();

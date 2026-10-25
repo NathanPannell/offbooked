@@ -5,13 +5,9 @@ import type { Ctx } from "./context.ts";
 import { analyzeSpeech, shiftStretches, type Stretch } from "./render/trim.ts";
 
 // Word timing for takes (see docs/api.md, LineAudio `speech` and `wordStartsMs`). The server knows
-// where the voice is in each clip (its stretches of speech, from the clip's own levels); the app
-// knows when each word started, from following the take while it recorded, and sends that with
-// the upload in ms of the recording. Both are served in ms of the clip as it plays: trimmed to the
-// speech and normalized.
-
-/** At most this many word starts are kept for a take (a very long speech). */
-export const MAX_WORD_STARTS = 2000;
+// where the voice is in each clip (its stretches of speech, from the clip's own levels) and when
+// each word of the line starts (align/ctc.ts, from the recording alone, stored in ms of it). Both are
+// served in ms of the clip as it plays: trimmed to the speech and normalized.
 
 const HAS_WORD = /[\p{L}\p{N}]/u;
 
@@ -24,32 +20,6 @@ const HAS_WORD = /[\p{L}\p{N}]/u;
  */
 export function pieceCount(text: string): number {
   return linePieces(text).length;
-}
-
-/** A short first word this far before the next, with no comma or full stop after it, was something else ("Um, I…"). */
-export const LONE_FIRST_WORD_MS = 1500;
-
-/**
- * When the line's first and last said words start, from a take's word starts (one per piece, ms of
- * the recording; the narrator's pieces skipped), for cutting the take by them. A short first word
- * heard far ahead of the rest with no break after it ("I" in "Um, I… [2 s] I shall…") is taken for
- * noise and the cut starts at the next word. Null when they don't fit the line.
- */
-export function wordAnchors(starts: readonly number[] | null, text: string): { firstMs: number; lastMs: number } | null {
-  const pieces = linePieces(text);
-  if (!starts?.length || starts.length !== pieces.length) return null;
-  const said = pieces.flatMap((p, i) => (p.narrator ? [] : [{ ms: starts[i]!, text: p.text, at: i }]));
-  if (!said.length) return null;
-  // Only when nothing in the script marks a pause there: no punctuation after the word (an ellipsis
-  // or a dash included), and no direction or lone dash between it and the next word.
-  const lone =
-    said.length >= 3 &&
-    said[1]!.at === said[0]!.at + 1 &&
-    /[\p{L}\p{N}]/u.test(said[1]!.text) &&
-    said[1]!.ms - said[0]!.ms > LONE_FIRST_WORD_MS &&
-    said[0]!.text.replace(/[^\p{L}\p{N}]/gu, "").length <= 4 &&
-    !/[,;:.!?\u2014\u2013\u2026-]['"\u2019\u201d)]*$/.test(said[0]!.text);
-  return { firstMs: said[lone ? 1 : 0]!.ms, lastMs: said[said.length - 1]!.ms };
 }
 
 /** The pieces `pieceCount` counts, in order: their text, and whether the narrator says them (a [direction]) rather than the character. */
@@ -95,25 +65,6 @@ export function linePieces(text: string): { text: string; narrator: boolean }[] 
     }
   });
   return [...groups.values()].flatMap((g) => (g.wordy ? g.pieces : []));
-}
-
-/**
- * The X-Word-Starts header of a take upload: comma-separated ms of the recording, one per spoken
- * word of the line, never going back. Null when it is missing, malformed, or doesn't fit the line
- * (the count is wrong, or a start is past the end of the recording): the take is kept either way.
- */
-export function parseWordStarts(header: unknown, text: string, durationMs: number): number[] | null {
-  if (typeof header !== "string" || !header.trim()) return null;
-  const parts = header.split(",");
-  if (parts.length > MAX_WORD_STARTS) return null;
-  const starts: number[] = [];
-  for (const part of parts) {
-    if (!/^\s*\d{1,9}\s*$/.test(part)) return null;
-    const ms = Number(part);
-    if (ms > durationMs + 1000 || (starts.length && ms < starts[starts.length - 1]!)) return null;
-    starts.push(ms);
-  }
-  return starts.length === pieceCount(text) ? starts : null;
 }
 
 /** Word starts in ms of the clip as served: moved by where the trim cut it, kept inside the clip. Undefined when they don't fit the line any more (it was edited). */
