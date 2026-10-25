@@ -35,14 +35,6 @@ export function myLinePauseMs(line: { text: string; recordedMs?: number | null }
   return Math.max(MIN_PAUSE_MS, Math.round((words / STAGE_WORDS_PER_SECOND) * 1000));
 }
 
-/** Speeds offered for other people's lines. */
-export const SPEEDS = [1, 1.25, 1.5, 2, 2.5, 3] as const;
-export type Speed = (typeof SPEEDS)[number];
-
-export function isSpeed(value: unknown): value is Speed {
-  return SPEEDS.includes(value as Speed);
-}
-
 /** The small tag shown beside a line when listening, or null for a recording (the cast's or the director's). */
 export function audioSourceTag(source: AudioSource): string | null {
   switch (source) {

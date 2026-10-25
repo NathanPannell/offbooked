@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type { ActorLine } from "../../api/types";
 import { AccuracyChip } from "../../components/AccuracyChip";
 import { CharacterName } from "../../components/CharacterName";
+import { SpeedButton } from "../../components/SpeedButton";
 import { WordDiff } from "../../components/WordDiff";
 import { pieceStates, segmentLine } from "../../stt/live";
 import { verdict, VERDICT_MESSAGE } from "../../stt/score";
@@ -182,6 +183,7 @@ export function LineCard({
                 <CloudUpload size={16} aria-hidden="true" /> Saving…
               </span>
             )}
+            {(takeUrl || upload) && <SpeedButton className="speed-btn-sm" />}
             <button type="button" className="btn btn-ghost btn-sm take-redo" onClick={onRerecord} aria-label={mine ? "Record this line again" : undefined}>
               <RotateCcw size={15} aria-hidden="true" /> {mine ? "Redo" : "Record your own"}
             </button>

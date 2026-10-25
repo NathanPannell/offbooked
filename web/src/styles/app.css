@@ -4764,7 +4764,7 @@
   border-top: 1px solid var(--line);
 }
 
-/* Speed of everyone else: tap to cycle 1× to 3×. Balanced on the right by a spacer. */
+/* Playback speed (SpeedButton): tap to cycle 0.5× to 4×. In the player bar, balanced on the right by a spacer. */
 .speed-btn {
   display: inline-grid;
   place-items: center;
@@ -4787,6 +4787,14 @@
 .speed-btn:hover {
   background: var(--paper-deep);
   color: var(--ink);
+}
+
+/* Beside Listen back on a take: as wide as its label, still a full tap target. */
+.speed-btn-sm {
+  width: auto;
+  min-width: var(--tap);
+  padding: 0 6px;
+  font-size: var(--text-sm);
 }
 
 .controls-spacer {

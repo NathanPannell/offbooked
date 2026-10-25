@@ -2,11 +2,13 @@ import { Crosshair, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, RunThrough } from "../api/types";
+import { usePlaybackSpeed } from "../audio/speed";
 import { useWakeLock } from "../audio/wakeLock";
 import { CharacterName } from "../components/CharacterName";
 import { repeatsSceneTitle } from "../routes/director/lineText";
 import { Loading } from "../components/Loading";
 import { SectionNav } from "../components/SectionNav";
+import { SpeedButton } from "../components/SpeedButton";
 import { sceneLabel } from "./sceneLabel";
 import { useResource } from "../lib/useResource";
 import { nowPlaying } from "../native/nowPlaying";
@@ -17,7 +19,6 @@ import { followLine } from "./follow";
 import { LineText, LiveText, type CueSpan } from "./LiveText";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
 import { changeSettings, defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
-import { SPEEDS } from "./timing";
 import { cueRange } from "./words";
 
 /** After scrolling by hand, how long before the play is followed again. */
@@ -29,8 +30,6 @@ const MODES: { mode: MyLineMode; label: string; short: string; option: string }[
   { mode: "skip", label: "Silent", short: "Silent", option: "Silent: a gap to say them" },
   { mode: "pause", label: "Pause, then read", short: "Pause", option: "Pause, then read" },
 ];
-
-const formatSpeed = (speed: number) => `${speed}×`;
 
 interface Props {
   load: () => Promise<RunThrough>;
@@ -60,7 +59,8 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   const myCharacterIds = useMemo(() => data?.myCharacterIds ?? [], [data]);
   const isActor = myCharacterIds.length > 0;
 
-  // Role, my-line mode and speed: remembered per production, read once the run-through loads.
+  // Role and my-line mode: remembered per production, read once the run-through loads. The speed is
+  // the app's one playback speed (audio/speed.ts).
   const productionId = data?.production.id;
   const loadStored = useEffectEvent((productionId: string) => {
     const roles = new Set([...(isActor ? [MY_PART] : []), ...characters.map((c) => c.id)]);
@@ -164,9 +164,10 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     engine?.setPart(part);
   }, [engine, part]);
 
+  const speed = usePlaybackSpeed();
   useEffect(() => {
-    engine?.setSpeed(settings.speed);
-  }, [engine, settings.speed]);
+    engine?.setSpeed(speed);
+  }, [engine, speed]);
 
   const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
@@ -272,8 +273,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     .join(" & ");
   const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
   const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
-  const nextSpeed = SPEEDS[(SPEEDS.indexOf(settings.speed) + 1) % SPEEDS.length];
-  const speedLabel = `${hasRole ? "Speed of other people's lines" : "Speed"}: ${formatSpeed(settings.speed)}`;
 
   const onLineTap = (line: Line) => {
     if (!engine || !hasAudio) return;
@@ -447,9 +446,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
       )}
 
       <div className="player-controls" role="group" aria-label="Playback">
-        <button type="button" className="speed-btn" onClick={() => update({ speed: nextSpeed })} aria-label={speedLabel} title={speedLabel}>
-          {formatSpeed(settings.speed)}
-        </button>
+        <SpeedButton label={hasRole ? "Speed of other people's lines" : "Speed"} />
         <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">
           <SkipBack size={24} />
         </button>
