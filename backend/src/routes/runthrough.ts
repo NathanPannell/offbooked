@@ -6,6 +6,7 @@ import { scheduleRender } from "../render/queue.ts";
 import { renderView } from "../render/view.ts";
 import { runThrough } from "../runthrough.ts";
 import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
+import { listenTrack } from "../track/track.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
 
 export function runthroughRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -27,6 +28,13 @@ export function runthroughRoutes(app: FastifyInstance, ctx: Ctx) {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, idOf(req.params));
     return { lines: await lineAudio(ctx, p.id, warmIds(req.body), { priority: TTS_PRIORITY.prefetch }) };
+  });
+
+  // One file for a stretch of the listen-through (track/track.ts), so it plays on with the phone locked.
+  app.post("/api/productions/:id/listen-track", async (req) => {
+    const user = await requireDirector(ctx, req);
+    const p = await ownedProduction(ctx, user, idOf(req.params));
+    return listenTrack(ctx, p.id, req.body);
   });
 
   app.post("/api/productions/:id/render", async (req, reply) => {

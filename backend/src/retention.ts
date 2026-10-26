@@ -124,6 +124,7 @@ async function purgeProduction(ctx: Ctx, productionId: string, reason: "retentio
     await tx`delete from practice_runs where production_id = ${productionId}`;
     await tx`delete from take_mixes where production_id = ${productionId}`;
     await tx`delete from renders where production_id = ${productionId}`;
+    await tx`delete from listen_tracks where production_id = ${productionId}`;
     await tx`delete from takes where production_id = ${productionId}`;
     await tx`delete from lines where production_id = ${productionId}`;
     await tx`delete from actor_characters where character_id in (select id from characters where production_id = ${productionId})`;
@@ -164,6 +165,7 @@ export async function sweepIfDeleted(ctx: Ctx, productionId: string): Promise<bo
   const [deleted] = await ctx.sql`select 1 from productions where id = ${productionId} and content_deleted_at is not null`;
   if (!deleted) return false;
   await ctx.sql`delete from take_mixes where production_id = ${productionId}`;
+  await ctx.sql`delete from listen_tracks where production_id = ${productionId}`;
   await ctx.storage.deletePrefix(`productions/${productionId}/`);
   ctx.log.warn({ productionId }, "swept a write that finished after the production's content was deleted");
   return true;

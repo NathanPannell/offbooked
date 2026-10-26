@@ -444,3 +444,37 @@ interface PartCard {       // GET /api/join/:token characters, GET /api/invite/p
 - `AudioSource` (`LineAudio.source`, `RunThrough.sources`, render timing, cue and `together` `audioSource`): `"standin"` is now `"director"`.
 - Removed: `POST /api/productions/:id/record-as`, `POST /api/productions/:id/characters/:characterId/unassign`, call sheet `takenBy`, `actorId` and `sharedLines`, join card `takenBy`, and the `character_taken` error.
 - A personal link (`/i/:token`) whose token doesn't check out is 401 "This link doesn't work. Ask your director for the cast link."
+
+# Additions (2026-10-26): listen tracks
+
+On a locked phone the website's line-by-line playback stops: it gives its `<audio>` element a new source for every line and every pause, and mobile browsers don't reliably start a new source in the background. A listen track is a stretch of the listen-through joined into one `.m4a` for one listener's part and mode. The player keeps starting line by line (no wait) and moves onto the track at the next line once it is built; from then on there is one source, so it plays on with the screen off, and moving between lines is a seek.
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| POST | `/api/productions/:id/listen-track` | director (own production) | `{ track: ListenTrack }` |
+| POST | `/api/invite/listen-track` | actor | Same, for any line of the actor's production. |
+
+Body: `{ lineIds: string[]; mine?: string[]; mode?: "read" | "skip" | "pause" }`. `lineIds` are dialogue lines and stage directions in playback order, at most 300 (`MAX_TRACK_LINES`); lines that aren't playable lines of that production are left out, and none left is 400. `mine` are the listener's own lines and `mode` what happens on them, as in the player (default `"read"`). Bad ids or mode are 400.
+
+```ts
+type ListenTrack =
+  | { status: "building" }   // ask again (the web app asks every 3 s)
+  | { status: "failed" }     // a build failed in the last 30 s; ask again later, keep playing line by line
+  | { status: "ready"; url: string; durationMs: number; items: TrackItem[] };
+
+interface TrackItem {
+  lineId: string;
+  kind: "line" | "speak";    // the line's audio (or its silence), or the pause while the listener says it
+  startMs: number;           // in the track
+  durationMs: number;
+  // "line" items only, as in LineAudio:
+  source?: AudioSource;
+  segments?: SpokenSegment[];
+  speech?: { startMs: number; endMs: number }[];
+  wordStartsMs?: number[];
+}
+```
+
+- Layout matches the player (`track/plan.ts`, kept in step with `web/src/player/queue.ts` and `timing.ts`): 350 ms between lines in a section, 1200 ms at a section change; on the listener's lines, `"skip"` is a `speak` item instead of the line and `"pause"` a `speak` item followed by the line. A `speak` item lasts a take's length plus 15% (at least 500 ms more), else the spoken words at 150 a minute, never under 1 s. The time between items is the pause between lines.
+- Built in-process, one at a time per server, from the same `.m4a` clips `LineAudio` serves (synthesizing whatever isn't made yet at the render's background priority, so listeners' own lines come first; waiting up to 5 minutes), each cut or padded to its exact length, then encoded once (AAC, 64 kb/s, 48 kHz mono, faststart). Stored at `productions/<id>/tracks/<hash>.m4a` and recorded in `listen_tracks` (migration `020`), keyed by a hash of the lines, the listener's lines and mode, each line's text, speaker, voices, current take and newest take change, and the TTS engine and settings, so a new take or an edited line makes a new track.
+- The URL is signed for 6 hours. Tracks nobody has asked for in 12 hours are deleted, rows and files, whenever another track of the production is built; the retention job deletes the rest with the production's content.

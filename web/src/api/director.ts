@@ -9,6 +9,7 @@ import type {
   LineAudio,
   LineAudioApi,
   LineKind,
+  ListenTrack,
   Production,
   Render,
   RunThrough,
@@ -79,6 +80,7 @@ export const productions = {
     line: (lineId, opts = {}) =>
       request<LineAudio>(`/productions/${id}/lines/${lineId}/audio${opts.prefetch ? "?prefetch=1" : ""}`, { auth: director, signal: opts.signal }),
     warm: (lineIds) => request<{ lines: LineAudio[] }>(`/productions/${id}/lines/audio/warm`, { auth: director, json: { lineIds } }),
+    track: (req) => request<{ track: ListenTrack }>(`/productions/${id}/listen-track`, { auth: director, json: req }),
   }),
 };
 
