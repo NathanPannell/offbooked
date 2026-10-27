@@ -30,9 +30,9 @@ jobs:
       - name: Wait for this commit to be live
         run: |
           for i in $(seq 1 90); do
-            live=$(curl -fsS "$SITE/revision.txt?t=$(date +%s)" || true)
+            live=$(curl -fsS "$SITE/revision.txt?t=$(date +%s)" || echo nothing)
             if [ "$live" = "$GITHUB_SHA" ]; then echo "live: $live"; exit 0; fi
-            echo "serving ${live:-nothing} (want $GITHUB_SHA)"
+            echo "serving ${live:0:40} (want $GITHUB_SHA)"
             sleep 10
           done
           echo "$SITE never served $GITHUB_SHA. Check the Vercel deployment for this commit." >&2
