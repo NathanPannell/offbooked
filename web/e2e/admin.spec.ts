@@ -20,8 +20,6 @@ test("an admin finds any production, opens it read only, and traces its director
   const directorEmail = `director-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`;
   const title = `Admin check ${Math.random().toString(36).slice(2, 8)}`;
   await signIn(page, directorEmail);
-  await page.getByLabel("Access code").fill("break a leg");
-  await page.getByRole("button", { name: "Unlock Offbooked" }).click();
   await page.getByLabel("Title").fill(title);
   await page.getByLabel("First performance").fill(dayFromNow(30));
   await page.getByLabel("Final performance").fill(dayFromNow(33));
