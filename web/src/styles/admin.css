@@ -1,0 +1,213 @@
+/* The admin area (routes/admin/). Loaded with its chunk; the admin banner on a production page
+   and the header link live in app.css because they show outside it. */
+
+.admin-page {
+  max-width: 1200px;
+}
+
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 var(--s-3);
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.admin-tab:hover {
+  color: var(--ink);
+}
+
+.admin-tab[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+.admin-panel-head h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--text-xl);
+  margin: 0;
+}
+
+.admin-panel-head p {
+  margin: var(--s-1) 0 0;
+}
+
+.admin-search {
+  display: flex;
+  gap: var(--s-2);
+  max-width: 560px;
+}
+
+.admin-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 var(--s-3);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.admin-search .btn {
+  min-height: var(--tap);
+}
+
+.admin-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--s-3);
+  margin: 0;
+}
+
+.admin-figure {
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.admin-figure dt {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.admin-figure dd {
+  margin: var(--s-1) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+}
+
+/* The table scrolls inside its card; the page never scrolls sideways. */
+.admin-table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 10px var(--s-3);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-table td.num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.admin-table time {
+  white-space: nowrap;
+}
+
+.admin-table a {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.admin-tag {
+  display: inline-block;
+  margin-left: var(--s-2);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--s-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.admin-timeline h3 {
+  margin: 0 0 var(--s-2);
+}
+
+.admin-timeline ul {
+  margin: 0;
+  padding: 0 0 0 var(--s-4);
+  list-style: none;
+  border-left: 2px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.admin-event {
+  display: grid;
+  grid-template-columns: 5.5em 1fr;
+  gap: var(--s-3);
+  font-size: var(--text-sm);
+}
+
+.admin-event time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-event a {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.admin-note {
+  font-size: var(--text-sm);
+}

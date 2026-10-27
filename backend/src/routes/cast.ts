@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector, type Director } from "../auth.ts";
+import { type Director, notOwned, ownedProduction, requireDirector, viewableProduction } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
-import { badRequest, notFound } from "../errors.ts";
+import { badRequest } from "../errors.ts";
 import { body, idOf, optionalEmail, optionalString, requiredString, uuidList } from "../input.ts";
 import { partsRecordedBy, topRecorders } from "../recorders.ts";
 import { inferInBackground } from "../shared.ts";
@@ -11,7 +11,7 @@ import { castMemberView, castRows } from "../views.ts";
 async function ownedActor(sql: Sql, user: Director, actorId: string): Promise<{ id: string; productionId: string }> {
   const [a] = await sql<{ id: string; productionId: string }[]>`
     select a.id, a.production_id from actors a join productions p on p.id = a.production_id where a.id = ${actorId} and p.owner_id = ${user.id}`;
-  if (!a) throw notFound("Cast member not found.");
+  if (!a) throw notOwned(user, "Cast member not found.");
   return a;
 }
 
@@ -30,6 +30,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
   const { sql, config } = ctx;
   const member = async (productionId: string, actorId: string) => castMemberView(config, (await castRows(sql, { productionId, actorId }))[0]!);
 
+  // The owner's only, even for an admin: each member's inviteUrl is their credential.
   app.get("/api/productions/:id/cast", async (req) => {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, idOf(req.params));
@@ -89,7 +90,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
   // under every part that says it, so the parts' counts add up to more.
   app.get("/api/productions/:id/call-sheet", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const [rows, top, mine] = await Promise.all([
       sql<{ id: string; name: string; lineCount: number; linesRecorded: number }[]>`
         select c.id, c.name,

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requireDirector, SESSION_DAYS, type Director } from "../auth.ts";
+import { requireDirector, SESSION_DAYS, withAdmin, type Director } from "../auth.ts";
 import { codeMatches } from "../beta.ts";
 import type { Ctx } from "../context.ts";
 import { randomToken, sha256 } from "../crypto.ts";
@@ -47,14 +47,14 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
       where token_hash = ${sha256(token)} and used_at is null and expires_at > now()
       returning email`;
     if (!login) throw unauthorized("This sign-in link has expired or was already used. Request a new one.");
-    const [user] = await ctx.sql<Director[]>`
+    const [user] = await ctx.sql<Omit<Director, "admin">[]>`
       insert into users (email) values (${login.email})
       on conflict (email) do update set email = excluded.email
       returning id, email, name, beta_access_at is not null as beta_access`;
     const sessionToken = randomToken();
     await ctx.sql`insert into sessions (token_hash, user_id, expires_at)
                   values (${sha256(sessionToken)}, ${user!.id}, now() + ${SESSION_DAYS} * interval '1 day')`;
-    return { sessionToken, user };
+    return { sessionToken, user: withAdmin(ctx.config, user!) };
   });
 
   app.get("/api/me", async (req) => ({ user: await requireDirector(ctx, req) }));
@@ -63,9 +63,9 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     const director = await requireDirector(ctx, req);
     const name = optionalString(body(req.body), "name", 80);
     if (name === undefined) return { user: director };
-    const [user] = await ctx.sql`update users set name = ${name} where id = ${director.id}
+    const [user] = await ctx.sql<Omit<Director, "admin">[]>`update users set name = ${name} where id = ${director.id}
       returning id, email, name, beta_access_at is not null as beta_access`;
-    return { user };
+    return { user: withAdmin(ctx.config, user!) };
   });
 
   // Offbooked is in private beta: entering the access code (BETA_ACCESS_CODE, emailed on request)
@@ -77,11 +77,11 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     await enforce(ctx.sql, ctx.log, `beta-code-ip:${req.ip}`, LIMITS.betaCodeIp, BETA_TOO_MANY);
     await enforce(ctx.sql, ctx.log, `beta-code-user:${director.id}`, LIMITS.betaCodeUser, BETA_TOO_MANY);
     if (!codeMatches(code, ctx.config.betaAccessCode)) throw new HttpError(400, "wrong_code", "That code doesn't match. Check it and try again.");
-    const [user] = await ctx.sql<Director[]>`
+    const [user] = await ctx.sql<Omit<Director, "admin">[]>`
       update users set beta_access_at = coalesce(beta_access_at, now()) where id = ${director.id}
       returning id, email, name, beta_access_at is not null as beta_access`;
     ctx.log.info({ userId: director.id }, "beta access granted");
-    return { user };
+    return { user: withAdmin(ctx.config, user!) };
   });
 
   // Deletes the account and everything in it, for good (App Store guideline 5.1.1(v)). The body must

@@ -1,4 +1,6 @@
 import type { FastifyRequest } from "fastify";
+import { isAdminEmail, recordAdminView } from "./admin/access.ts";
+import type { Config } from "./config.ts";
 import type { Ctx } from "./context.ts";
 import { sha256 } from "./crypto.ts";
 import { HttpError, notFound, productionDeleted, unauthorized } from "./errors.ts";
@@ -13,7 +15,12 @@ export interface Director {
   name: string | null;
   /** May set up productions: entered the beta access code (src/beta.ts), or had an account before the beta gate. */
   betaAccess: boolean;
+  /** In ADMIN_EMAILS: may open the admin area and view any production (read only). */
+  admin: boolean;
 }
+
+/** An account row from the database with `admin` worked out from ADMIN_EMAILS. */
+export const withAdmin = (config: Config, user: Omit<Director, "admin">): Director => ({ ...user, admin: isAdminEmail(config, user.email) });
 
 export const SESSION_DAYS = 30;
 
@@ -27,18 +34,52 @@ function credential(req: FastifyRequest, scheme: "Bearer" | "Invite"): string | 
 export async function requireDirector(ctx: Ctx, req: FastifyRequest): Promise<Director> {
   const token = credential(req, "Bearer");
   if (!token) throw unauthorized("Sign in to continue.");
-  const [user] = await ctx.sql<Director[]>`
+  const [user] = await ctx.sql<Omit<Director, "admin">[]>`
     select u.id, u.email, u.name, u.beta_access_at is not null as beta_access from sessions s join users u on u.id = s.user_id
     where s.token_hash = ${sha256(token)} and s.expires_at > now() and u.deleted_at is null`;
   if (!user) throw unauthorized("Your session has ended. Sign in again.");
+  return withAdmin(ctx.config, user);
+}
+
+// Every /api/admin route starts here. Anyone who isn't an admin, signed in or not, gets the same
+// 404 as a route that doesn't exist, so the admin area isn't advertised.
+export async function requireAdmin(ctx: Ctx, req: FastifyRequest): Promise<Director> {
+  const user = await requireDirector(ctx, req).catch((err: unknown) => {
+    if (err instanceof HttpError && err.status === 401) return null;
+    throw err;
+  });
+  if (!user?.admin) throw notFound("Not found.");
   return user;
 }
 
-// Archived productions stay readable by their owner; other people's productions are 404.
+const adminReadOnly = () => new HttpError(403, "admin_read_only", "You're viewing this production as an admin, so it's read only.");
+
+// For a change to something the user doesn't own (a line, a character, a take…): 404, except to an
+// admin, who can see every production and so is told it's read only instead.
+export const notOwned = (user: Director, message: string) => (user.admin ? adminReadOnly() : notFound(message));
+
+// For changes: archived productions stay changeable by their owner; other people's productions are
+// 404, except to an admin, who can see them (viewableProduction) but not change them.
 export async function ownedProduction(ctx: Ctx, user: Director, productionId: string): Promise<ProductionRow> {
   const [p] = await productionRows(ctx.sql, { ownerId: user.id, id: productionId, includeArchived: true });
-  if (!p) throw notFound("Production not found.");
-  return p;
+  if (p) return p;
+  if (user.admin && (await productionRows(ctx.sql, { ownerId: null, id: productionId, includeArchived: true })).length) throw adminReadOnly();
+  throw notFound("Production not found.");
+}
+
+// For reading: the owner's production, or, for an admin, anyone's, exactly as its owner sees it
+// (`access: "admin"`). Each admin view of someone else's production is recorded in admin_audit.
+export async function viewableProduction(ctx: Ctx, user: Director, productionId: string): Promise<ProductionRow> {
+  const [own] = await productionRows(ctx.sql, { ownerId: user.id, id: productionId, includeArchived: true });
+  if (own) return { ...own, access: "owner" };
+  if (user.admin) {
+    const [p] = await productionRows(ctx.sql, { ownerId: null, id: productionId, includeArchived: true });
+    if (p) {
+      await recordAdminView(ctx.sql, user.id, "view_production", { productionId: p.id });
+      return { ...p, access: "admin" };
+    }
+  }
+  throw notFound("Production not found.");
 }
 
 export interface ActorSession {
