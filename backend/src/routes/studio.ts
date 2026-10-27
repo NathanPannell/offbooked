@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requireDirector, viewableProduction } from "../auth.ts";
+import { notOwned, requireDirector, viewableProduction } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { notifyActorsDone } from "../email/notify.ts";
 import { notFound } from "../errors.ts";
@@ -23,7 +23,7 @@ export function studioRoutes(app: FastifyInstance, ctx: Ctx) {
     const [line] = await sql<{ productionId: string }[]>`
       select l.production_id from lines l join productions p on p.id = l.production_id
       where l.id = ${lineId} and p.owner_id = ${user.id} and l.kind = 'dialogue'`;
-    if (!line) throw notFound("Line not found.");
+    if (!line) throw notOwned(user, "Line not found.");
     const { body, created } = await acceptTake(ctx, req, {
       productionId: line.productionId,
       lineId,
@@ -66,7 +66,7 @@ export function studioRoutes(app: FastifyInstance, ctx: Ctx) {
         const user = await requireDirector(ctx, req);
         const takeId = idOf(req.params);
         const [take] = await sql`select 1 from takes t join productions p on p.id = t.production_id where t.id = ${takeId} and p.owner_id = ${user.id}`;
-        if (!take) throw notFound("Take not found.");
+        if (!take) throw notOwned(user, "Take not found.");
         await setTakeDeleted(ctx, takeId, deleted);
         return reply.code(204).send();
       },

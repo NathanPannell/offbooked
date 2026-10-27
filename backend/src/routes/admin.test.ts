@@ -146,6 +146,11 @@ describe("the admin area", { skip: dbSkip }, () => {
       ["POST", `/api/productions/${hamletId}/archive`, {}],
       ["POST", `/api/productions/${hamletId}/join-link/reset`, {}],
       ["POST", `/api/productions/${hamletId}/render`, {}],
+      ["PATCH", `/api/lines/${hamletLines.find((l) => l.kind === "dialogue")!.id}`, { text: "Changed" }],
+      ["PATCH", `/api/characters/${hamletChar}`, { name: "RENAMED" }],
+      ["PATCH", `/api/sections/${sectionId}`, { title: "Renamed" }],
+      ["PATCH", `/api/cast/${jo.actorId}`, { name: "Renamed" }],
+      ["POST", `/api/takes/${rizTakes[0]!}/restore`, {}],
     ] as const) {
       const res = await send(method, url, root, payload);
       assert.equal(res.statusCode, 403, url);

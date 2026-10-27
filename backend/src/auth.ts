@@ -51,6 +51,10 @@ export async function requireAdmin(ctx: Ctx, req: FastifyRequest): Promise<Direc
 
 const adminReadOnly = () => new HttpError(403, "admin_read_only", "You're viewing this production as an admin, so it's read only.");
 
+// For a change to something the user doesn't own (a line, a character, a take…): 404, except to an
+// admin, who can see every production and so is told it's read only instead.
+export const notOwned = (user: Director, message: string) => (user.admin ? adminReadOnly() : notFound(message));
+
 // For changes: archived productions stay changeable by their owner; other people's productions are
 // 404, except to an admin, who can see them (viewableProduction) but not change them.
 export async function ownedProduction(ctx: Ctx, user: Director, productionId: string): Promise<ProductionRow> {

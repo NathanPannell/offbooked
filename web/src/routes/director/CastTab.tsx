@@ -89,7 +89,8 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
     <div className="cast">
       <section className="cast-actions" aria-label="Get the lines recorded">
         <CastLink production={production} link={link} />
-        <RecordYourself productionId={production.id} parts={parts} />
+        {/* An admin's view is read only: recording, the name prompt and resetting the link are the director's. */}
+        {production.access !== "admin" && <RecordYourself productionId={production.id} parts={parts} />}
       </section>
 
       {wrapped && <WrapBanner productionId={production.id} onListen={onOpenPlay} />}
@@ -365,8 +366,8 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
           <button type="button" className="btn btn-primary btn-lg cast-link-share" onClick={share} disabled={!link.data}>
             <Share2 size={18} aria-hidden="true" /> Share link with your cast
           </button>
-          <NamePrompt />
-          {link.data && <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />}
+          {production.access !== "admin" && <NamePrompt />}
+          {link.data && production.access !== "admin" && <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />}
         </>
       )}
     </section>

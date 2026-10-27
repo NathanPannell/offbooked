@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector, viewableProduction, type Director } from "../auth.ts";
+import { type Director, notOwned, ownedProduction, requireDirector, viewableProduction } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
-import { badRequest, notFound } from "../errors.ts";
+import { badRequest } from "../errors.ts";
 import { body, idOf, optionalEmail, optionalString, requiredString, uuidList } from "../input.ts";
 import { partsRecordedBy, topRecorders } from "../recorders.ts";
 import { inferInBackground } from "../shared.ts";
@@ -11,7 +11,7 @@ import { castMemberView, castRows } from "../views.ts";
 async function ownedActor(sql: Sql, user: Director, actorId: string): Promise<{ id: string; productionId: string }> {
   const [a] = await sql<{ id: string; productionId: string }[]>`
     select a.id, a.production_id from actors a join productions p on p.id = a.production_id where a.id = ${actorId} and p.owner_id = ${user.id}`;
-  if (!a) throw notFound("Cast member not found.");
+  if (!a) throw notOwned(user, "Cast member not found.");
   return a;
 }
 
