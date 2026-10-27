@@ -59,11 +59,18 @@ export default function DirectorLayout() {
       <header className="app-header">
         <div className="app-header-inner">
           <Brand to="/app" />
-          {/* The dot asks for a name until there is one: it's what the cast calls you. */}
-          <Link className="account-btn" to="/app/account" aria-label={named ? "Your account" : "Your account: add your name"} title="Your account">
-            <Avatar name={castFacingName(user.name, user.email)} size={36} />
-            {!named && <span className="account-dot" aria-hidden="true" />}
-          </Link>
+          <div className="header-actions">
+            {user.admin && (
+              <Link className="admin-link" to="/app/admin">
+                Admin
+              </Link>
+            )}
+            {/* The dot asks for a name until there is one: it's what the cast calls you. */}
+            <Link className="account-btn" to="/app/account" aria-label={named ? "Your account" : "Your account: add your name"} title="Your account">
+              <Avatar name={castFacingName(user.name, user.email)} size={36} />
+              {!named && <span className="account-dot" aria-hidden="true" />}
+            </Link>
+          </div>
         </div>
       </header>
       <Outlet context={{ user, setUser } satisfies DirectorContext} />

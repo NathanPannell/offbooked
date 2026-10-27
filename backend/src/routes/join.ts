@@ -97,6 +97,7 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     return { inviteToken: inviteToken(config.inviteSecret, actorId, 1), inviteUrl: inviteUrl(config.appUrl, config.inviteSecret, actorId, 1) };
   });
 
+  // The owner's only, even for an admin: claiming it joins the cast, which can record over anyone.
   app.get("/api/productions/:id/join-link", async (req) => {
     const user = await requireDirector(ctx, req);
     const p = await ownedProduction(ctx, user, (req.params as { id: string }).id);

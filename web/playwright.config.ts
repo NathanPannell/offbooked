@@ -47,6 +47,8 @@ export default defineConfig({
         STORAGE_DIR: path.resolve("test-results/e2e-storage"),
         TTS_DRIVER: "off",
         ANTHROPIC_API_KEY: "",
+        // e2e/admin.spec.ts signs in as this admin.
+        ADMIN_EMAILS: "admin-e2e@example.test",
       },
     },
     {
