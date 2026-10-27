@@ -17,7 +17,10 @@ export const AUDIT_WINDOW_MINUTES = 10;
 export async function recordAdminView(sql: Sql, adminUserId: string, action: AdminAction, target: { productionId?: string; subject?: string }): Promise<void> {
   const productionId = target.productionId ?? null;
   const subject = target.subject ?? null;
-  await sql`
+  await sql.begin(async (tx) => {
+    // Under READ COMMITTED two requests could both see no row; the lock makes the second wait and see the first's.
+    await tx`select pg_advisory_xact_lock(hashtext(${`admin_audit:${adminUserId}:${action}:${productionId ?? ""}:${subject ?? ""}`}))`;
+    await tx`
     insert into admin_audit (admin_user_id, action, production_id, subject)
     select ${adminUserId}, ${action}, ${productionId}, ${subject}
     where not exists (
@@ -25,6 +28,7 @@ export async function recordAdminView(sql: Sql, adminUserId: string, action: Adm
       where admin_user_id = ${adminUserId} and action = ${action}
         and production_id is not distinct from ${productionId}::uuid and subject is not distinct from ${subject}::text
         and created_at > now() - ${AUDIT_WINDOW_MINUTES} * interval '1 minute')`;
+  });
 }
 
 export interface AuditEntry {

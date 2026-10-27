@@ -1,5 +1,5 @@
 import type { Sql } from "../db.ts";
-import { parsePersonKey } from "./people.ts";
+import { formatPersonKey, parsePersonKey } from "./people.ts";
 
 // One person's timeline, from what the app already stores. What it can't show, because nothing
 // records it: listening to a run-through or a take, which parts someone picked and when (picks
@@ -57,6 +57,7 @@ type Row = { at: Date; kind: TraceKind; text: string; productionId: string | nul
 
 export async function personTrace(sql: Sql, key: string): Promise<Trace | null> {
   const who = parsePersonKey(key);
+  key = formatPersonKey(who);
   const users = await sql<{ id: string; email: string; name: string | null; createdAt: Date; betaAccessAt: Date | null; deletedAt: Date | null }[]>`
     select id, email, name, created_at, beta_access_at, deleted_at from users
     where ${who.kind === "email" ? sql`deleted_at is null and lower(email) = ${who.email}` : who.kind === "user" ? sql`id = ${who.id}` : sql`false`}`;
@@ -117,7 +118,8 @@ export async function personTrace(sql: Sql, key: string): Promise<Trace | null> 
       select n.sent_at, 'email_sent', n.kind, o.id, o.title from notifications n join owned o on o.id = n.production_id
         where n.sent_at is not null and n.kind in ('actor_done', 'cast_complete')
       union all
-      select n.sent_at, 'email_sent', n.kind, m.production_id, m.title from notifications n join mine m on m.id = n.actor_id where n.sent_at is not null
+      select n.sent_at, 'email_sent', n.kind, m.production_id, m.title from notifications n join mine m on m.id = n.actor_id
+        where n.sent_at is not null and n.kind = 'runthrough_ready'
       union all
       select a.created_at, 'joined_cast', case when a.director_user_id is null then 'Joined the cast' else 'Recorded as the director' end, m.production_id, m.title
         from actors a join mine m on m.id = a.id

@@ -1,7 +1,7 @@
 import { Search } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router";
-import { admin, type AdminProduction } from "../../api/admin";
+import { admin, ADMIN_LIST_LIMIT, type AdminProduction } from "../../api/admin";
 import { plural } from "../../lib/format";
 import { useResource } from "../../lib/useResource";
 import { Figures, Loaded, PersonLink, Table, When } from "./shared";
@@ -44,6 +44,9 @@ export default function ProductionsPanel() {
                 { label: "Takes", value: sum(rows, (p) => p.takes) },
               ]}
             />
+            {rows.length >= ADMIN_LIST_LIMIT && (
+              <p className="muted">Showing the {ADMIN_LIST_LIMIT} most recently active, and the figures are theirs. Search to narrow it down.</p>
+            )}
             {rows.length === 0 ? (
               <p className="muted">{q ? `No production matches "${q}".` : "No productions yet."}</p>
             ) : (

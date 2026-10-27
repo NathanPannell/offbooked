@@ -38,7 +38,7 @@ const people: PanelRoutes = (app, ctx, adminOf) => {
     const { key } = req.params as { key: string };
     const trace = await personTrace(ctx.sql, key);
     if (!trace) throw notFound("Nobody with that key.");
-    await recordAdminView(ctx.sql, adminOf(req).id, "view_person", { subject: key });
+    await recordAdminView(ctx.sql, adminOf(req).id, "view_person", { subject: trace.key });
     return { person: trace };
   });
 };

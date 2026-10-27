@@ -21,6 +21,9 @@ export function parsePersonKey(key: string): PersonKey {
   throw badRequest("That isn't a person key.");
 }
 
+/** The one spelling of a key, so the same person is always the same audit subject. */
+export const formatPersonKey = (k: PersonKey) => (k.kind === "email" ? `e:${k.email}` : k.kind === "user" ? `u:${k.id}` : `a:${k.id}`);
+
 /** The key of the account `u`. */
 export const userKey = (sql: Sql, alias = "u") =>
   sql`(case when ${sql(alias)}.deleted_at is null then 'e:' || lower(${sql(alias)}.email) else 'u:' || ${sql(alias)}.id::text end)`;

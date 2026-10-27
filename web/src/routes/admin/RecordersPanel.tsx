@@ -15,7 +15,7 @@ export default function RecordersPanel() {
             items={[
               { label: "People recording", value: rows.length },
               { label: "Cast members", value: rows.filter((r) => r.kind === "cast").length },
-              { label: "Lines recorded", value: sum(rows, (r) => r.linesRecorded) },
+              { label: "Directors", value: rows.filter((r) => r.kind === "director").length },
               { label: "Takes", value: sum(rows, (r) => r.takes) },
             ]}
           />

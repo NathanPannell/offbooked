@@ -44,7 +44,10 @@ export async function requireDirector(ctx: Ctx, req: FastifyRequest): Promise<Di
 // Every /api/admin route starts here. Anyone who isn't an admin, signed in or not, gets the same
 // 404 as a route that doesn't exist, so the admin area isn't advertised.
 export async function requireAdmin(ctx: Ctx, req: FastifyRequest): Promise<Director> {
-  const user = await requireDirector(ctx, req).catch(() => null);
+  const user = await requireDirector(ctx, req).catch((err: unknown) => {
+    if (err instanceof HttpError && err.status === 401) return null;
+    throw err;
+  });
   if (!user?.admin) throw notFound("Not found.");
   return user;
 }

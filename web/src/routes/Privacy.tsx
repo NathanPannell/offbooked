@@ -72,6 +72,10 @@ export function Privacy() {
           a synthesized voice, sending the emails described above, and keeping the service secure. We never use your recordings or script to train AI models,
           ours or anyone else's.
         </p>
+        <p>
+          The people who run Offbooked can open any production, its script and recordings, and see what each account and cast member has done in the app, to
+          help when something goes wrong and to keep the service running. They can look but not change anything, and every look is logged.
+        </p>
 
         <h2>Speech, voices and AI</h2>
         <ul>

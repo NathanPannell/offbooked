@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector, viewableProduction } from "../auth.ts";
+import { ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
 import { HttpError, badRequest, productionDeleted } from "../errors.ts";
@@ -97,9 +97,10 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
     return { inviteToken: inviteToken(config.inviteSecret, actorId, 1), inviteUrl: inviteUrl(config.appUrl, config.inviteSecret, actorId, 1) };
   });
 
+  // The owner's only, even for an admin: claiming it joins the cast, which can record over anyone.
   app.get("/api/productions/:id/join-link", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await viewableProduction(ctx, user, (req.params as { id: string }).id);
+    const p = await ownedProduction(ctx, user, (req.params as { id: string }).id);
     const [row] = await sql<{ joinVersion: number }[]>`select join_version from productions where id = ${p.id}`;
     return { joinUrl: joinUrl(config.appUrl, config.inviteSecret, p.id, row!.joinVersion) };
   });

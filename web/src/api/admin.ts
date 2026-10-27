@@ -80,6 +80,9 @@ export interface AuditEntry {
   subject: string | null;
 }
 
+/** The productions list stops here (ADMIN_LIST_LIMIT in backend/src/admin/productions.ts). */
+export const ADMIN_LIST_LIMIT = 500;
+
 export const admin = {
   productions: (q?: string) =>
     request<{ productions: AdminProduction[] }>(`/admin/productions${q?.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`, { auth: director }),

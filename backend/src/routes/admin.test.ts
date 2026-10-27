@@ -128,15 +128,18 @@ describe("the admin area", { skip: dbSkip }, () => {
     const hamletChar = hamletLines.find((l) => l.kind === "dialogue")!.characterId!;
     for (const url of [
       `/api/productions/${hamletId}/script`,
-      `/api/productions/${hamletId}/cast`,
       `/api/productions/${hamletId}/call-sheet`,
-      `/api/productions/${hamletId}/join-link`,
       `/api/productions/${hamletId}/runthrough`,
       `/api/productions/${hamletId}/sections/${sectionId}/lines`,
       `/api/productions/${hamletId}/characters/${hamletChar}/lines`,
     ]) {
       assert.equal((await get(url, root)).statusCode, 200, url);
       assert.equal((await get(url, bob)).statusCode, 404, url);
+    }
+    // Each cast member's invite link and the cast join link are credentials: never the admin's.
+    for (const url of [`/api/productions/${hamletId}/cast`, `/api/productions/${hamletId}/join-link`]) {
+      assert.equal((await get(url, root)).statusCode, 403, url);
+      assert.equal((await get(url, alice)).statusCode, 200, url);
     }
     const studio = (await get(`/api/productions/${hamletId}/characters/${hamletChar}/lines`, root)).json();
     assert.ok(studio.lines.length > 0);
@@ -268,5 +271,25 @@ describe("the admin area", { skip: dbSkip }, () => {
 
     const views = (await get("/api/admin/audit", root)).json().entries.filter((e: { action: string }) => e.action === "view_person");
     assert.ok(views.some((e: { subject: string }) => e.subject === "e:riz@example.test"));
+    await get(`/api/admin/people/${encodeURIComponent("e:RIZ@example.test")}`, root);
+    assert.equal((await t.ctx.sql`select 1 from admin_audit where subject ilike 'e:riz@%'`).length, 1, "one spelling of a person");
+  });
+
+  test("deleting an account takes its email out of the audit log", async () => {
+    const carol = await signIn(t, "carol@example.test");
+    await productionWithScript(t, carol, SEED_SCENE, "Carol's show");
+    const [user] = await t.ctx.sql<{ id: string }[]>`select id from users where email = 'carol@example.test'`;
+    assert.equal((await get(`/api/admin/people/${encodeURIComponent("e:carol@example.test")}`, root)).statusCode, 200);
+    const del = await t.app.inject({ method: "DELETE", url: "/api/me", headers: bearer(carol), payload: { confirm: true } });
+    assert.equal(del.statusCode, 204);
+    const subjects = (await get("/api/admin/audit", root)).json().entries.map((e: { subject: string | null }) => e.subject);
+    assert.ok(!subjects.some((s: string | null) => s?.includes("carol")), subjects.join(", "));
+    assert.ok(subjects.includes(`u:${user!.id}`));
+    // The account still shows as a creator, without its email, and its trace is under its id.
+    const creator = (await get("/api/admin/creators", root)).json().creators.find((c: { key: string }) => c.key === `u:${user!.id}`);
+    assert.equal(creator.email, null);
+    assert.ok(creator.deletedAt);
+    const trace = (await get(`/api/admin/people/u:${user!.id}`, root)).json().person;
+    assert.ok(trace.events.some((e: { kind: string }) => e.kind === "account_deleted"));
   });
 });

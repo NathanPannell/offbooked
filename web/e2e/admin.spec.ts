@@ -55,11 +55,11 @@ test("an admin finds any production, opens it read only, and traces its director
   await expect(admin.getByText("Stand, and unfold yourself.")).toBeVisible();
   await expect(admin.getByRole("button", { name: "Archive production" })).toHaveCount(0);
   await admin.getByRole("button", { name: "Cast", exact: true }).click();
-  await expect(admin.getByRole("heading", { name: "Invite your cast" })).toBeVisible();
-  // What only the director can do isn't offered: recording, renaming themselves, a new link.
+  await expect(admin.getByText("0 of 4 lines recorded")).toBeVisible();
+  // What only the director can do isn't offered: the cast link (it would let the admin join) and recording.
+  await expect(admin.getByRole("heading", { name: "Invite your cast" })).toHaveCount(0);
   await expect(admin.getByRole("button", { name: "Record some lines yourself" })).toHaveCount(0);
   await expect(admin.getByText(/^Your cast will see/)).toHaveCount(0);
-  await expect(admin.getByRole("button", { name: /Make a new one/ })).toHaveCount(0);
   await admin.getByRole("link", { name: "Back to admin" }).click();
 
   // The director is among the creators, with their figures, and their trace tells the story.

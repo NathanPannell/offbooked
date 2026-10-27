@@ -28,7 +28,9 @@ import { suggestMerges } from "./duplicateCharacters";
  */
 export function CastTab({ production, onOpenScript, onOpenPlay }: { production: Production; onOpenScript: () => void; onOpenPlay: () => void }) {
   const sheet = useResource(() => castApi.callSheet(production.id), `sheet:${production.id}`);
-  const link = useResource(() => joinLink.get(production.id).then((r) => r.joinUrl), `join:${production.id}`);
+  // An admin's view is read only, and the cast link would let them join the cast: it's the director's alone.
+  const asAdmin = production.access === "admin";
+  const link = useResource(() => (asAdmin ? Promise.resolve("") : joinLink.get(production.id).then((r) => r.joinUrl)), `join:${production.id}`);
 
   useInterval(() => void sheet.reload(), 15_000, !!sheet.data);
 
@@ -88,9 +90,9 @@ export function CastTab({ production, onOpenScript, onOpenPlay }: { production: 
   return (
     <div className="cast">
       <section className="cast-actions" aria-label="Get the lines recorded">
-        <CastLink production={production} link={link} />
-        {/* An admin's view is read only: recording, the name prompt and resetting the link are the director's. */}
-        {production.access !== "admin" && <RecordYourself productionId={production.id} parts={parts} />}
+        {/* Sharing the link and recording a part are the director's; an admin only looks. */}
+        {!asAdmin && <CastLink production={production} link={link} />}
+        {!asAdmin && <RecordYourself productionId={production.id} parts={parts} />}
       </section>
 
       {wrapped && <WrapBanner productionId={production.id} onListen={onOpenPlay} />}
@@ -366,8 +368,8 @@ function CastLink({ production, link }: { production: Production; link: LinkReso
           <button type="button" className="btn btn-primary btn-lg cast-link-share" onClick={share} disabled={!link.data}>
             <Share2 size={18} aria-hidden="true" /> Share link with your cast
           </button>
-          {production.access !== "admin" && <NamePrompt />}
-          {link.data && production.access !== "admin" && <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />}
+          <NamePrompt />
+          {link.data && <ResetLink productionId={production.id} onReset={(url) => link.setData(url)} />}
         </>
       )}
     </section>

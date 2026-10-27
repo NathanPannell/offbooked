@@ -30,9 +30,10 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
   const { sql, config } = ctx;
   const member = async (productionId: string, actorId: string) => castMemberView(config, (await castRows(sql, { productionId, actorId }))[0]!);
 
+  // The owner's only, even for an admin: each member's inviteUrl is their credential.
   app.get("/api/productions/:id/cast", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await viewableProduction(ctx, user, idOf(req.params));
+    const p = await ownedProduction(ctx, user, idOf(req.params));
     const cast = await castRows(sql, { productionId: p.id });
     const uncast = await sql<{ id: string }[]>`
       select c.id from characters c where c.production_id = ${p.id}
