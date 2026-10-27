@@ -24,10 +24,15 @@ export function RecorderDemo() {
 
   const play = useCallback((from: number) => {
     cancelAnimationFrame(frame.current);
-    const began = performance.now() - from;
     setPlaying(true);
+    // Frame by frame, at most 100 ms a frame, so a tab left in the background (no frames) carries
+    // on where it was instead of jumping ahead.
+    let ms = from;
+    let last = performance.now();
     const tick = () => {
-      const ms = performance.now() - began;
+      const now = performance.now();
+      ms += Math.min(100, now - last);
+      last = now;
       setElapsed(ms);
       if (recorderAt(ms).phase === "wrapped") setPlaying(false);
       else frame.current = requestAnimationFrame(tick);

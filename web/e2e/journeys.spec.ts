@@ -125,9 +125,9 @@ test("the pricing page is free in the beta and shows the founder prices", async 
   await expect(page).toHaveTitle("Pricing · Offbooked");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Free during public beta.");
   const showPass = page.locator(".mk-plan", { has: page.getByRole("heading", { name: "Show Pass" }) });
-  await expect(showPass.locator("s")).toHaveText("C$79");
+  await expect(showPass.locator("s")).toHaveText("was C$79");
   await expect(showPass.getByText("C$39")).toBeVisible();
-  await expect(page.locator(".mk-plan", { has: page.getByRole("heading", { name: "Season" }) }).locator("s")).toHaveText("C$249");
+  await expect(page.locator(".mk-plan", { has: page.getByRole("heading", { name: "Season" }) }).locator("s")).toHaveText("was C$249");
   // Nothing can be bought yet: every plan signs up for the beta.
   await showPass.getByRole("link", { name: "Start free in the beta" }).click();
   await expect(page).toHaveURL(/\/signin$/);

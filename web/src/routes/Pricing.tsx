@@ -13,7 +13,7 @@ export function Pricing() {
     <MarketingLayout path="/pricing">
       <header className="mk-hero mk-pricing-hero">
         <h1 className="mk-hero-title">Free during public beta.</h1>
-        <p className="mk-hero-lede">After launch, the director pays per production. Your cast is always free.</p>
+        <p className="mk-hero-lede">After launch, the director pays per show or per season. Your cast is always free.</p>
       </header>
 
       <section className="mk-section mk-pricing" aria-label="Plans">
@@ -27,7 +27,8 @@ export function Pricing() {
               <p className="mk-plan-price">
                 {plan.was && (
                   <>
-                    <s className="mk-plan-was" aria-label={`was ${plan.was}`}>
+                    <s className="mk-plan-was">
+                      <span className="sr-only">was </span>
                       {plan.was}
                     </s>{" "}
                   </>

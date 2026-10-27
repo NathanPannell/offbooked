@@ -456,7 +456,7 @@
 }
 
 .mk-rec-stage {
-  height: 330px;
+  height: 340px;
   padding: var(--s-4);
   background: var(--paper);
   display: flex;
@@ -510,7 +510,11 @@
     var(--shadow);
 }
 
+/* Only the preview of the next line gives way when the line in hand needs the room. */
 .mk-rec-card.is-next {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
   opacity: 0.55;
   font-family: var(--font-serif);
   color: var(--ink-soft);
