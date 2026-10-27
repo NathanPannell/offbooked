@@ -1,7 +1,20 @@
-import type { SpokenSegment } from "../api/types";
+import type { SpokenSegment, TrackItem } from "../api/types";
 import { applySpeed, clampSpeed } from "../audio/speed";
 import type { Clip, ClipLoader } from "./clips";
-import { gapBetweenMs, isMine, nextIndex, NO_PART, playableFrom, prefetchWindow, previousIndex, stepFor, type Part, type QueueLine } from "./queue";
+import {
+  gapBetweenMs,
+  isMine,
+  nextIndex,
+  NO_PART,
+  playableFrom,
+  prefetchWindow,
+  previousIndex,
+  sameLines,
+  samePart,
+  stepFor,
+  type Part,
+  type QueueLine,
+} from "./queue";
 import { silenceUrl } from "./silence";
 
 export interface Gap {
@@ -21,6 +34,25 @@ export interface PlayerState {
   ended: boolean;
   /** The current line's clip is still on its way. */
   waiting: boolean;
+  /** Playing from a listen track: one long source, which keeps going with the phone locked. */
+  onTrack: boolean;
+}
+
+/** A listen track as the server gives it (see ListenTrack in api/types.ts). */
+export interface TrackSource {
+  url: string;
+  items: TrackItem[];
+}
+
+/** A listen track placed in the play queue: each item knows its line's index. */
+interface LoadedTrack {
+  url: string;
+  /** The URL without its signature: the same file asked for again has the same key. */
+  key: string;
+  items: (TrackItem & { index: number })[];
+  /** Each line's first item (its "speak" pause, or its audio), by line index. */
+  first: Map<number, number>;
+  lastIndex: number;
 }
 
 /**
@@ -48,7 +80,8 @@ type Phase =
   | { kind: "line"; index: number; clip: Clip }
   | { kind: "wait"; index: number; afterSpeak: boolean } // the clip is loading; a short silence loops meanwhile
   | { kind: "speak"; index: number; durationMs: number; then: "read" | "next" } // the listener says their line; then it plays, or the next one does
-  | { kind: "pause"; index: number; next: number }; // the pause between two lines
+  | { kind: "pause"; index: number; next: number } // the pause between two lines
+  | { kind: "track"; index: number }; // playing from a listen track; the line follows its time
 
 /** Recorded takes time the listener's pause; TTS and silent lines are timed from their words. */
 const recorded = (source: string | undefined) => source === "actor" || source === "director";
@@ -58,6 +91,12 @@ const recorded = (source: string | undefined) => source === "actor" || source ==
  * silence, then the next. Pauses, the listener's speaking pauses and waits for a clip are silent
  * WAVs on the same element, so playback moves on from `ended` events alone and one tap unlocks it
  * for good. Other people's lines play at the chosen speed (pitch kept); the listener's own at 1×.
+ *
+ * With the phone locked, mobile browsers don't reliably let a page start a new source, so line by
+ * line stops at the end of the clip that was playing. Given a listen track (addTrack: a stretch of
+ * the play as one file, built by the server for this part and mode), the engine moves onto it at
+ * the next line it covers and from then on only seeks: the current line, the gap meter and the
+ * speed for each line follow the track's time (timeupdate, and animation frames while visible).
  */
 export class PlayerEngine {
   private lines: QueueLine[] = [];
@@ -67,7 +106,14 @@ export class PlayerEngine {
   private token = 0;
   private retried = new Set<string>();
   private switchedAt = 0;
-  private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false };
+  private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false };
+  /** Listen tracks ready to play: the one playing (if any) and the newest. */
+  private tracks: LoadedTrack[] = [];
+  /** The track whose file is on the element, while the phase is "track". */
+  private current: LoadedTrack | null = null;
+  /** Tracks that failed to play, by key: never tried again on this screen. */
+  private badTracks = new Set<string>();
+  private frame = 0;
   private listeners = new Set<() => void>();
 
   constructor(
@@ -78,6 +124,7 @@ export class PlayerEngine {
     audio.addEventListener("play", this.onPlay);
     audio.addEventListener("pause", this.onPause);
     audio.addEventListener("error", this.onError);
+    audio.addEventListener("timeupdate", this.onTimeUpdate);
     applySpeed(audio, 1);
   }
 
@@ -95,6 +142,8 @@ export class PlayerEngine {
 
   setLines(lines: QueueLine[]) {
     const current = this.lines[this.state.index]?.lineId;
+    // Tracks are placed by line index; a changed script needs new ones.
+    if (this.tracks.length && !sameLines(this.lines, lines)) this.clearTracks();
     this.lines = lines;
     const index = current ? lines.findIndex((l) => l.lineId === current) : -1;
     this.set({ index });
@@ -106,8 +155,14 @@ export class PlayerEngine {
   setPart(part: Part) {
     const before = this.part;
     this.part = part;
+    // A track is built for one part and mode: another one needs its own.
+    if (!samePart(before, part) && this.tracks.length) this.clearTracks();
     const phase = this.phase;
     if (!phase) return;
+    if (phase.kind === "track") {
+      this.syncTrack();
+      return;
+    }
     const line = this.lines[phase.index];
     const wasSpeaking = phase.kind === "speak" || (phase.kind === "wait" && phase.afterSpeak);
     const silentNow = part.mode !== "read" && isMine(part, line);
@@ -126,6 +181,41 @@ export class PlayerEngine {
     this.speed = clampSpeed(speed);
     const phase = this.phase;
     if (phase?.kind === "line") this.applyRate(isMine(this.part, this.lines[phase.index]));
+    else if (phase?.kind === "track") this.syncTrack();
+  }
+
+  /**
+   * A listen track for the current part and mode. Playback moves onto it at the next line it
+   * covers (or at once, from a pause). The same file asked for again changes nothing.
+   */
+  addTrack(source: TrackSource) {
+    const key = source.url.split("?")[0]!;
+    if (this.badTracks.has(key) || this.tracks.some((t) => t.key === key)) return;
+    const byLine = new Map(this.lines.map((l, i) => [l.lineId, i]));
+    const items = source.items.flatMap((item) => {
+      const index = byLine.get(item.lineId);
+      return index === undefined ? [] : [{ ...item, index }];
+    });
+    if (!items.length) return;
+    const first = new Map<number, number>();
+    items.forEach((item, i) => {
+      if (!first.has(item.index)) first.set(item.index, i);
+    });
+    const track: LoadedTrack = { url: source.url, key, items, first, lastIndex: items[items.length - 1]!.index };
+    // Keep the one playing; a newer one replaces any other.
+    this.tracks = [...this.tracks.filter((t) => t === this.current), track];
+  }
+
+  /** Drops every track; if one is playing, carries on line by line from the current line. */
+  clearTracks() {
+    this.tracks = [];
+    if (this.phase?.kind === "track") this.leaveTrack();
+    this.current = null;
+  }
+
+  /** The last line of the track that would play this line, or null when none covers it. */
+  trackReach(index: number): number | null {
+    return this.trackFor(index)?.lastIndex ?? null;
   }
 
   /** Where playback is inside the current line (see LinePosition), or null when stopped. */
@@ -146,6 +236,22 @@ export class PlayerEngine {
         return { index: phase.index, kind: phase.afterSpeak ? "after" : "before", timeMs: 0, durationMs: 0 };
       case "pause":
         return { index: phase.index, kind: "after", timeMs: 0, durationMs: 0 };
+      case "track": {
+        const item = this.trackItem();
+        if (!item) return null;
+        const into = timeMs - item.startMs;
+        if (into >= item.durationMs) return { index: item.index, kind: "after", timeMs: 0, durationMs: 0 };
+        if (item.kind === "speak") return { index: item.index, kind: "gap", timeMs: into, durationMs: item.durationMs };
+        return {
+          index: item.index,
+          kind: "clip",
+          timeMs: into,
+          durationMs: item.durationMs,
+          segments: item.segments,
+          wordStartsMs: item.wordStartsMs,
+          speech: item.speech,
+        };
+      }
     }
   }
 
@@ -191,7 +297,8 @@ export class PlayerEngine {
 
   previous() {
     const phase = this.phase;
-    const elapsed = phase?.kind === "line" ? this.audio.currentTime * 1000 : phase?.kind === "pause" ? Infinity : 0;
+    const elapsed =
+      phase?.kind === "track" ? this.trackElapsedMs() : phase?.kind === "line" ? this.audio.currentTime * 1000 : phase?.kind === "pause" ? Infinity : 0;
     const index = previousIndex(this.state.index, elapsed);
     this.seekToSegment(index, this.state.playing);
   }
@@ -238,8 +345,13 @@ export class PlayerEngine {
       return;
     }
     const line = this.lines[index]!;
-    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false });
-    this.prefetchFrom(index);
+    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false, onTrack: false });
+    const track = this.trackFor(index);
+    if (autoplay && track) {
+      this.playTrackAt(index, track);
+      return;
+    }
+    if (!track) this.prefetchFrom(index);
     if (!autoplay) {
       this.phase = null;
       this.audio.pause();
@@ -286,6 +398,10 @@ export class PlayerEngine {
   private onEnded = () => {
     const phase = this.phase;
     if (!phase) return;
+    if (phase.kind === "track") {
+      this.trackEnded();
+      return;
+    }
     if (phase.kind === "pause") {
       this.startLine(phase.next, true);
       return;
@@ -310,6 +426,12 @@ export class PlayerEngine {
   };
 
   private onPlay = () => {
+    if (this.phase?.kind === "track") {
+      this.set({ playing: true, ended: false });
+      this.syncTrack();
+      this.startFrames();
+      return;
+    }
     const gap = this.state.gap;
     this.set({
       playing: true,
@@ -320,6 +442,7 @@ export class PlayerEngine {
 
   private onPause = () => {
     const gap = this.state.gap;
+    if (gap && this.phase?.kind === "track") this.set({ gap: { ...gap, endsAt: null } });
     if (gap && this.phase?.kind === "speak") {
       const remainingMs = Math.max(0, gap.durationMs - this.audio.currentTime * 1000);
       this.set({ gap: { ...gap, endsAt: null, remainingMs } });
@@ -333,6 +456,15 @@ export class PlayerEngine {
   // A signed URL that expired, or a clip that won't decode: fetch it again once, else skip it.
   private onError = () => {
     const phase = this.phase;
+    // A track that won't play (its link expired, a network error): line by line from here, and
+    // never that track again.
+    if (phase?.kind === "track") {
+      const bad = this.current;
+      if (bad) this.badTracks.add(bad.key);
+      this.tracks = this.tracks.filter((t) => t !== bad);
+      this.leaveTrack();
+      return;
+    }
     if (phase?.kind !== "line") return;
     const lineId = this.lines[phase.index]?.lineId;
     if (!lineId) return;
@@ -345,8 +477,144 @@ export class PlayerEngine {
     this.playClip(phase.index, ++this.token, false);
   };
 
+  // Listen tracks ----------------------------------------------------------------------------
+
+  /** The track to play this line from: the one playing when it covers it, else another. */
+  private trackFor(index: number): LoadedTrack | null {
+    const covers = (t: LoadedTrack) => t.first.has(index);
+    if (this.current && covers(this.current)) return this.current;
+    return [...this.tracks].reverse().find(covers) ?? null;
+  }
+
+  /** Plays the track from this line's first item. Synchronous up to play(), like startLine. */
+  private playTrackAt(index: number, track: LoadedTrack) {
+    const token = this.token;
+    const item = track.items[track.first.get(index)!]!;
+    this.phase = { kind: "track", index };
+    this.audio.loop = false;
+    if (this.current !== track || this.audio.src !== track.url) {
+      this.switchedAt = performance.now();
+      this.audio.src = track.url;
+    }
+    this.current = track;
+    this.seek(item.startMs / 1000);
+    this.set({ onTrack: true, waiting: false });
+    this.syncTrack();
+    this.prefetchPastTrack(index);
+    void this.audio.play().catch((err: unknown) => {
+      if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false });
+    });
+    this.startFrames();
+  }
+
+  /** How far into the current line's audio the track is (Infinity in the pause after it, 0 in a speaking pause). */
+  private trackElapsedMs(): number {
+    const pos = this.position();
+    return pos?.kind === "clip" ? pos.timeMs : pos?.kind === "after" ? Infinity : 0;
+  }
+
+  /** Moves the element to a time, now, or once it knows the file's length (unless its source changed by then). */
+  private seek(seconds: number) {
+    const src = this.audio.src;
+    const to = () => {
+      if (this.audio.src !== src) return;
+      try {
+        this.audio.currentTime = seconds;
+      } catch {
+        // Not seekable yet: loadedmetadata sets it.
+      }
+    };
+    to();
+    if (!(this.audio.readyState >= 1)) this.audio.addEventListener("loadedmetadata", to, { once: true });
+  }
+
+  /** The item playing now (or the last one before the gap that is playing). */
+  private trackItem(): (TrackItem & { index: number }) | null {
+    const items = this.current?.items;
+    if (!items?.length) return null;
+    const ms = this.audio.currentTime * 1000;
+    let lo = 0;
+    let hi = items.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (items[mid]!.startMs <= ms) lo = mid;
+      else hi = mid - 1;
+    }
+    return items[lo]!;
+  }
+
+  /** Follows the track's time: the current line, the speed for it, and the listener's pause. */
+  private syncTrack() {
+    if (this.phase?.kind !== "track") return;
+    const item = this.trackItem();
+    if (!item) return;
+    const ms = this.audio.currentTime * 1000;
+    const inside = ms < item.startMs + item.durationMs;
+    if (item.index !== this.phase.index || item.index !== this.state.index) {
+      this.phase = { kind: "track", index: item.index };
+      this.set({ index: item.index });
+      this.prefetchPastTrack(item.index);
+    }
+    const rate = inside && item.kind === "line" && !isMine(this.part, this.lines[item.index]) ? this.speed : 1;
+    if (this.audio.playbackRate !== rate) applySpeed(this.audio, rate);
+    const gap = this.state.gap;
+    if (inside && item.kind === "speak") {
+      const remainingMs = Math.max(0, item.startMs + item.durationMs - ms);
+      const playing = this.state.playing;
+      if (!gap || gap.index !== item.index || (gap.endsAt === null) === playing) {
+        this.set({ gap: { index: item.index, durationMs: item.durationMs, endsAt: playing ? performance.now() + remainingMs : null, remainingMs } });
+      }
+    } else if (gap) this.set({ gap: null });
+  }
+
+  /** Near the end of the track, fetch the lines after it, in case no newer track is ready by then. */
+  private prefetchPastTrack(index: number) {
+    const track = this.current;
+    if (!track || track.lastIndex - index > PREFETCH_LINES) return;
+    const after = nextIndex(this.lines, track.lastIndex, this.part);
+    if (after !== null && !this.trackFor(after)) this.prefetchFrom(after);
+  }
+
+  /** The track has played to its end: on to the next line, from a newer track when there is one. */
+  private trackEnded() {
+    const last = this.current?.lastIndex ?? this.state.index;
+    this.set({ onTrack: false, gap: null });
+    const next = nextIndex(this.lines, last, this.part);
+    if (next === null) {
+      this.phase = null;
+      this.set({ playing: false, ended: true });
+      return;
+    }
+    this.phase = { kind: "pause", index: last, next };
+    this.playUrl(silenceUrl(gapBetweenMs(this.lines, last, next)));
+  }
+
+  /** Off the track (it changed or failed): the current line again, line by line. */
+  private leaveTrack() {
+    this.current = null;
+    this.set({ onTrack: false, gap: null });
+    if (this.state.index >= 0) this.startLine(this.state.index, this.state.playing);
+    else this.phase = null;
+  }
+
+  private onTimeUpdate = () => this.syncTrack();
+
+  /** While visible, follows the track every frame (timeupdate alone is about 4 a second). */
+  private startFrames() {
+    if (this.frame || typeof requestAnimationFrame !== "function") return;
+    const loop = () => {
+      this.frame = 0;
+      if (this.phase?.kind !== "track" || !this.state.playing) return;
+      this.syncTrack();
+      this.frame = requestAnimationFrame(loop);
+    };
+    this.frame = requestAnimationFrame(loop);
+  }
+
   destroy() {
     this.token++;
+    if (this.frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.frame);
+    this.audio.removeEventListener("timeupdate", this.onTimeUpdate);
     this.audio.removeEventListener("ended", this.onEnded);
     this.audio.removeEventListener("play", this.onPlay);
     this.audio.removeEventListener("pause", this.onPause);

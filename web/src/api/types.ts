@@ -187,10 +187,37 @@ export interface SpokenSegment {
   narrator: boolean;
 }
 
+/** One line's place in a listen track: its audio ("line"), or the pause while the listener says it ("speak"). */
+export interface TrackItem {
+  lineId: string;
+  kind: "line" | "speak";
+  /** Where it starts in the track, and how long it lasts. The time between items is the pause between lines. */
+  startMs: number;
+  durationMs: number;
+  /** "line" items: the clip's source and word timing, as in LineAudio. */
+  source?: AudioSource;
+  segments?: SpokenSegment[];
+  wordStartsMs?: number[];
+  speech?: { startMs: number; endMs: number }[];
+}
+
+/** A stretch of the listen-through as one file (POST …/listen-track), so it plays on with the phone locked. */
+export type ListenTrack = { status: "building" } | { status: "failed" } | { status: "ready"; url: string; durationMs: number; items: TrackItem[] };
+
+export interface ListenTrackRequest {
+  /** Dialogue lines and stage directions in playback order (at most 300). */
+  lineIds: string[];
+  /** The listener's own lines, and what happens on them. */
+  mine: string[];
+  mode: "read" | "skip" | "pause";
+}
+
 /** Line audio calls, scoped to a director's production or an actor's invite. */
 export interface LineAudioApi {
   line: (lineId: string, opts?: { prefetch?: boolean; signal?: AbortSignal }) => Promise<LineAudio>;
   warm: (lineIds: string[]) => Promise<{ lines: LineAudio[] }>;
+  /** Builds (or finds) a listen track. Absent where line by line is enough (tests). */
+  track?: (req: ListenTrackRequest) => Promise<{ track: ListenTrack }>;
 }
 
 export interface User {

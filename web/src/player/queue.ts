@@ -33,6 +33,19 @@ export const NO_PART: Part = { mine: null, mode: "read" };
 
 export const isMine = (part: Part, line: QueueLine | undefined): boolean => Boolean(line && part.mine?.has(line.lineId));
 
+/** The same lines and the same mode on them: what one plays, the other plays too. */
+export function samePart(a: Part, b: Part): boolean {
+  if ((a.mine?.size ?? 0) !== (b.mine?.size ?? 0)) return false;
+  if (a.mine?.size && a.mode !== b.mode) return false;
+  for (const id of a.mine ?? []) if (!b.mine?.has(id)) return false;
+  return true;
+}
+
+/** The same lines in the same order (a reloaded script that didn't change). */
+export function sameLines(a: QueueLine[], b: QueueLine[]): boolean {
+  return a === b || (a.length === b.length && a.every((l, i) => l.lineId === b[i]!.lineId && l.sectionId === b[i]!.sectionId));
+}
+
 /** The first line at or after `index`, or null when none is left. Every line takes its time. */
 export function playableFrom(lines: QueueLine[], index: number, _part: Part = NO_PART): number | null {
   const i = Math.max(0, index);
