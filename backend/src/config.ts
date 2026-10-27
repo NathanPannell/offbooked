@@ -20,6 +20,8 @@ export interface AlignConfig {
 export interface Config {
   databaseUrl: string;
   appUrl: string;
+  /** Other frontends on this API (staging) whose sign-in links land back on themselves, exact origins. */
+  extraAppUrls: string[];
   apiUrl: string;
   corsOrigins: string[];
   sessionSecret: string;
@@ -44,6 +46,25 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
 
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+// Exact origins only: a sign-in link carries a live token, so a pattern like CORS_ORIGINS'
+// "https://*.vercel.app" would let anyone's deployment ask for links that land on it.
+function appOrigins(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((s) => trimSlash(s.trim()))
+    .filter(Boolean)
+    .map((url) => {
+      if (url.includes("*") || !URL.canParse(url) || new URL(url).origin !== url)
+        throw new Error(`EXTRA_APP_URLS must list exact origins like https://staging.example.com, not ${url}`);
+      return url;
+    });
+}
+
+/** Where a sign-in link lands: the frontend that asked (its Origin) when it is one of EXTRA_APP_URLS, else APP_URL. */
+export function signInAppUrl(config: Pick<Config, "appUrl" | "extraAppUrls">, origin: string | undefined): string {
+  return origin && config.extraAppUrls.includes(origin) ? origin : config.appUrl;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -73,6 +94,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     databaseUrl: required(env, "DATABASE_URL"),
     appUrl: trimSlash(env.APP_URL?.trim() || "http://localhost:5173"),
+    extraAppUrls: appOrigins(env.EXTRA_APP_URLS),
     apiUrl: trimSlash(env.API_URL?.trim() || `http://localhost:${port}`),
     corsOrigins: (env.CORS_ORIGINS ?? "")
       .split(",")

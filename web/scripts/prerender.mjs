@@ -14,6 +14,10 @@ const SEO = /<!--seo-->[\s\S]*?<!--\/seo-->/;
 const template = await readFile(new URL("index.html", dist), "utf8");
 if (!template.includes(ROOT) || !SEO.test(template)) throw new Error("dist/index.html is missing the root element or the <!--seo--> block");
 
+// The commit this build is of (Vercel sets it), so a deploy can be checked against the merge it
+// came from: the staging check (.github/workflows/staging-web.yml) waits for it to match.
+await writeFile(new URL("revision.txt", dist), `${process.env.VERCEL_GIT_COMMIT_SHA || "dev"}\n`);
+
 await writeFile(
   new URL("shell.html", dist),
   template.replace(SEO, (block) => `${block}\n  <meta name="robots" content="noindex">`),
