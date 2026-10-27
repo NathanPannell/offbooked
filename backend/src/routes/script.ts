@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector, type Director } from "../auth.ts";
+import { type Director, notOwned, ownedProduction, requireDirector } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
 import { badRequest, conflict, notFound } from "../errors.ts";
@@ -16,7 +16,7 @@ async function ownedLine(sql: Sql, user: Director, lineId: string): Promise<Line
     select l.id, l.seq, l.section_id, l.kind, l.character_id, l.text, l.flagged, l.flag_code, l.flag_reason, l.current_take_id, l.source_line, l.source_page, l.voice_ids, l.production_id
     from lines l join productions p on p.id = l.production_id
     where l.id = ${lineId} and p.owner_id = ${user.id}`;
-  if (!line) throw notFound("Line not found.");
+  if (!line) throw notOwned(user, "Line not found.");
   return line;
 }
 
@@ -25,7 +25,7 @@ async function ownedCharacter(sql: Sql, user: Director, characterId: string): Pr
     select c.id, c.name, c.aliases, c.production_id, c.is_group, c.everyone, c.member_ids, 0 as line_count
     from characters c join productions p on p.id = c.production_id
     where c.id = ${characterId} and p.owner_id = ${user.id}`;
-  if (!c) throw notFound("Character not found.");
+  if (!c) throw notOwned(user, "Character not found.");
   return c;
 }
 
@@ -314,7 +314,7 @@ export function scriptRoutes(app: FastifyInstance, ctx: Ctx) {
       update sections s set title = ${title} from productions p
       where s.id = ${idOf(req.params)} and p.id = s.production_id and p.owner_id = ${user.id}
       returning s.id, s.seq, s.act, s.scene, s.title`;
-    if (!section) throw notFound("Section not found.");
+    if (!section) throw notOwned(user, "Section not found.");
     return { section };
   });
 

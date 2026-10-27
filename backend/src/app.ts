@@ -6,6 +6,7 @@ import Fastify, { type FastifyError } from "fastify";
 import type { Ctx } from "./context.ts";
 import { HttpError } from "./errors.ts";
 import { actorRoutes } from "./routes/actor.ts";
+import { adminRoutes } from "./routes/admin.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { castRoutes } from "./routes/cast.ts";
 import { joinRoutes } from "./routes/join.ts";
@@ -126,6 +127,7 @@ export function buildApp(opts: { revision?: string; probeFfmpeg?: () => Promise<
     runthroughRoutes(api, ctx);
     fileRoutes(api, ctx);
     emailRoutes(api, ctx);
+    adminRoutes(api, ctx);
   });
   return app;
 }

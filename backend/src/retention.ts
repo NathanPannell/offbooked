@@ -79,6 +79,8 @@ export async function deleteAccount(ctx: Ctx, userId: string): Promise<{ product
     await tx`delete from sessions where user_id = ${userId}`;
     await tx`delete from login_tokens where email = ${user.email}`;
     await tx`update users set email = 'deleted-' || id || '@deleted.invalid', name = null, deleted_at = coalesce(deleted_at, now()) where id = ${userId}`;
+    // An admin's trace of this person stays in the audit log under the account's id, not its email.
+    await tx`update admin_audit set subject = ${`u:${userId}`} where subject = ${`e:${user.email.toLowerCase()}`}`;
     await tx`update productions set archived_at = coalesce(archived_at, now()), title = '' where owner_id = ${userId}`;
     await tx`
       update actors set name = '', first_name = null, phone = null, email = null, email_verified_at = null,
