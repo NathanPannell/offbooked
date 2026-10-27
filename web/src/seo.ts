@@ -21,9 +21,16 @@ export const PAGES: PageMeta[] = [
   {
     path: "/",
     file: "index.html",
-    title: "Offbooked: hear your script read by your real cast",
+    title: "Offbooked: run lines with your cast, not a robot",
     description:
-      "Upload the script and send your cast one link. Everyone records their lines from their phone, then the whole cast rehearses the play in each other's voices, with gaps for their own lines.",
+      "Share your script with one link. Everyone records their own lines from their phone, no account needed, and the whole cast rehearses the play in each other's voices.",
+  },
+  {
+    path: "/pricing",
+    file: "pricing.html",
+    title: "Pricing · Offbooked",
+    description:
+      "Offbooked is free during the public beta. After launch the director pays per production: C$79, or C$39 at the founder price, locked in for life. The cast is always free.",
   },
   {
     path: "/privacy",
@@ -59,7 +66,7 @@ export function structuredData(): object[] {
       applicationCategory: "EducationalApplication",
       operatingSystem: "Web browser (iPhone, Android, laptops and Chromebooks)",
       image: OG_IMAGE,
-      offers: { "@type": "Offer", price: "0", priceCurrency: "CAD", description: "Free during the private beta" },
+      offers: { "@type": "Offer", price: "0", priceCurrency: "CAD", description: "Free during the public beta" },
     },
     {
       "@context": "https://schema.org",

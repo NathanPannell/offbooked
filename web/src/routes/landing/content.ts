@@ -1,8 +1,11 @@
 // The marketing site's words that are also data: the FAQ (shown on the page and sent as FAQPage
 // structured data) and the pricing plans. Every claim here must be true of the app today. Keep
-// the page short: answers of two short sentences at most.
+// the page short: only questions that stop someone signing up, answers of two short sentences.
 
 export const SOCIAL_PROOF = "Used by casts in British Columbia and Nova Scotia for real productions.";
+
+/** The one call to action, for anyone signed out. */
+export const CTA_LABEL = "Try free in public beta";
 
 export interface Faq {
   q: string;
@@ -11,38 +14,41 @@ export interface Faq {
 
 export const FAQ: Faq[] = [
   {
-    q: "Do my cast need an app or account?",
-    a: "No. They open your link in their phone's browser and start recording.",
+    q: "Do my actors need an account?",
+    a: "No. They open your link in their phone's browser, pick their part and start recording.",
   },
   {
-    q: "What scripts work?",
-    a: "PDF (up to 300 pages) or Word files with real text. Scanned pages don't work yet.",
+    q: "Is it free?",
+    a: "Yes, everything is free during the public beta. Your cast never pay.",
   },
   {
-    q: "Does it work on Android?",
-    a: "Yes. It works in the browser on iPhone, Android, laptops and Chromebooks.",
+    q: "What will it cost after the beta?",
+    a: "The director pays C$79 per production, or C$39 at the founder price, locked in for life. Your cast is always free.",
   },
   {
-    q: "What happens after the show?",
-    a: "Seven days after your final performance, the script and every recording are deleted for good.",
+    q: "Who can hear our recordings?",
+    a: "Only people with your show's link, and we never train AI on them. Everything is deleted 7 days after your final performance.",
   },
   {
-    q: "Is Offbooked the “Off Book!” app?",
-    a: "No. Off Book! is a separate iPhone app; Offbooked runs in the browser from one link.",
+    q: "What devices does it work on?",
+    a: "Any phone, tablet or laptop with a browser: iPhone, Android and Chromebooks included.",
   },
 ];
 
 export interface Plan {
   name: string;
+  /** What it costs at the founder price. */
   price: string;
+  /** The full price, struck through beside the founder price. */
+  was?: string;
   per: string;
   line: string;
-  /** Only the free beta can be chosen today; the others show what's coming. */
-  available: boolean;
+  /** Free today. The paid plans show their launch price; nothing can be bought yet. */
+  now: boolean;
 }
 
 export const PLANS: Plan[] = [
-  { name: "Free beta", price: "C$0", per: "in beta", line: "Everything, for every show.", available: true },
-  { name: "Show Pass", price: "about C$29", per: "per production", line: "One flat price for the whole run.", available: false },
-  { name: "Season", price: "Later", per: "for schools", line: "Several shows a year, by invoice.", available: false },
+  { name: "Public beta", price: "C$0", per: "while in beta", line: "Every feature, for every show.", now: true },
+  { name: "Show Pass", price: "C$39", was: "C$79", per: "per production", line: "One price for the whole run.", now: false },
+  { name: "Season", price: "C$125", was: "C$249", per: "per year", line: "Several shows a year.", now: false },
 ];

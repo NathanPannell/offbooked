@@ -4,7 +4,7 @@ import { headTags, pageFor, PAGES, SITE_URL, structuredData } from "./seo";
 
 describe("marketing page metadata", () => {
   it("gives every page a title, description, canonical URL and link-preview tags", () => {
-    expect(PAGES.map((p) => p.path)).toEqual(["/", "/privacy", "/terms"]);
+    expect(PAGES.map((p) => p.path)).toEqual(["/", "/pricing", "/privacy", "/terms"]);
     for (const page of PAGES) {
       const head = headTags(page);
       expect(head).toContain(`<title>${page.title}</title>`);
@@ -33,15 +33,26 @@ describe("marketing page metadata", () => {
 });
 
 describe("the site's promises", () => {
-  it("answers the questions people ask, including that it isn't the Off Book! app", () => {
-    expect(FAQ.some((f) => /Off Book!/.test(f.q) && f.a.startsWith("No."))).toBe(true);
+  it("answers only what stops a director signing up, briefly", () => {
+    expect(FAQ.map((f) => f.q)).toEqual([
+      "Do my actors need an account?",
+      "Is it free?",
+      "What will it cost after the beta?",
+      "Who can hear our recordings?",
+      "What devices does it work on?",
+    ]);
     expect(FAQ.length).toBeLessThanOrEqual(5);
     // Short answers: at most two sentences each.
     for (const f of FAQ) expect([f.q.endsWith("?"), f.a.length > 30, f.a.split(/(?<=[.!?])\s+(?=[A-Z])/).length <= 2]).toEqual([true, true, true]);
   });
 
-  it("only the free beta can be chosen; paid plans are shown as coming", () => {
-    expect(PLANS.filter((p) => p.available).map((p) => p.name)).toEqual(["Free beta"]);
-    expect(PLANS.find((p) => p.name === "Show Pass")!.price).toContain("C$29");
+  it("is free in the beta, and shows each launch price beside its founder price, half off", () => {
+    expect(PLANS.filter((p) => p.now).map((p) => [p.name, p.price])).toEqual([["Public beta", "C$0"]]);
+    expect(PLANS.filter((p) => !p.now).map((p) => [p.name, p.was, p.price])).toEqual([
+      ["Show Pass", "C$79", "C$39"],
+      ["Season", "C$249", "C$125"],
+    ]);
+    // The FAQ quotes the same prices.
+    expect(FAQ.find((f) => f.q.includes("cost"))!.a).toContain("C$79 per production, or C$39 at the founder price");
   });
 });

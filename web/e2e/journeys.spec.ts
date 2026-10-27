@@ -43,11 +43,14 @@ async function createProduction(page: Page, title: string): Promise<void> {
 
 test("the marketing pages are real HTML before any script runs, and the app's pages aren't indexed", async ({ browser, request }, testInfo) => {
   const home = await (await request.get("/")).text();
-  expect(home).toContain("Hear your script read by your <span");
+  expect(home).toContain("Run lines with <span");
   expect(home).toContain('<link rel="canonical" href="https://offbooked.com/">');
   expect(home).toContain('<meta property="og:image" content="https://offbooked.com/og.png">');
   expect(home).toContain('"@type":"FAQPage"');
-  expect(home).toContain("Is Offbooked the “Off Book!” app?");
+  expect(home).toContain("Do my actors need an account?");
+  const pricing = await (await request.get("/pricing")).text();
+  expect(pricing).toContain('<link rel="canonical" href="https://offbooked.com/pricing">');
+  expect(pricing).toContain("Free tier details coming after beta.");
   expect(await (await request.get("/join/abc")).text()).toContain('<meta name="robots" content="noindex">');
   expect(await (await request.get("/robots.txt")).text()).toContain("Sitemap: https://offbooked.com/sitemap.xml");
   expect((await request.get("/og.png")).headers()["content-type"]).toBe("image/png");
@@ -55,7 +58,8 @@ test("the marketing pages are real HTML before any script runs, and the app's pa
   const noScript = await browser.newContext({ ...testInfo.project.use, javaScriptEnabled: false });
   const page = await noScript.newPage();
   for (const [path, heading] of [
-    ["/", "Hear your script read by your real cast."],
+    ["/", "Run lines with your cast, not a robot."],
+    ["/pricing", "Free during public beta."],
     ["/privacy", "Your script, your voices, your cast"],
     ["/terms", "The house rules"],
   ]) {
@@ -66,24 +70,71 @@ test("the marketing pages are real HTML before any script runs, and the app's pa
   await noScript.close();
 });
 
-test("the landing page plays its demo and leads to setting up a show", async ({ page }) => {
+test("the landing page's one call to action leads to signing up for the beta", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   await page.goto("/");
-  await expect(page.getByText("Used by casts in British Columbia and Nova Scotia for real productions.")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Run lines with your cast, not a robot.");
+  await expect(page.getByText("Share your script with one link. Everyone records their own lines, no account needed.")).toBeVisible();
+  await page.getByRole("link", { name: "Try free in public beta" }).first().click();
+  await expect(page).toHaveURL(/\/signin$/);
+  expect(errors).toEqual([]);
+});
+
+test("the landing page's scene demo plays the whole scene, and can pause for your lines", async ({ page }) => {
+  await page.goto("/");
   // No synthesized voices in the demo: until the real cast's recording is in, it says so.
   await expect(page.getByText("Real-cast recording coming soon.")).toBeVisible();
-  await page.getByRole("button", { name: "See the demo" }).click();
+  // It opens on "Just listen": one pass through the scene, every line in a castmate's voice.
+  await expect(page.getByRole("button", { name: "Just listen" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Play the demo" }).click();
   await expect(page.getByRole("button", { name: "Pause the demo" })).toBeVisible();
-  await expect(page.getByText("Your line · say it now")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("button", { name: "Coming soon" }).first()).toBeDisabled();
+  await expect(page.locator(".mk-demo-line.is-current")).toContainText("I have done the deed.");
+  await expect(page.locator(".mk-demo-line.is-current")).toContainText("I heard the owl scream", { timeout: 10_000 });
+  await expect(page.getByText("Your line · say it now")).toHaveCount(0);
+
+  // "Pause, then read" waits for your own line before it plays.
+  await page.getByRole("button", { name: "Pause the demo" }).click();
+  await page.getByRole("button", { name: "Pause, then read" }).click();
+  await page.getByRole("button", { name: /^Play from LADY MACBETH: I heard/ }).click();
+  await expect(page.getByText("Your line · say it now")).toBeVisible();
+});
+
+test("the landing page's recording demo records line after line by itself", async ({ page }) => {
+  await page.goto("/");
+  const recorder = page.locator(".mk-rec");
+  await expect(recorder.getByText("0 of 5 recorded")).toBeVisible();
+  // It starts by itself once it scrolls into view, and moves from line to line with no taps.
+  await page.getByRole("heading", { name: "Hands-free recording." }).scrollIntoViewIfNeeded();
+  await recorder.scrollIntoViewIfNeeded();
+  await expect(page.getByRole("button", { name: "Pause the recording demo" })).toBeVisible();
+  await expect(recorder.getByText("Recording · hands-free")).toBeVisible();
+  await expect(recorder.locator(".mk-rec-line .is-heard").first()).toBeVisible();
+  await expect(recorder.getByText("1 of 5 recorded")).toBeVisible({ timeout: 10_000 });
+  await expect(recorder.locator(".mk-rec-card.is-current")).toContainText("Now.");
+  await expect(recorder.getByText("You're wrapped")).toBeVisible({ timeout: 25_000 });
+  await expect(recorder.getByText("5 of 5 recorded")).toBeVisible();
+  await page.getByRole("button", { name: "Play the recording demo again" }).click();
+  await expect(recorder.getByText("0 of 5 recorded")).toBeVisible();
+});
+
+test("the pricing page is free in the beta and shows the founder prices", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("contentinfo").getByRole("link", { name: "Pricing" }).click();
+  await expect(page).toHaveURL(/\/pricing$/);
+  await expect(page).toHaveTitle("Pricing · Offbooked");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Free during public beta.");
+  const showPass = page.locator(".mk-plan", { has: page.getByRole("heading", { name: "Show Pass" }) });
+  await expect(showPass.locator("s")).toHaveText("C$79");
+  await expect(showPass.getByText("C$39")).toBeVisible();
+  await expect(page.locator(".mk-plan", { has: page.getByRole("heading", { name: "Season" }) }).locator("s")).toHaveText("C$249");
+  // Nothing can be bought yet: every plan signs up for the beta.
+  await showPass.getByRole("link", { name: "Start free in the beta" }).click();
+  await expect(page).toHaveURL(/\/signin$/);
+  await page.goto("/pricing");
   await page.getByRole("link", { name: "Privacy policy", exact: true }).click();
   await expect(page).toHaveURL(/\/privacy$/);
   await expect(page).toHaveTitle("Privacy policy · Offbooked");
-  await page.goto("/");
-  await page.getByRole("link", { name: "Set up your show, free" }).first().click();
-  await expect(page).toHaveURL(/\/signin$/);
-  expect(errors).toEqual([]);
 });
 
 test("a new director needs the beta access code to set up a play, and keeps it", async ({ page }) => {
