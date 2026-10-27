@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { needsTrack, REFRESH_LINES, trackWindow } from "./listenTrack";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ListenTrack } from "../api/types";
+import { MAX_TRIES, needsTrack, POLL_MS, pollTrack, REFRESH_LINES, RETRY_FAILED_MS, trackWindow, type Poll } from "./listenTrack";
 import { NO_PART, sameLines, samePart, type QueueLine } from "./queue";
 
 const queue: QueueLine[] = Array.from({ length: 10 }, (_, i) => ({ lineId: `l${i}`, sectionId: i < 5 ? "s1" : "s2", text: "Some words." }));
@@ -45,5 +46,58 @@ describe("what a track still fits", () => {
     expect(samePart({ mine: new Set(["a"]), mode: "pause" }, { mine: new Set(["b"]), mode: "pause" })).toBe(false);
     expect(samePart(NO_PART, { mine: new Set(), mode: "pause" })).toBe(true);
     expect(samePart(NO_PART, { mine: new Set(["a"]), mode: "read" })).toBe(false);
+  });
+});
+
+describe("asking for a stretch", () => {
+  const req = { lineIds: ["l0"], mine: [], mode: "read" as const };
+  const ready: ListenTrack = { status: "ready", url: "https://files.test/t.m4a", durationMs: 1000, items: [] };
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  // Answers each request with the next of `answers` (an Error rejects), and counts them.
+  const asker = (...answers: (ListenTrack | Error)[]) => {
+    const ask = vi.fn(async () => {
+      const next = answers.shift() ?? answers.at(-1) ?? { status: "failed" };
+      if (next instanceof Error) throw next;
+      return { track: next };
+    });
+    return ask;
+  };
+
+  it("asks again while it builds, then hands over the ready track and stops", async () => {
+    const ask = asker({ status: "building" }, { status: "building" }, ready);
+    const on = { ready: vi.fn(), failed: vi.fn() };
+    pollTrack({ cancelled: false }, ask, req, on);
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2);
+    expect(on.ready).toHaveBeenCalledWith(ready);
+    await vi.advanceTimersByTimeAsync(RETRY_FAILED_MS * 5);
+    expect(ask).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits as long as the server does after a failure, and gives up after a few tries", async () => {
+    const ask = asker({ status: "failed" }, new Error("offline"), { status: "failed" });
+    const on = { ready: vi.fn(), failed: vi.fn() };
+    const poll: Poll = { cancelled: false };
+    pollTrack(poll, ask, req, on);
+    await vi.advanceTimersByTimeAsync(RETRY_FAILED_MS - 1);
+    expect(ask).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(RETRY_FAILED_MS * 20);
+    expect(ask).toHaveBeenCalledTimes(MAX_TRIES);
+    expect(on.failed).toHaveBeenCalledTimes(MAX_TRIES);
+    expect(on.ready).not.toHaveBeenCalled();
+    // Still the stretch in hand, so the player doesn't ask for it again from the next line.
+    expect(poll.cancelled).toBe(false);
+  });
+
+  it("stops at once when cancelled", async () => {
+    const ask = asker({ status: "building" });
+    const poll: Poll = { cancelled: false };
+    pollTrack(poll, ask, req, { ready: vi.fn(), failed: vi.fn() });
+    await vi.advanceTimersByTimeAsync(0);
+    poll.cancelled = true;
+    clearTimeout(poll.timer);
+    await vi.advanceTimersByTimeAsync(POLL_MS * 10);
+    expect(ask).toHaveBeenCalledTimes(1);
   });
 });

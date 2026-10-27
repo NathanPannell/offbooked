@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LineAudioApi, ListenTrackRequest } from "../api/types";
+import type { LineAudioApi, ListenTrack, ListenTrackRequest } from "../api/types";
 import type { PlayerEngine } from "./engine";
 import { nextIndex, playableFrom, sameLines, samePart, type Part, type QueueLine } from "./queue";
 
@@ -13,9 +13,15 @@ import { nextIndex, playableFrom, sameLines, samePart, type Part, type QueueLine
 export const TRACK_LINES = 300;
 /** Ask for the next stretch once the listener is this close to the end of the one playing. */
 export const REFRESH_LINES = 40;
-/** How often to ask again while a track is building, and after one failed. */
+/** How often to ask again while a track is building. */
 export const POLL_MS = 3000;
-export const RETRY_FAILED_MS = 30_000;
+/**
+ * How long to wait after a failed track (or a request that failed) before asking again: the
+ * server's own wait before it builds a failed track again. After MAX_TRIES the stretch plays line
+ * by line, so a track that keeps failing doesn't keep the server and its database awake.
+ */
+export const RETRY_FAILED_MS = 10 * 60_000;
+export const MAX_TRIES = 3;
 
 export type TrackStatus = "off" | "building" | "ready" | "failed";
 
@@ -33,14 +39,46 @@ export function needsTrack(reach: number | null, index: number, queueLength: num
   return reach < queueLength - 1 && reach - index < REFRESH_LINES;
 }
 
-interface Job {
+/** One stretch being asked for: cancelled when the listener moves on, the player goes, or it gives up. */
+export interface Poll {
+  timer?: ReturnType<typeof setTimeout>;
+  cancelled: boolean;
+}
+
+interface Job extends Poll {
   queue: QueueLine[];
   part: Part;
   /** The stretch asked for, as line indexes [start, end). */
   start: number;
   end: number;
-  timer?: ReturnType<typeof setTimeout>;
-  cancelled: boolean;
+}
+
+/**
+ * Asks for one stretch's track until it is ready (`onReady`): again every POLL_MS while it builds,
+ * and after a failure RETRY_FAILED_MS later, MAX_TRIES times in all before giving up.
+ */
+export function pollTrack(
+  poll: Poll,
+  ask: (req: ListenTrackRequest) => Promise<{ track: ListenTrack }>,
+  req: ListenTrackRequest,
+  on: { ready: (track: ListenTrack & { status: "ready" }) => void; failed: () => void },
+): void {
+  let tries = 0;
+  const failed = () => {
+    if (poll.cancelled) return;
+    on.failed();
+    // Giving up leaves the poll in place (not cancelled), so this stretch isn't asked for again.
+    if (++tries < MAX_TRIES) poll.timer = setTimeout(once, RETRY_FAILED_MS);
+  };
+  const once = () => {
+    ask(req).then(({ track }) => {
+      if (poll.cancelled) return;
+      if (track.status === "ready") on.ready(track);
+      else if (track.status === "building") poll.timer = setTimeout(once, POLL_MS);
+      else failed();
+    }, failed);
+  };
+  once();
 }
 
 /**
@@ -77,26 +115,13 @@ export function useListenTrack(opts: {
     const next: Job = { queue, part, start: index, end: index + req.lineIds.length, cancelled: false };
     box.job = next;
     setStatus("building");
-    const poll = () => {
-      ask(req).then(
-        ({ track }) => {
-          if (next.cancelled) return;
-          if (track.status === "ready") {
-            engine.addTrack(track);
-            setStatus("ready");
-          } else if (track.status === "building") {
-            next.timer = setTimeout(poll, POLL_MS);
-          } else {
-            setStatus("failed");
-            next.timer = setTimeout(poll, RETRY_FAILED_MS);
-          }
-        },
-        () => {
-          if (!next.cancelled) next.timer = setTimeout(poll, RETRY_FAILED_MS);
-        },
-      );
-    };
-    poll();
+    pollTrack(next, ask, req, {
+      ready: (track) => {
+        engine.addTrack(track);
+        setStatus("ready");
+      },
+      failed: () => setStatus("failed"),
+    });
   }, [engine, api, queue, part, index, active, box]);
 
   // Stop asking when the player goes.

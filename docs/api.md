@@ -459,7 +459,7 @@ Body: `{ lineIds: string[]; mine?: string[]; mode?: "read" | "skip" | "pause" }`
 ```ts
 type ListenTrack =
   | { status: "building" }   // ask again (the web app asks every 3 s)
-  | { status: "failed" }     // a build failed in the last 30 s; ask again later, keep playing line by line
+  | { status: "failed" }     // a build failed in the last 10 minutes; ask again later, keep playing line by line
   | { status: "ready"; url: string; durationMs: number; items: TrackItem[] };
 
 interface TrackItem {

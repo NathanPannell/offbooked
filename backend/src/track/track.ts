@@ -30,8 +30,11 @@ export const MAX_TRACK_LINES = 300;
 export const TRACK_URL_TTL_SECONDS = 6 * 3600;
 /** How long a build waits for clips still being made before giving up (the player asks again later). */
 const BUILD_WAIT_MS = 5 * 60_000;
-/** A failed build is not tried again sooner than this, so a broken line can't keep the server busy. */
-const RETRY_FAILED_MS = 30_000;
+/**
+ * A failed build is not tried again sooner than this, however often it is asked for, so a broken
+ * line can't keep the server (and the database) busy. The web player waits as long between tries.
+ */
+export const RETRY_FAILED_MS = 10 * 60_000;
 /** Tracks nobody has asked for in this long are deleted (rows and files) when another is built. */
 const PRUNE_AFTER_HOURS = 12;
 
@@ -130,6 +133,8 @@ export async function listenTrack(ctx: Ctx, productionId: string, raw: unknown):
       where listen_tracks.status <> 'ready'
     returning id`;
   if (!claimed) return listenTrack(ctx, productionId, raw); // finished meanwhile
+  // Two first requests at once both claim the row: the second leaves the build to the first.
+  if (inProgress(ctx).has(claimed.id)) return { track: { status: "building" } };
   inProgress(ctx).add(claimed.id);
   const run = (chains.get(ctx) ?? Promise.resolve()).then(() => buildTrack(ctx, productionId, claimed.id, hash, lines, req));
   chains.set(
@@ -142,8 +147,11 @@ export async function listenTrack(ctx: Ctx, productionId: string, raw: unknown):
 
 async function buildTrack(ctx: Ctx, productionId: string, rowId: string, hash: string, lines: LineRow[], req: TrackRequest): Promise<void> {
   const started = Date.now();
-  const workDir = await mkdtemp(path.join(tmpdir(), "offbooked-track-"));
+  let workDir: string | undefined;
+  let ready = false;
   try {
+    workDir = await mkdtemp(path.join(tmpdir(), "offbooked-track-"));
+    const dir = workDir;
     const audio = await resolveLineAudio(
       ctx,
       productionId,
@@ -158,13 +166,13 @@ async function buildTrack(ctx: Ctx, productionId: string, rowId: string, hash: s
       req.mode,
     );
     const keys = [...new Set(plan.pieces.flatMap((p) => (p.kind === "clip" ? [p.key] : [])))];
-    const pcm = new Map(keys.map((key, i) => [key, path.join(workDir, `clip-${i}.pcm`)]));
+    const pcm = new Map(keys.map((key, i) => [key, path.join(dir, `clip-${i}.pcm`)]));
     await eachLimit(keys, 4, async (key) => {
       const source = `${pcm.get(key)!}.m4a`;
       await writeFile(source, await ctx.storage.get(key));
       await decodeToPcm(source, pcm.get(key)!);
     });
-    const out = path.join(workDir, "track.m4a");
+    const out = path.join(dir, "track.m4a");
     await encodeTrack(plan.pieces, pcm, out, TRACK_SETTINGS.bitrate);
     const key = `productions/${productionId}/tracks/${hash}.m4a`;
     await ctx.storage.put(key, await readFile(out), "audio/mp4");
@@ -173,16 +181,20 @@ async function buildTrack(ctx: Ctx, productionId: string, rowId: string, hash: s
     await ctx.sql`
       update listen_tracks set status = 'ready', storage_key = ${key}, duration_ms = ${durationMs}, items = ${ctx.sql.json(plan.items as never)},
         error = null, updated_at = now(), used_at = now()
-      where id = ${rowId}`;
+      where id = ${rowId} and status = 'building'`;
+    ready = true;
     ctx.log.info({ productionId, lines: lines.length, durationMs, ms: Date.now() - started }, "listen track ready");
-    await pruneTracks(ctx, productionId);
   } catch (err) {
     ctx.log.warn({ err, productionId }, "listen track failed");
-    await ctx.sql`update listen_tracks set status = 'failed', error = ${String((err as Error).message).slice(0, 500)}, updated_at = now() where id = ${rowId}`;
+    await ctx.sql`
+      update listen_tracks set status = 'failed', error = ${String((err as Error).message).slice(0, 500)}, updated_at = now()
+      where id = ${rowId} and status = 'building'`;
   } finally {
     inProgress(ctx).delete(rowId);
-    await rm(workDir, { recursive: true, force: true });
+    if (workDir) await rm(workDir, { recursive: true, force: true });
   }
+  // Outside the build's try: a prune that fails mustn't mark the track just built as failed.
+  if (ready) await pruneTracks(ctx, productionId).catch((err) => ctx.log.warn({ err, productionId }, "pruning listen tracks failed"));
 }
 
 /** Deletes this production's tracks nobody has asked for in a while, rows and files. */

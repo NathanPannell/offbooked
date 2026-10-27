@@ -4,10 +4,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import type { Ctx } from "../context.ts";
+import { resolveLineAudio } from "../linestream.ts";
 import { makeTone } from "../render/ffmpeg.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "../test/helpers.ts";
 import { FakeSynthesizer } from "../test/tts.ts";
-import { MAX_TRACK_LINES, pruneTracks, trackRequest } from "./track.ts";
+import { TTS_PRIORITY } from "../tts/service.ts";
+import { listenTrack, MAX_TRACK_LINES, pruneTracks, RETRY_FAILED_MS, trackRequest } from "./track.ts";
 
 interface Line {
   id: string;
@@ -162,5 +166,48 @@ describe("listen tracks", { skip: dbSkip }, () => {
     const left = await t.ctx.sql`select 1 from listen_tracks where production_id = ${pid} and used_at < now() - interval '12 hours'`;
     assert.equal(left.length, 0);
     assert.equal(await pruneTracks(t.ctx, pid), 0, "nothing left to prune");
+  });
+
+  // Last: it deletes a clip's file.
+  test("an idle server sends no queries after a build, and a failed track isn't built again when asked", { timeout: 60_000 }, async () => {
+    // Counts every query the track code sends, so an idle server can be shown to send none.
+    let queries = 0;
+    const sql = new Proxy(t.ctx.sql, {
+      apply(target, self, args) {
+        queries++;
+        return Reflect.apply(target, self, args);
+      },
+    });
+    const ctx: Ctx = { ...t.ctx, sql };
+    const settledFor = async (ms: number) => {
+      await t.ctx.jobs.idle();
+      await delay(100);
+      const settled = queries;
+      await delay(ms);
+      assert.equal(queries, settled, "the server kept querying while idle");
+    };
+    const [, ben, last] = dialogue();
+
+    assert.deepEqual(await listenTrack(ctx, pid, { lineIds: [last!.id] }), { track: { status: "building" } });
+    await settledFor(2500);
+    assert.equal((await listenTrack(ctx, pid, { lineIds: [last!.id] })).track.status, "ready");
+
+    // A clip whose file has gone fails the build. Asking again inside the retry window answers
+    // "failed" from the row and starts nothing.
+    const [audio] = await resolveLineAudio(t.ctx, pid, [ben!.id], { priority: TTS_PRIORITY.render });
+    assert.ok(audio?.audioKey);
+    await t.ctx.storage.deleteKeys([audio.audioKey]);
+    assert.deepEqual(await listenTrack(ctx, pid, { lineIds: [ben!.id] }), { track: { status: "building" } });
+    await t.ctx.jobs.idle();
+    const failedAt = async () =>
+      (
+        await t.ctx.sql<{ status: string; updatedAt: Date }[]>`select status, updated_at from listen_tracks where production_id = ${pid} and status = 'failed'`
+      )[0];
+    const failed = await failedAt();
+    assert.ok(failed, "the build failed");
+    for (let i = 0; i < 3; i++) assert.deepEqual(await listenTrack(ctx, pid, { lineIds: [ben!.id] }), { track: { status: "failed" } });
+    await settledFor(500);
+    assert.equal((await failedAt())!.updatedAt.getTime(), failed.updatedAt.getTime(), "not built again");
+    assert.ok(RETRY_FAILED_MS >= 5 * 60_000);
   });
 });
