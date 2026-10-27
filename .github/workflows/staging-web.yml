@@ -34,7 +34,12 @@ jobs:
       - name: Wait for this commit to be live
         run: |
           for _ in $(seq 1 90); do
-            live=$(curl -fsS -H "x-vercel-protection-bypass: $BYPASS" "$SITE/revision.txt?t=$(date +%s)" || echo nothing)
+            code=$(curl -sS -o revision.txt -w '%{http_code}' -H "x-vercel-protection-bypass: $BYPASS" "$SITE/revision.txt?t=$(date +%s)") || code=000
+            case "$code" in
+              302 | 401 | 403) echo "Vercel refused the bypass secret ($code): update VERCEL_AUTOMATION_BYPASS_SECRET" >&2; exit 1 ;;
+            esac
+            live="nothing ($code)"
+            if [ "$code" = 200 ]; then live=$(head -c 64 revision.txt); fi
             if [ "$live" = "$GITHUB_SHA" ]; then echo "live: $live"; exit 0; fi
             echo "serving ${live:0:40} (want $GITHUB_SHA)"
             sleep 10
