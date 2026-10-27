@@ -3,7 +3,8 @@ name: Staging web
 # Vercel builds every push to staging from Git (web/vercel.json) and serves it at
 # https://staging.offbooked.com. This waits for that build to go live and checks the site loads and
 # can reach its API, so a merge into staging ends with a green or red check like a deploy. It deploys
-# nothing itself and needs no secrets. Production web deploys come only from main.
+# nothing itself. Staging sits behind Vercel Authentication, so requests to it carry the project's
+# Protection Bypass for Automation secret. Production web deploys come only from main.
 on:
   push:
     branches: [staging]
@@ -23,14 +24,22 @@ jobs:
     timeout-minutes: 20
     env:
       SITE: https://staging.offbooked.com
+      BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
       # The API the staging build calls: VITE_API_URL on Vercel's Preview environment for the staging
       # branch. Today that is production.
       API: https://api.offbooked.com
     steps:
+      - name: Bypass secret is set
+        run: '[ -n "$BYPASS" ] || { echo "Missing secret VERCEL_AUTOMATION_BYPASS_SECRET (Vercel: Deployment Protection, Protection Bypass for Automation)" >&2; exit 1; }'
       - name: Wait for this commit to be live
         run: |
-          for i in $(seq 1 90); do
-            live=$(curl -fsS "$SITE/revision.txt?t=$(date +%s)" || echo nothing)
+          for _ in $(seq 1 90); do
+            code=$(curl -sS -o revision.txt -w '%{http_code}' -H "x-vercel-protection-bypass: $BYPASS" "$SITE/revision.txt?t=$(date +%s)") || code=000
+            case "$code" in
+              302 | 401 | 403) echo "Vercel refused the bypass secret ($code): update VERCEL_AUTOMATION_BYPASS_SECRET" >&2; exit 1 ;;
+            esac
+            live="nothing ($code)"
+            if [ "$code" = 200 ]; then live=$(head -c 64 revision.txt); fi
             if [ "$live" = "$GITHUB_SHA" ]; then echo "live: $live"; exit 0; fi
             echo "serving ${live:0:40} (want $GITHUB_SHA)"
             sleep 10
@@ -40,11 +49,11 @@ jobs:
       - name: Pages load
         run: |
           for path in / /pricing /privacy /terms /signin /app; do
-            code=$(curl -sS -o page.html -w '%{http_code}' "$SITE$path")
+            code=$(curl -sS -o page.html -w '%{http_code}' -H "x-vercel-protection-bypass: $BYPASS" "$SITE$path")
             echo "$path $code"
-            [ "$code" = 200 ] && grep -q 'id="root"' page.html || { echo "$SITE$path did not load" >&2; exit 1; }
+            if [ "$code" != 200 ] || ! grep -q 'id="root"' page.html; then echo "$SITE$path did not load" >&2; exit 1; fi
           done
-          curl -fsSI "$SITE/" | grep -qi '^x-robots-tag: noindex' || { echo "staging is missing X-Robots-Tag: noindex" >&2; exit 1; }
+          curl -fsSI -H "x-vercel-protection-bypass: $BYPASS" "$SITE/" | grep -qi '^x-robots-tag: noindex' || { echo "staging is missing X-Robots-Tag: noindex" >&2; exit 1; }
       # A preflight is answered by the CORS plugin, not a route: no sign-in link is asked for and no
       # query runs (retention's catch-up only when a pass is overdue), so it costs Neon nothing.
       - name: The API accepts the staging origin

@@ -22,7 +22,7 @@ The staging build's `VITE_API_URL` is `https://api.offbooked.com`, the productio
 
 Use a test director account and a test production, and archive it when done. Don't share staging links with real casts.
 
-Staging is public but unlisted: Vercel's deployment protection skips custom domains, and every response there carries `X-Robots-Tag: noindex, nofollow`.
+Staging is private: the project's deployment protection (Vercel Authentication, which covers every Preview deployment, its custom domain included) sends anyone not signed in to the Vercel team to a Vercel login first, on every new browser or phone. A sign-in link from Offbooked opened on a phone goes through that login and then lands back on staging with its token. Every response there also carries `X-Robots-Tag: noindex, nofollow`. The `Staging web` check gets past the login with the project's Protection Bypass for Automation secret, kept in the repository secret `VERCEL_AUTOMATION_BYPASS_SECRET`; regenerating it on Vercel means updating that secret.
 
 ## How it is set up
 
@@ -33,7 +33,8 @@ Staging is public but unlisted: Vercel's deployment protection skips custom doma
 | DNS and TLS | Vercel DNS: the `*` ALIAS record covers the subdomain; Vercel issues the certificate |
 | API URL | Vercel env `VITE_API_URL`, target Preview, git branch `staging` |
 | Backend | Railway `production`: `CORS_ORIGINS` and `EXTRA_APP_URLS` include `https://staging.offbooked.com` |
-| Check | `.github/workflows/staging-web.yml`, no secrets |
+| Access | Vercel Authentication on Preview deployments; the bypass secret in GitHub secret `VERCEL_AUTOMATION_BYPASS_SECRET` |
+| Check | `.github/workflows/staging-web.yml` |
 
 ## Swapping in a staging backend
 
