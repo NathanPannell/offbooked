@@ -4,14 +4,14 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "git": { "deploymentEnabled": { "**": false, "main": true } },
-  "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]",
+  "git": { "deploymentEnabled": { "**": false, "main": true, "staging": true } },
+  "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ] && [ \"$VERCEL_GIT_COMMIT_REF\" != \"staging\" ]",
   "rewrites": [
     { "source": "/", "destination": "/index.html" },
     { "source": "/pricing", "destination": "/pricing.html" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
-    { "source": "/((?!assets/|models/|\\.well-known/|robots\\.txt|sitemap\\.xml|og\\.png|favicon\\.svg).*)", "destination": "/shell.html" }
+    { "source": "/((?!assets/|models/|\\.well-known/|robots\\.txt|revision\\.txt|sitemap\\.xml|og\\.png|favicon\\.svg).*)", "destination": "/shell.html" }
   ],
   "headers": [
     {
@@ -21,6 +21,15 @@
         { "key": "Referrer-Policy", "value": "no-referrer" },
         { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "staging.offbooked.com" }],
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/revision.txt",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
     },
     {
       "source": "/assets/(.*)",

@@ -60,6 +60,23 @@ describe("director auth", { skip: dbSkip }, () => {
     assert.equal((await linkFor({ app: "yes" })).searchParams.has("app"), false);
   });
 
+  test("a sign-in asked for from the staging frontend lands back on it", async () => {
+    const staging = await createTestApp({ env: { EXTRA_APP_URLS: "https://staging.app.test" } });
+    try {
+      const linkFrom = async (origin: string, payload: object = {}) =>
+        new URL(
+          (
+            await staging.app.inject({ method: "POST", url: "/api/auth/request", headers: { origin }, payload: { email: "stage@example.test", ...payload } })
+          ).json().devLink,
+        );
+      assert.equal((await linkFrom("https://staging.app.test")).origin, "https://staging.app.test");
+      assert.equal((await linkFrom("https://evil.vercel.app")).origin, "https://app.test");
+      assert.equal((await linkFrom("https://staging.app.test", { app: true })).origin, "https://app.test");
+    } finally {
+      await staging.close();
+    }
+  });
+
   test("missing or bad credentials get the error shape", async () => {
     const res = await t.app.inject({ method: "GET", url: "/api/productions" });
     assert.equal(res.statusCode, 401);

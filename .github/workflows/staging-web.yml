@@ -1,0 +1,55 @@
+name: Staging web
+
+# Vercel builds every push to staging from Git (web/vercel.json) and serves it at
+# https://staging.offbooked.com. This waits for that build to go live and checks the site loads and
+# can reach its API, so a merge into staging ends with a green or red check like a deploy. It deploys
+# nothing itself and needs no secrets. Production web deploys come only from main.
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: staging-web
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SITE: https://staging.offbooked.com
+      # The API the staging build calls: VITE_API_URL on Vercel's Preview environment for the staging
+      # branch. Today that is production.
+      API: https://api.offbooked.com
+    steps:
+      - name: Wait for this commit to be live
+        run: |
+          for i in $(seq 1 90); do
+            live=$(curl -fsS "$SITE/revision.txt?t=$(date +%s)" || true)
+            if [ "$live" = "$GITHUB_SHA" ]; then echo "live: $live"; exit 0; fi
+            echo "serving ${live:-nothing} (want $GITHUB_SHA)"
+            sleep 10
+          done
+          echo "$SITE never served $GITHUB_SHA. Check the Vercel deployment for this commit." >&2
+          exit 1
+      - name: Pages load
+        run: |
+          for path in / /privacy /terms /signin /app; do
+            code=$(curl -sS -o page.html -w '%{http_code}' "$SITE$path")
+            echo "$path $code"
+            [ "$code" = 200 ] && grep -q 'id="root"' page.html || { echo "$SITE$path did not load" >&2; exit 1; }
+          done
+          curl -fsSI "$SITE/" | grep -qi '^x-robots-tag: noindex' || { echo "staging is missing X-Robots-Tag: noindex" >&2; exit 1; }
+      # A preflight is answered by the CORS plugin, not a route: no sign-in link is asked for and no
+      # query runs (retention's catch-up only when a pass is overdue), so it costs Neon nothing.
+      - name: The API accepts the staging origin
+        run: |
+          curl -sS -o /dev/null -D headers.txt -X OPTIONS "$API/api/auth/request" \
+            -H "Origin: $SITE" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type"
+          cat headers.txt
+          grep -qi "^access-control-allow-origin: $SITE" headers.txt || { echo "$API does not allow $SITE: add it to CORS_ORIGINS" >&2; exit 1; }
