@@ -88,7 +88,18 @@ const result = await page.evaluate(
         }
         schedules[`x${slow}`] = passes;
       }
-      out.push({ id: f.id, text: f.text, speechStartMs: f.speechStartMs, speechEndMs: f.speechEndMs, beats: f.beats, totalMs: f.totalMs, frameDb, schedules });
+      out.push({
+        id: f.id,
+        text: f.text,
+        context: f.context,
+        expect: f.expect,
+        speechStartMs: f.speechStartMs,
+        speechEndMs: f.speechEndMs,
+        beats: f.beats,
+        totalMs: f.totalMs,
+        frameDb,
+        schedules,
+      });
     }
     return out;
   },

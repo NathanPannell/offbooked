@@ -1,5 +1,5 @@
 import { API_URL, request, type Auth } from "./client";
-import { partHeaders, wordStartHeaders, type TakePart, type TakePartResult, type TakeUploadResult } from "./actor";
+import { partHeaders, type TakePart, type TakePartResult, type TakeUploadResult } from "./actor";
 import type { SplitSecond } from "../routes/director/lineJoin";
 import type {
   CallSheetCharacter,
@@ -170,16 +170,7 @@ export const standins = {
   /** Deletes any take in the director's production; `restoreTake` is its Undo. */
   deleteTake: (takeId: string) => request<void>(`/takes/${takeId}`, { method: "DELETE", auth: director }),
   restoreTake: (takeId: string) => request<void>(`/takes/${takeId}/restore`, { method: "POST", auth: director }),
-  putTake: (
-    lineId: string,
-    audio: Blob,
-    takeId: string,
-    durationMs: number,
-    signal?: AbortSignal,
-    characterId?: string | null,
-    part?: TakePart,
-    wordStartsMs?: readonly number[] | null,
-  ) =>
+  putTake: (lineId: string, audio: Blob, takeId: string, durationMs: number, signal?: AbortSignal, characterId?: string | null, part?: TakePart) =>
     request<TakeUploadResult | TakePartResult>(`/lines/${lineId}/take${characterId ? `?characterId=${characterId}` : ""}`, {
       method: "PUT",
       auth: director,
@@ -190,7 +181,6 @@ export const standins = {
         "X-Take-Id": takeId,
         "X-Duration-Ms": String(Math.round(durationMs)),
         ...partHeaders(part),
-        ...wordStartHeaders(wordStartsMs),
       },
     }),
 };

@@ -3,14 +3,17 @@ import { CAPTURE_RATE, type LiveCapture } from "../audio/liveCapture";
 import {
   advanceInput,
   applyPass,
+  checkPass,
   clauseBreaks,
   decideAdvance,
+  flubbed,
   nextPassInterval,
   passWindowSeconds,
   pauseBegan,
   rmsDb,
   segmentLine,
   SPEECH_MS_PER_WORD,
+  startLineCheck,
   startProgress,
   startVad,
   VAD_MIN_RUN_MS,
@@ -18,7 +21,7 @@ import {
 } from "./live";
 import { prepareForAsr } from "./prepare";
 import type { SttSession } from "./session";
-import { addVoiced, notePass, startWordClock, type TakeTiming } from "./wordTiming";
+import { addVoiced, type TakeTiming } from "./wordTiming";
 
 const FRAME_SAMPLES = CAPTURE_RATE / 50; // 20 ms
 const MIN_AUDIO_SAMPLES = CAPTURE_RATE / 2;
@@ -51,21 +54,40 @@ interface Options {
   stt: SttSession;
   /** The text of the line being recorded. */
   text: string;
+  /** Lines near it (its cue, the speaker's next line, the line after it), for the wrong-line check. */
+  nearby?: readonly string[];
   /** When false, words still light up but the take never stops by itself. */
   autoAdvance: boolean;
-  /** The actor has finished: stop, keep the take and move on. */
-  onAdvance: (lineId: string, mode: LiveTakeView["mode"]) => void;
-  /** Filled while a take records with what timing its words needs (`takeWordStarts`); kept after it stops. */
+  /** Check that the take was the line before moving on (`flubbed`). Only with the speech model. */
+  checkLine?: boolean;
+  /**
+   * The actor has finished: stop, and keep the take and move on, unless `flub` (the wrong-line check
+   * found it wasn't the line: then ask).
+   */
+  onAdvance: (lineId: string, mode: LiveTakeView["mode"], flub: boolean) => void;
+  /** Filled while a take records with where Listen back should stop (`listenEndMs`); kept after it stops. */
   timingRef?: { current: TakeTiming | null };
 }
 
 /**
  * Follows the take that is recording: re-transcribes the growing audio every few hundred ms in the
- * speech worker, aligns it with the line to light up spoken words, and watches the mic level to
- * end the take after a pause once the actor has spoken; the transcript only sets how long that
- * pause is. Without the model it only watches the level.
+ * speech worker and traces along the line (is the next word said?) to light up spoken words, and
+ * watches the mic level to end the take after a pause once the actor has spoken; the transcript
+ * only sets how long that pause is, and says whether the take was the line at all (the wrong-line
+ * check, against the lines near it). Without the model it only watches the level.
  */
-export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvance, onAdvance, timingRef }: Options): LiveTakeView | null {
+export function useLiveTake({
+  recording,
+  capture,
+  analyser,
+  stt,
+  text,
+  nearby = [],
+  autoAdvance,
+  checkLine = true,
+  onAdvance,
+  timingRef,
+}: Options): LiveTakeView | null {
   const [view, setView] = useState<LiveTakeView | null>(null);
   const autoRef = useRef(autoAdvance);
   autoRef.current = autoAdvance;
@@ -73,6 +95,10 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
   advanceRef.current = onAdvance;
   const textRef = useRef(text);
   textRef.current = text;
+  const nearbyRef = useRef(nearby);
+  nearbyRef.current = nearby;
+  const checkRef = useRef(checkLine);
+  checkRef.current = checkLine;
   const timingOut = useRef(timingRef);
   timingOut.current = timingRef;
 
@@ -87,6 +113,7 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
     const { tokens } = segmentLine(textRef.current);
     const breaks = clauseBreaks(textRef.current);
     let progress = startProgress(tokens.length);
+    let check = startLineCheck(nearbyRef.current);
     let vad = startVad();
     let covered = 0; // samples the newest finished pass covered
     let coveredSpeechMs = 0; // voiced time in them
@@ -97,13 +124,12 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
     const controller = new AbortController();
     const cleanups: (() => void)[] = [];
 
-    // Word timing: the capture's samples start about now, a moment after the recording did.
+    // For Listen back: the capture's samples start about now, a moment after the recording did.
     const timing: TakeTiming = {
       lineId,
-      text: textRef.current,
       offsetMs: startedAt === null ? 0 : Math.max(0, performance.now() - startedAt),
-      clock: startWordClock(),
       stretches: [],
+      lineEndMs: null,
     };
     if (timingOut.current) timingOut.current.current = timing;
 
@@ -123,7 +149,7 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
       );
       if (decision === "wait") return;
       decided = true;
-      advanceRef.current(lineId, mode);
+      advanceRef.current(lineId, mode, checkRef.current && mode === "live" && flubbed(check, progress));
     };
 
     // Transcription passes sleep between them; a pause in the voice wakes the loop (see PAUSE_PASS_MS).
@@ -201,10 +227,10 @@ export function useLiveTake({ recording, capture, analyser, stt, text, autoAdvan
               coveredSpeechMs = speechThen;
               latency = performance.now() - passStart;
               latencies.push(latency);
-              const before = progress.cursor;
+              const ended = progress.ended;
               progress = applyPass(progress, tokens, heard, windowed);
-              // The words this pass reached were said in the audio it heard (taken before the pass ran).
-              timing.clock = notePass(timing.clock, before, progress.cursor, (from / CAPTURE_RATE) * 1000, (total / CAPTURE_RATE) * 1000);
+              check = checkPass(check, tokens, heard, windowed);
+              if (!ended && progress.ended) timing.lineEndMs = (total / CAPTURE_RATE) * 1000;
             }
           }
           covered = total;
