@@ -39,7 +39,7 @@ jobs:
           exit 1
       - name: Pages load
         run: |
-          for path in / /privacy /terms /signin /app; do
+          for path in / /pricing /privacy /terms /signin /app; do
             code=$(curl -sS -o page.html -w '%{http_code}' "$SITE$path")
             echo "$path $code"
             [ "$code" = 200 ] && grep -q 'id="root"' page.html || { echo "$SITE$path did not load" >&2; exit 1; }
