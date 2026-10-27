@@ -34,10 +34,7 @@ export default function CreatorsPanel() {
                   <td>
                     <When iso={c.signedUpAt} />
                   </td>
-                  <td>
-                    {c.plan.name}
-                    {!c.plan.betaAccessAt && <span className="admin-tag">No beta access</span>}
-                  </td>
+                  <td>{c.plan.name}</td>
                   <td className="num">
                     {c.productions}
                     {c.activeProductions !== c.productions && <span className="muted"> ({c.activeProductions} active)</span>}

@@ -224,8 +224,6 @@ export interface User {
   id: string;
   email: string;
   name: string | null;
-  /** May set up productions (Offbooked is in private beta; see BetaGate). */
-  betaAccess: boolean;
   /** In the server's ADMIN_EMAILS: may open the admin area (/app/admin). */
   admin?: boolean;
 }

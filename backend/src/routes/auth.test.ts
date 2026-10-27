@@ -30,7 +30,7 @@ describe("director auth", { skip: dbSkip }, () => {
     const patched = await t.app.inject({ method: "PATCH", url: "/api/me", headers: bearer(sessionToken), payload: { name: "Sam" } });
     assert.equal(patched.json().user.name, "Sam");
     const me = await t.app.inject({ method: "GET", url: "/api/me", headers: bearer(sessionToken) });
-    assert.deepEqual(me.json().user, { id: user.id, email: "sam@example.test", name: "Sam", betaAccess: false, admin: false });
+    assert.deepEqual(me.json().user, { id: user.id, email: "sam@example.test", name: "Sam", admin: false });
 
     const [stored] = await t.ctx.sql`select token_hash from sessions where user_id = ${user.id}`;
     assert.notEqual(stored!.tokenHash, sessionToken, "sessions are stored hashed");

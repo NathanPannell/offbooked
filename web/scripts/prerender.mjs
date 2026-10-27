@@ -1,5 +1,5 @@
 // Pre-renders the marketing pages after `vite build`, so search engines, link previews and anyone
-// without JavaScript get the real text: dist/index.html (/), privacy.html and terms.html, each with
+// without JavaScript get the real text: dist/index.html (/), pricing.html, privacy.html and terms.html, each with
 // its own title, description, canonical URL, Open Graph and Twitter tags (and structured data on /).
 // The browser hydrates that HTML (src/main.tsx). The app's own screens (/app, /join, /i, /signin,
 // /auth) are served dist/shell.html, the plain build without any page text, kept out of search.

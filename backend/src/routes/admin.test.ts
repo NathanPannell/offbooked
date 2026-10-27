@@ -207,7 +207,9 @@ describe("the admin area", { skip: dbSkip }, () => {
     assert.equal(alice.linesRecorded, 3);
     assert.equal(alice.takes, 3);
     assert.equal(alice.plan.name, "Free beta");
-    assert.ok(alice.plan.betaAccessAt && alice.lastSignInAt && alice.signedUpAt);
+    assert.ok(alice.lastSignInAt && alice.signedUpAt);
+    // Public beta: no access code, so only accounts from the private beta have a betaAccessAt.
+    assert.equal(alice.plan.betaAccessAt, null);
     const bob = creators.find((c: { email: string }) => c.email === "bob@example.test");
     assert.deepEqual([bob.productions, bob.castMembers, bob.linesRecorded, bob.takes], [1, 1, 2, 2], "Riz's take and Bob's own");
   });
@@ -262,7 +264,7 @@ describe("the admin area", { skip: dbSkip }, () => {
 
     const bobTrace = (await get(`/api/admin/people/${encodeURIComponent("e:bob@example.test")}`, root)).json().person;
     const kinds = bobTrace.events.map((e: { kind: string }) => e.kind);
-    for (const kind of ["signed_up", "beta_access", "signed_in", "production_created", "script_uploaded", "script_read", "recorded"])
+    for (const kind of ["signed_up", "signed_in", "production_created", "script_uploaded", "script_read", "recorded"])
       assert.ok(kinds.includes(kind), `${kind} in ${kinds.join(", ")}`);
     assert.ok(kinds.indexOf("signed_up") < kinds.indexOf("production_created"));
 
