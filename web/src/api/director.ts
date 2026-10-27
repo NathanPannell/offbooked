@@ -53,7 +53,6 @@ export const auth = {
   verify: (token: string) => request<{ sessionToken: string; user: User }>("/auth/verify", { auth: none, json: { token } }),
   me: () => request<{ user: User }>("/me", { auth: director }),
   updateMe: (name: string) => request<{ user: User }>("/me", { method: "PATCH", auth: director, json: { name } }),
-  enterBetaCode: (code: string) => request<{ user: User }>("/me/beta-access", { auth: director, json: { code } }),
   logout: () => request<void>("/auth/logout", { method: "POST", auth: director }),
   /** Deletes the account and every production in it, for good. */
   deleteAccount: () => request<void>("/me", { method: "DELETE", auth: director, json: { confirm: true } }),

@@ -21,8 +21,6 @@ export const LIMITS = {
   verifyProduction: { limit: 20, windowSeconds: 3600 }, // verification emails per production
   verifySendIp: { limit: 10, windowSeconds: 3600 }, // verification emails asked for per IP
   verifyOpen: { limit: 30, windowSeconds: 900 }, // verification pages opened or confirmed per IP
-  betaCodeUser: { limit: 10, windowSeconds: 3600 }, // beta access code tries per account
-  betaCodeIp: { limit: 30, windowSeconds: 3600 }, // beta access code tries per IP
 } satisfies Record<string, Limit>;
 
 // Fixed window counter. Returns false once the window's count passes the limit.

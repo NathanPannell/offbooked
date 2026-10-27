@@ -31,8 +31,8 @@ const ctx = createCtx(config, sql, consoleLog, { labeler: null });
 try {
   await migrate(sql, consoleLog);
   const [director] = await sql<{ id: string }[]>`
-    insert into users (email, name, beta_access_at) values (${DIRECTOR_EMAIL}, 'Sam Director', now())
-    on conflict (email) do update set name = coalesce(users.name, excluded.name), beta_access_at = coalesce(users.beta_access_at, now())
+    insert into users (email, name) values (${DIRECTOR_EMAIL}, 'Sam Director')
+    on conflict (email) do update set name = coalesce(users.name, excluded.name)
     returning id`;
   if (process.argv.includes("--reset")) {
     await sql`update productions set archived_at = now() where owner_id = ${director!.id} and title = ${SEED_TITLE} and archived_at is null`;

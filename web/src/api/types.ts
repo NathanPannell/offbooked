@@ -195,8 +195,6 @@ export interface User {
   id: string;
   email: string;
   name: string | null;
-  /** May set up productions (Offbooked is in private beta; see BetaGate). */
-  betaAccess: boolean;
 }
 
 export interface Script {

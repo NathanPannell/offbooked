@@ -8,23 +8,20 @@ const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures
 /** YYYY-MM-DD, `days` from today. */
 const dayFromNow = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
-/** Signs in as a new director, and enters the beta access code unless `beta` is false. */
-async function signInAsDirector(page: Page, { beta = true } = {}): Promise<void> {
+/** Signs in as a new director, who lands on setting up their first play. */
+async function signInAsDirector(page: Page): Promise<void> {
   await page.goto("/signin");
+  await signInHere(page);
+}
+
+/** Signs in from the sign-in page with a new email, through the dev sign-in link. */
+async function signInHere(page: Page): Promise<void> {
   await page.getByLabel("Email").fill(`director-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`);
   await page.getByRole("button", { name: "Email me a sign-in link" }).click();
   // The backend runs with EMAIL_DRIVER=log, so the sign-in link comes back on the page.
   await page.getByRole("link", { name: "Use dev sign-in link" }).click();
   // A new director has no productions yet, so signing in goes straight to setting one up.
   await expect(page).toHaveURL(/\/app\/new$/);
-  if (beta) await enterBetaCode(page);
-}
-
-/** Offbooked is in private beta: a new account enters the access code before setting up a play. */
-async function enterBetaCode(page: Page, code = "Break a leg!"): Promise<void> {
-  await page.getByLabel("Access code").fill(code);
-  await page.getByRole("button", { name: "Unlock Offbooked" }).click();
-  await expect(page.getByRole("heading", { name: "What are you putting on?" })).toBeVisible();
 }
 
 /** Sets up a play on one screen (title, dates, script) and waits on it until the script is read. */
@@ -137,20 +134,14 @@ test("the pricing page is free in the beta and shows the founder prices", async 
   await expect(page).toHaveTitle("Privacy policy · Offbooked");
 });
 
-test("a new director needs the beta access code to set up a play, and keeps it", async ({ page }) => {
-  await signInAsDirector(page, { beta: false });
-  await expect(page.getByRole("heading", { name: "Offbooked is in private beta" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "contact@nathanpannell.com" })).toHaveAttribute("href", /^mailto:contact@nathanpannell\.com\?/);
-  await expect(page.getByLabel("Title")).toHaveCount(0);
-
-  await page.getByLabel("Access code").fill("break a log");
-  await page.getByRole("button", { name: "Unlock Offbooked" }).click();
-  await expect(page.getByText("That code doesn't match. Check it and try again.")).toBeVisible();
-
-  // Case, punctuation and spacing don't matter, and the account keeps its access.
-  await enterBetaCode(page, "  BREAK a leg ");
-  await page.reload();
+test("a new director signs up from the homepage's button and sets up a play straight away", async ({ page }) => {
+  // Offbooked is in public beta: no access code, nothing between signing in and setting up a play.
+  await page.goto("/");
+  await page.getByRole("link", { name: "Try free in public beta" }).first().click();
+  await signInHere(page);
   await expect(page.getByRole("heading", { name: "What are you putting on?" })).toBeVisible();
+  await expect(page.getByLabel("Access code")).toHaveCount(0);
+  await createProduction(page, "Macbeth (e2e)");
 });
 
 test("a director uploads a script and shares the cast link, and a cast member opens it", async ({ page, browser }, testInfo) => {

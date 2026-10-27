@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { CONTACT_EMAIL, mailto } from "../lib/contact";
 import { MarketingLayout } from "./landing/MarketingLayout";
 
-/** The terms of use: plain and short, for a free private beta. */
+/** The terms of use: plain and short, for a free public beta. */
 export function Terms() {
   const email = <a href={mailto("Offbooked terms")}>{CONTACT_EMAIL}</a>;
   return (
@@ -10,7 +10,7 @@ export function Terms() {
       <article className="mk-legal">
         <p className="eyebrow">Terms of use</p>
         <h1 className="display">The house rules</h1>
-        <p className="muted">Last updated 25 October 2026</p>
+        <p className="muted">Last updated 27 October 2026</p>
 
         <p>
           These terms cover your use of Offbooked (offbooked.com and the Offbooked iOS app), made by Nathan Pannell in Victoria, British Columbia, Canada. By
@@ -19,9 +19,9 @@ export function Terms() {
 
         <h2>The beta</h2>
         <p>
-          Offbooked is in private beta and free to use. Setting up productions needs an access code, which we give out by email; cast members never need one.
-          Features may change while we build it, and we may limit or end the beta. If paid plans arrive, we'll say so on the site before anything is charged,
-          and nothing you've set up becomes paid without you choosing it.
+          Offbooked is in public beta and free to use. Any director can sign up and set up productions; cast members never need an account. Features may change
+          while we build it, and we may limit or end the beta. If paid plans arrive, we'll say so on the site before anything is charged, and nothing you've set
+          up becomes paid without you choosing it.
         </p>
 
         <h2>Your account and your cast</h2>
@@ -51,7 +51,7 @@ export function Terms() {
           <li>upload anything unlawful, or anything you have no right to share with your cast;</li>
           <li>record or share someone's voice without their agreement;</li>
           <li>harass anyone, or try to get into productions, accounts or data that aren't yours;</li>
-          <li>overload, probe or reverse engineer the service, or get around its limits or the beta access code.</li>
+          <li>overload, probe or reverse engineer the service, or get around its limits.</li>
         </ul>
         <p>We may suspend or remove accounts or productions that break these rules.</p>
 
