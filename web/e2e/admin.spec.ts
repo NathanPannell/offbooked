@@ -54,7 +54,7 @@ test("an admin finds any production, opens it read only, and traces its director
   await admin.getByRole("button", { name: "Script", exact: true }).click();
   await expect(admin.getByText("Stand, and unfold yourself.")).toBeVisible();
   await expect(admin.getByRole("button", { name: "Archive production" })).toHaveCount(0);
-  await admin.getByRole("button", { name: "Cast", exact: true }).click();
+  await admin.getByRole("button", { name: /^Cast(, next step)?$/ }).click();
   await expect(admin.getByText("0 of 4 lines recorded")).toBeVisible();
   // What only the director can do isn't offered: the cast link (it would let the admin join) and recording.
   await expect(admin.getByRole("heading", { name: "Invite your cast" })).toHaveCount(0);
