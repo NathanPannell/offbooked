@@ -1,5 +1,5 @@
 import { request, type Auth } from "./client";
-import type { ActorLine, EmailState, Invite, LineAudio, LineAudioApi, PartCard, RunThrough, Section, SttResult, Take } from "./types";
+import type { ActorLine, EmailState, Invite, LineAudio, LineAudioApi, ListenTrack, PartCard, RunThrough, Section, SttResult, Take } from "./types";
 
 export interface TakeUploadResult {
   take: Take;
@@ -58,6 +58,7 @@ export function actorApi(token: string) {
     lineAudio: {
       line: (lineId, opts = {}) => request<LineAudio>(`/invite/lines/${lineId}/audio${opts.prefetch ? "?prefetch=1" : ""}`, { auth, signal: opts.signal }),
       warm: (lineIds) => request<{ lines: LineAudio[] }>("/invite/lines/audio/warm", { auth, json: { lineIds } }),
+      track: (req) => request<{ track: ListenTrack }>("/invite/listen-track", { auth, json: req }),
     } satisfies LineAudioApi as LineAudioApi,
   };
 }

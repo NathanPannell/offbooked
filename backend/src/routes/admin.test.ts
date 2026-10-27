@@ -143,6 +143,12 @@ describe("the admin area", { skip: dbSkip }, () => {
     }
     const studio = (await get(`/api/productions/${hamletId}/characters/${hamletChar}/lines`, root)).json();
     assert.ok(studio.lines.length > 0);
+    // Listening through: the listen track is a playback cache, like the line audio.
+    const playable = hamletLines.filter((l) => l.kind === "dialogue").map((l) => l.id);
+    const track = await send("POST", `/api/productions/${hamletId}/listen-track`, root, { lineIds: playable });
+    assert.equal(track.statusCode, 200, track.body);
+    assert.equal((await send("POST", `/api/productions/${hamletId}/listen-track`, bob, { lineIds: playable })).statusCode, 404);
+    await t.ctx.jobs.idle();
 
     for (const [method, url, payload] of [
       ["PATCH", `/api/productions/${hamletId}`, { title: "Renamed" }],

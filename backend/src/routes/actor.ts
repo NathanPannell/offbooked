@@ -8,6 +8,7 @@ import { body, idOf, idParam, optionalEmail, requiredString, uuidList } from "..
 import { cueViews, previousCue, saysLine, warmCues } from "../lineaudio.ts";
 import { checkCastComplete } from "../render/queue.ts";
 import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
+import { listenTrack } from "../track/track.ts";
 import { takeRecorder, type RecordedBy } from "../recorders.ts";
 import { runThrough } from "../runthrough.ts";
 import { partCards } from "./join.ts";
@@ -239,6 +240,12 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post("/api/invite/lines/audio/warm", async (req) => {
     const s = await requireActor(ctx, req);
     return { lines: await lineAudio(ctx, s.production.id, warmIds(req.body), { priority: TTS_PRIORITY.prefetch }) };
+  });
+
+  // One file for a stretch of the listen-through (track/track.ts), so it plays on with the phone locked.
+  app.post("/api/invite/listen-track", async (req) => {
+    const s = await requireActor(ctx, req);
+    return listenTrack(ctx, s.production.id, req.body);
   });
 
   app.post("/api/invite/practice", async (req) => {
