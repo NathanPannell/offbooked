@@ -138,6 +138,7 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
       source = { kind: "text", text };
     }
     await enforce(ctx.sql, ctx.log, `parse:${user.id}`, LIMITS.scriptParse, "Too many script uploads in the last hour. Try again later.");
+    await enforce(ctx.sql, ctx.log, `parse-ip:${req.ip}`, LIMITS.scriptParseIp, "Too many script uploads in the last hour. Try again later.");
     try {
       await startScriptParse(ctx, p.id, source);
     } catch (err) {

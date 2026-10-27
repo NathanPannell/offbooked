@@ -15,6 +15,9 @@ export const LIMITS = {
   inviteIp: { limit: 900, windowSeconds: 600 },
   takeUpload: { limit: 120, windowSeconds: 600 },
   scriptParse: { limit: 10, windowSeconds: 3600 },
+  // Script reads per IP, across accounts: with sign-up open to anyone (public beta), this caps what
+  // one source can spend on Claude by making new accounts.
+  scriptParseIp: { limit: 30, windowSeconds: 3600 },
   completionEmail: { limit: 60, windowSeconds: 86_400 },
   verifySend: { limit: 5, windowSeconds: 3600 }, // verification emails per cast member
   verifyTo: { limit: 5, windowSeconds: 86_400 }, // verification emails per address
