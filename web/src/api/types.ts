@@ -98,6 +98,8 @@ export interface Production {
   archived: boolean;
   scriptStatus: ScriptStatus;
   progress: { linesTotal: number; linesRecorded: number; actorsTotal: number; actorsDone: number };
+  /** "admin": an admin viewing someone else's production. It's read only: the server refuses changes. */
+  access?: "owner" | "admin";
 }
 
 export type CastStatus = "not_opened" | "opened" | "in_progress" | "done";
@@ -195,6 +197,8 @@ export interface User {
   id: string;
   email: string;
   name: string | null;
+  /** In the server's ADMIN_EMAILS: may open the admin area (/app/admin). */
+  admin?: boolean;
 }
 
 export interface Script {

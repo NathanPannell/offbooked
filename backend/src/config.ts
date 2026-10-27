@@ -32,6 +32,8 @@ export interface Config {
   normalizeOnUpload: boolean;
   tts: TtsConfig;
   align: AlignConfig;
+  /** Accounts that may open the admin area (src/admin.ts), lowercased. Empty: nobody. */
+  adminEmails: string[];
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -95,5 +97,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       modelPath: env.ALIGN_MODEL?.trim() || "/opt/align/wav2vec2-base-960h-q4.onnx",
       threads: Math.max(1, Number(env.ALIGN_THREADS) || Math.min(2, availableParallelism())),
     },
+    adminEmails: (env.ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
   };
 }

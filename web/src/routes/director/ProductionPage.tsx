@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, Check } from "lucide-react";
+import { Archive, ArrowLeft, Check, Eye } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { errorMessage } from "../../api/client";
@@ -52,13 +52,31 @@ export default function ProductionPage() {
     play: false,
   };
 
+  // An admin sees someone else's production exactly as its director does, but can't change it: the
+  // server refuses every change (admin_read_only), and the title and archive controls are hidden.
+  const asAdmin = p.access === "admin";
   return (
     <main className={`page production-page tab-${tab}`}>
+      {asAdmin && (
+        <div className="notice notice-warn admin-view-banner" role="status">
+          <Eye size={18} aria-hidden="true" />
+          <span>
+            <strong>Admin view.</strong> You're seeing this production as its director does. It's read only, and this visit is in the audit log.{" "}
+            <Link to="/app/admin/productions">Back to admin</Link>
+          </span>
+        </div>
+      )}
       <div className="production-head">
-        <Link className="back-link" to="/app" aria-label="All productions">
+        <Link className="back-link" to={asAdmin ? "/app/admin/productions" : "/app"} aria-label={asAdmin ? "All productions (admin)" : "All productions"}>
           <ArrowLeft size={16} aria-hidden="true" /> Productions
         </Link>
-        <ProductionTitle production={p} onSaved={(updated) => production.setData(updated)} />
+        {asAdmin ? (
+          <div className="production-title">
+            <h1 className="display">{p.title}</h1>
+          </div>
+        ) : (
+          <ProductionTitle production={p} onSaved={(updated) => production.setData(updated)} />
+        )}
       </div>
 
       {/* Pinned to the top while scrolling, with each page’s own row pinned just under it. */}

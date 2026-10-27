@@ -26,6 +26,8 @@ export interface ProductionRow {
   linesRecorded: number;
   actorsTotal: number;
   actorsDone: number;
+  /** How the viewer reaches it: their own, or an admin's read-only view (viewableProduction in auth.ts). */
+  access?: "owner" | "admin";
 }
 
 // Progress counts a line as recorded once there is a take for each of its voices (one voice, or
@@ -36,7 +38,8 @@ const lineRecorded = (sql: Sql) =>
   sql`not exists (select 1 from line_voices v where v.line_id = l.id and voice_take(v.line_id, v.shared, v.character_id) is null)`;
 const voiceRecorded = (sql: Sql) => sql`voice_take(lv.line_id, lv.shared, lv.character_id) is not null`;
 
-export async function productionRows(sql: Sql, where: { ownerId: string; id?: string; includeArchived?: boolean }): Promise<ProductionRow[]> {
+// `ownerId: null` is anyone's production: only an admin's view (auth.ts viewableProduction) asks for that.
+export async function productionRows(sql: Sql, where: { ownerId: string | null; id?: string; includeArchived?: boolean }): Promise<ProductionRow[]> {
   return sql<ProductionRow[]>`
     select p.id, p.owner_id, p.title, p.performance_starts_on::text as performance_starts_on, p.performance_ends_on::text as performance_ends_on,
       (p.performance_ends_on + ${RETENTION_DAYS}::int)::text as content_deletes_on, p.script_status, p.script_error,
@@ -49,7 +52,7 @@ export async function productionRows(sql: Sql, where: { ownerId: string; id?: st
         and not exists (select 1 from actor_characters ac join line_voices lv on lv.character_id = ac.character_id
                         where ac.actor_id = a.id and not ${voiceRecorded(sql)})) as actors_done
     from productions p
-    where p.owner_id = ${where.ownerId}
+    where ${where.ownerId === null ? sql`true` : sql`p.owner_id = ${where.ownerId}`}
       ${where.id ? sql`and p.id = ${where.id}` : sql``}
       ${where.includeArchived ? sql`` : sql`and p.archived_at is null`}
     order by p.created_at desc`;
@@ -66,6 +69,7 @@ export function productionView(p: ProductionRow) {
     archived: Boolean(p.archivedAt),
     scriptStatus: p.scriptStatus,
     progress: { linesTotal: p.linesTotal, linesRecorded: p.linesRecorded, actorsTotal: p.actorsTotal, actorsDone: p.actorsDone },
+    access: p.access ?? "owner",
   };
 }
 

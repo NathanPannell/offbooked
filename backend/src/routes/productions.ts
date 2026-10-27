@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector } from "../auth.ts";
+import { ownedProduction, requireDirector, viewableProduction } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { HttpError, badRequest, conflict } from "../errors.ts";
 import { body, idOf, optionalDate, requiredString, type Body } from "../input.ts";
@@ -70,7 +70,7 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get("/api/productions/:id", async (req) => {
     const user = await requireDirector(ctx, req);
-    return { production: productionView(await ownedProduction(ctx, user, idOf(req.params))) };
+    return { production: productionView(await viewableProduction(ctx, user, idOf(req.params))) };
   });
 
   app.patch("/api/productions/:id", async (req) => {
@@ -150,7 +150,7 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get("/api/productions/:id/script", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const [sections, characters, lines] = await Promise.all([sectionsOf(ctx.sql, p.id), charactersOf(ctx.sql, p.id), linesOf(ctx.sql, p.id)]);
     const [latest] =
       p.scriptStatus === "parsing"
@@ -178,7 +178,7 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get("/api/productions/:id/script/source", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const q = req.query as { line?: string; context?: string };
     const line = Number(q.line);
     if (!Number.isInteger(line) || line < 1) throw badRequest("line must be a positive whole number.");
@@ -200,7 +200,7 @@ export function productionRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get("/api/productions/:id/script/file", async (req, reply) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const script = await latestReadyScript(p.id);
     const data = await ctx.storage.get(script.storageKey);
     reply.header("Content-Type", contentTypeForKey(script.storageKey));

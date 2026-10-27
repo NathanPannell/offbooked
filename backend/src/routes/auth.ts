@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { requireDirector, SESSION_DAYS, type Director } from "../auth.ts";
+import { requireDirector, SESSION_DAYS, withAdmin, type Director } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { randomToken, sha256 } from "../crypto.ts";
 import { HttpError, unauthorized } from "../errors.ts";
@@ -45,14 +45,14 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
       where token_hash = ${sha256(token)} and used_at is null and expires_at > now()
       returning email`;
     if (!login) throw unauthorized("This sign-in link has expired or was already used. Request a new one.");
-    const [user] = await ctx.sql<Director[]>`
+    const [user] = await ctx.sql<Omit<Director, "admin">[]>`
       insert into users (email) values (${login.email})
       on conflict (email) do update set email = excluded.email
       returning id, email, name`;
     const sessionToken = randomToken();
     await ctx.sql`insert into sessions (token_hash, user_id, expires_at)
                   values (${sha256(sessionToken)}, ${user!.id}, now() + ${SESSION_DAYS} * interval '1 day')`;
-    return { sessionToken, user };
+    return { sessionToken, user: withAdmin(ctx.config, user!) };
   });
 
   app.get("/api/me", async (req) => ({ user: await requireDirector(ctx, req) }));
@@ -61,9 +61,9 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     const director = await requireDirector(ctx, req);
     const name = optionalString(body(req.body), "name", 80);
     if (name === undefined) return { user: director };
-    const [user] = await ctx.sql`update users set name = ${name} where id = ${director.id}
+    const [user] = await ctx.sql<Omit<Director, "admin">[]>`update users set name = ${name} where id = ${director.id}
       returning id, email, name`;
-    return { user };
+    return { user: withAdmin(ctx.config, user!) };
   });
 
   // Deletes the account and everything in it, for good (App Store guideline 5.1.1(v)). The body must
