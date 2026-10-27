@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector } from "../auth.ts";
+import { requireDirector, viewableProduction } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import { notifyActorsDone } from "../email/notify.ts";
 import { notFound } from "../errors.ts";
@@ -77,7 +77,7 @@ export function studioRoutes(app: FastifyInstance, ctx: Ctx) {
   // take, where its audio comes from, and its cue (the previous line by another character).
   app.get("/api/productions/:id/sections/:sectionId/lines", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const [section] = await sql<SectionRow[]>`
       select id, seq, act, scene, title from sections where id = ${idOf(req.params, "sectionId")} and production_id = ${p.id}`;
     if (!section) throw notFound("Section not found.");
@@ -92,7 +92,7 @@ export function studioRoutes(app: FastifyInstance, ctx: Ctx) {
   // detail as a scene. On a shared line the take shown is theirs and `together` has the others.
   app.get("/api/productions/:id/characters/:characterId/lines", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const [character] = await sql<{ id: string; name: string }[]>`
       select id, name from characters where id = ${idOf(req.params, "characterId")} and production_id = ${p.id}`;
     if (!character) throw notFound("Character not found.");

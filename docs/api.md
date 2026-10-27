@@ -444,3 +444,23 @@ interface PartCard {       // GET /api/join/:token characters, GET /api/invite/p
 - `AudioSource` (`LineAudio.source`, `RunThrough.sources`, render timing, cue and `together` `audioSource`): `"standin"` is now `"director"`.
 - Removed: `POST /api/productions/:id/record-as`, `POST /api/productions/:id/characters/:characterId/unassign`, call sheet `takenBy`, `actorId` and `sharedLines`, join card `takenBy`, and the `character_taken` error.
 - A personal link (`/i/:token`) whose token doesn't check out is 401 "This link doesn't work. Ask your director for the cast link."
+
+# Additions (2026-10-27): the admin area
+
+Admins are the accounts whose email is in `ADMIN_EMAILS` (comma list, any case). The user object (`/api/me`, `/api/auth/verify`, `PATCH /api/me`, `/api/me/beta-access`) carries `admin: boolean`. Nothing in the database marks an admin.
+
+**Viewing any production.** The read routes of a production (`GET /api/productions/:id`, `…/script`, `…/script/source`, `…/script/file`, `…/cast`, `…/call-sheet`, `…/join-link`, `…/runthrough`, `…/lines/:lineId/audio`, `POST …/lines/audio/warm`, `GET …/sections/:sectionId/lines`, `GET …/characters/:characterId/lines`) answer an admin for anyone's production exactly as they answer its owner (`viewableProduction` in `backend/src/auth.ts`). The production object carries `access: "owner" | "admin"`. Every change to a production an admin doesn't own is refused: 403 `admin_read_only` on the production routes, 404 on line, section, character, cast-member and take routes (they check the owner as before). Each admin view of someone else's production is written to `admin_audit`, at most one row per admin and production every 10 minutes.
+
+**Admin routes.** Every route under `/api/admin` passes `requireAdmin` (an `onRequest` hook on the whole plugin, `backend/src/routes/admin.ts`): anyone not an admin, signed in or not, gets 404 `not_found`. All answer a request; nothing polls.
+
+| Method | Path | Response |
+| --- | --- | --- |
+| GET | `/api/admin/productions?q=` | `{ productions: [{ id, title, createdAt, archived, contentDeleted, scriptStatus, performanceEndsOn, owner: { id, email, name, key }, linesTotal, linesRecorded, takes, castMembers, lastActivity }] }`, newest activity first, at most 500. `q` matches the title or the owner's email or name (case-insensitive, `%` and `_` are plain characters). `linesRecorded` counts dialogue lines with a take that isn't deleted; `takes` counts takes that aren't deleted; `castMembers` counts everyone who joined, listeners included. |
+| GET | `/api/admin/creators` | `{ creators: [{ key, email, name, signedUpAt, deletedAt, plan: { name: "Free beta", betaAccessAt }, productions, activeProductions, castMembers, linesRecorded, takes, lastSignInAt, lastActivity }] }`: every account that has created a production. There is no billing; `plan` reports the beta. |
+| GET | `/api/admin/recorders` | `{ recorders: [{ key, name, email, kind: "director" \| "cast", takes, linesRecorded, firstRecordingAt, lastRecordingAt, lastSeenAt, productions: [{ id, title, role: "owner" \| "cast" }] }] }`: everyone with a take, one row per person. |
+| GET | `/api/admin/people/:key` | `{ person: { key, name, emails, accounts, castRows, events: [{ at, kind, text, production }] } }`, events oldest first (the newest 2,000). 400 for a malformed key, 404 for nobody. Recorded in `admin_audit` as `view_person`. |
+| GET | `/api/admin/audit?productionId=` | `{ entries: [{ id, at, action: "view_production" \| "view_person", admin, production, subject }] }`, newest 200. |
+
+**People.** Cast members have no accounts, so a person is keyed (`backend/src/admin/people.ts`): `e:<email>` for a director account and every cast row with that verified email, `u:<id>` for a deleted account, `a:<cast row id>` for a cast row with no verified email.
+
+**Trace gaps.** Not stored anywhere, so not in a trace: listening to a listen-through or a take, which parts someone picked and when (`actor_characters` has no timestamp), who deleted a take, and a director's activity between sign-ins (sessions record the sign-in only, and go on sign-out).

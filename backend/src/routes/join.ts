@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector } from "../auth.ts";
+import { ownedProduction, requireDirector, viewableProduction } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql } from "../db.ts";
 import { HttpError, badRequest, productionDeleted } from "../errors.ts";
@@ -99,7 +99,7 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get("/api/productions/:id/join-link", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, (req.params as { id: string }).id);
+    const p = await viewableProduction(ctx, user, (req.params as { id: string }).id);
     const [row] = await sql<{ joinVersion: number }[]>`select join_version from productions where id = ${p.id}`;
     return { joinUrl: joinUrl(config.appUrl, config.inviteSecret, p.id, row!.joinVersion) };
   });

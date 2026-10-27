@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { ownedProduction, requireDirector, type Director } from "../auth.ts";
+import { ownedProduction, requireDirector, viewableProduction, type Director } from "../auth.ts";
 import type { Ctx } from "../context.ts";
 import type { Sql, Tx } from "../db.ts";
 import { badRequest, notFound } from "../errors.ts";
@@ -32,7 +32,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get("/api/productions/:id/cast", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const cast = await castRows(sql, { productionId: p.id });
     const uncast = await sql<{ id: string }[]>`
       select c.id from characters c where c.production_id = ${p.id}
@@ -89,7 +89,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
   // under every part that says it, so the parts' counts add up to more.
   app.get("/api/productions/:id/call-sheet", async (req) => {
     const user = await requireDirector(ctx, req);
-    const p = await ownedProduction(ctx, user, idOf(req.params));
+    const p = await viewableProduction(ctx, user, idOf(req.params));
     const [rows, top, mine] = await Promise.all([
       sql<{ id: string; name: string; lineCount: number; linesRecorded: number }[]>`
         select c.id, c.name,

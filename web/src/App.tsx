@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { BrowserRouter, Route, Routes, StaticRouter } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes, StaticRouter } from "react-router";
 import { Loading } from "./components/Loading";
 import { ToastProvider } from "./components/Toast";
 import { NativeLinks } from "./native/NativeLinks";
@@ -21,6 +21,9 @@ const JoinPage = lazy(() => import("./routes/actor/JoinPage"));
 const SceneRecorder = lazy(() => import("./routes/director/SceneRecorder"));
 const Account = lazy(() => import("./routes/director/Account"));
 const NativeHome = lazy(() => import("./native/NativeHome"));
+const AdminLayout = lazy(() => import("./routes/admin/AdminLayout"));
+const AdminSectionPage = lazy(() => import("./routes/admin/AdminSectionPage"));
+const PersonTrace = lazy(() => import("./routes/admin/PersonTrace"));
 
 function Router({ location, children }: { location?: string; children: ReactNode }) {
   return location === undefined ? <BrowserRouter>{children}</BrowserRouter> : <StaticRouter location={location}>{children}</StaticRouter>;
@@ -48,6 +51,12 @@ export function App({ location }: { location?: string }) {
               <Route path="p/:id" element={<ProductionPage />} />
               <Route path="p/:id/record" element={<SceneRecorder />} />
               <Route path="account" element={<Account />} />
+              {/* The admin area's panels come from routes/admin/sections.ts. */}
+              <Route path="admin" element={<AdminLayout />}>
+                <Route index element={<Navigate to="productions" replace />} />
+                <Route path="people/:key" element={<PersonTrace />} />
+                <Route path=":section" element={<AdminSectionPage />} />
+              </Route>
             </Route>
             <Route path="/join/:token" element={<JoinPage />} />
             <Route path="/i/:token" element={<InvitePage />} />

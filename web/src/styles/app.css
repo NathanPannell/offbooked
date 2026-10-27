@@ -4397,3 +4397,31 @@
 .name-line-form .field-error {
   flex-basis: 100%;
 }
+
+/* The header's right side: the admin link (admins only) and the account button. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.admin-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 var(--s-3);
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-link:hover {
+  color: var(--ink);
+}
+
+/* An admin viewing someone else's production (ProductionPage). */
+.admin-view-banner a {
+  color: var(--accent-text);
+  font-weight: 600;
+}

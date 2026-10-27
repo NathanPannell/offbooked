@@ -35,6 +35,8 @@ export interface Config {
   align: AlignConfig;
   /** The phrase a director enters once for beta access, which setting up a production needs (src/beta.ts). */
   betaAccessCode: string;
+  /** Accounts that may open the admin area (src/admin.ts), lowercased. Empty: nobody. */
+  adminEmails: string[];
 }
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -99,5 +101,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       threads: Math.max(1, Number(env.ALIGN_THREADS) || Math.min(2, availableParallelism())),
     },
     betaAccessCode: env.BETA_ACCESS_CODE?.trim() || DEFAULT_BETA_ACCESS_CODE,
+    adminEmails: (env.ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
   };
 }
