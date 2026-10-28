@@ -71,9 +71,8 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
 | POST | `/api/auth/request` | `{ email, next?, app? }` | `204`. Sends a sign-in link `${APP_URL}/auth/verify?token=…&next=…` (single use, 15 min). `app: true` (the iOS app) adds `&app=1`, which makes the link a universal link that opens the app (`web/public/.well-known/apple-app-site-association`); without it a sign-in started in Safari stays in Safari. `next` is where the app goes after signing in; only a path inside the director app (`/app`, `/app/…`, `/app?…`) is kept, anything else is dropped without an error. When `EMAIL_DRIVER=log`, the response is `200 { devLink }` instead so local testing works. |
-| POST | `/api/auth/verify` | `{ token }` | `{ sessionToken, user: { id, email, name, betaAccess } }` (session lasts 30 days). `betaAccess` says whether the account may set up productions (private beta, below). |
+| POST | `/api/auth/verify` | `{ token }` | `{ sessionToken, user: { id, email, name } }` (session lasts 30 days). Offbooked is in public beta: any account may set up productions. |
 | GET | `/api/me` | | `{ user }` |
-| POST | `/api/me/beta-access` | `{ code }` | `{ user }` with `betaAccess: true`. Offbooked is in private beta: an account needs beta access to set up a production, and gets it for good by entering the access code (`BETA_ACCESS_CODE`, default "break a leg"; compared ignoring case, punctuation, accents and spaces). A wrong code is 400 `wrong_code`. Every try counts toward 10 an hour per account and 30 an hour per IP (429 `rate_limited`). An account that already has access gets `{ user }` back whatever the code. Accounts made before the gate (migration `019`) have access. Cast members never need it. |
 | PATCH | `/api/me` | `{ name }` | `{ user }`. The director's name shows on invites ("Sam invited you"). Until it is set, the cast sees the part of the email before the @, capitalised (`sam.ortiz@…` is "Sam Ortiz"); the cast never sees the email address. |
 | DELETE | `/api/me` | `{ confirm: true }` | `204`. Deletes the account for good (App Store guideline 5.1.1(v)): at once, in one transaction, the account is signed out everywhere, its sign-in links go, the user row becomes a tombstone with no email or name, and every production it owns is archived with its title and all cast details (verified emails included) cleared; then each production's script, recordings and renders are deleted as retention deletes them. Those are due immediately, so anything a storage failure leaves is finished by the retention worker. Its synthesized speech goes too, unless another production uses it (as for retention, below), and it sends no more completion emails. Its cast and join links answer 410 `production_deleted` with no title or director name. Signing in again with the same address makes a new, empty account. Without `confirm: true` it is 400 `confirm_required`. |
 | POST | `/api/auth/logout` | | `204` |
@@ -83,7 +82,7 @@ interface TimingEntry { lineId: string; startMs: number; endMs: number; recorded
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
 | GET | `/api/productions` | | `{ productions: Production[] }` (not archived) |
-| POST | `/api/productions` | `{ title, performanceStartsOn?, performanceEndsOn? }` | `{ production }`. Without `performanceEndsOn` the final date is the start date, or one year from today when neither is given. 403 `beta_access_required` while the account has no beta access. |
+| POST | `/api/productions` | `{ title, performanceStartsOn?, performanceEndsOn? }` | `{ production }`. Without `performanceEndsOn` the final date is the start date, or one year from today when neither is given. |
 | GET | `/api/productions/:id` | | `{ production }` |
 | PATCH | `/api/productions/:id` | `{ title?, performanceStartsOn?, performanceEndsOn? }` | `{ production }`. `performanceStartsOn: null` clears the start; `performanceEndsOn` can't be cleared. Changing the final date reschedules deletion. |
 | POST | `/api/productions/:id/archive` | | `204`. Hides it and revokes its invites. Nothing is deleted then; content is still deleted on `contentDeletesOn`. |
@@ -445,18 +444,52 @@ interface PartCard {       // GET /api/join/:token characters, GET /api/invite/p
 - Removed: `POST /api/productions/:id/record-as`, `POST /api/productions/:id/characters/:characterId/unassign`, call sheet `takenBy`, `actorId` and `sharedLines`, join card `takenBy`, and the `character_taken` error.
 - A personal link (`/i/:token`) whose token doesn't check out is 401 "This link doesn't work. Ask your director for the cast link."
 
+# Additions (2026-10-26): listen tracks
+
+On a locked phone the website's line-by-line playback stops: it gives its `<audio>` element a new source for every line and every pause, and mobile browsers don't reliably start a new source in the background. A listen track is a stretch of the listen-through joined into one `.m4a` for one listener's part and mode. The player keeps starting line by line (no wait) and moves onto the track at the next line once it is built; from then on there is one source, so it plays on with the screen off, and moving between lines is a seek.
+
+| Method | Path | Auth | Response |
+| --- | --- | --- | --- |
+| POST | `/api/productions/:id/listen-track` | director (own production) | `{ track: ListenTrack }` |
+| POST | `/api/invite/listen-track` | actor | Same, for any line of the actor's production. |
+
+Body: `{ lineIds: string[]; mine?: string[]; mode?: "read" | "skip" | "pause" }`. `lineIds` are dialogue lines and stage directions in playback order, at most 300 (`MAX_TRACK_LINES`); lines that aren't playable lines of that production are left out, and none left is 400. `mine` are the listener's own lines and `mode` what happens on them, as in the player (default `"read"`). Bad ids or mode are 400.
+
+```ts
+type ListenTrack =
+  | { status: "building" }   // ask again (the web app asks every 3 s)
+  | { status: "failed" }     // a build failed in the last 10 minutes; ask again later, keep playing line by line
+  | { status: "ready"; url: string; durationMs: number; items: TrackItem[] };
+
+interface TrackItem {
+  lineId: string;
+  kind: "line" | "speak";    // the line's audio (or its silence), or the pause while the listener says it
+  startMs: number;           // in the track
+  durationMs: number;
+  // "line" items only, as in LineAudio:
+  source?: AudioSource;
+  segments?: SpokenSegment[];
+  speech?: { startMs: number; endMs: number }[];
+  wordStartsMs?: number[];
+}
+```
+
+- Layout matches the player (`track/plan.ts`, kept in step with `web/src/player/queue.ts` and `timing.ts`): 350 ms between lines in a section, 1200 ms at a section change; on the listener's lines, `"skip"` is a `speak` item instead of the line and `"pause"` a `speak` item followed by the line. A `speak` item lasts a take's length plus 15% (at least 500 ms more), else the spoken words at 150 a minute, never under 1 s. The time between items is the pause between lines.
+- Built in-process, one at a time per server, from the same `.m4a` clips `LineAudio` serves (synthesizing whatever isn't made yet at the render's background priority, so listeners' own lines come first; waiting up to 5 minutes), each cut or padded to its exact length, then encoded once (AAC, 64 kb/s, 48 kHz mono, faststart). Stored at `productions/<id>/tracks/<hash>.m4a` and recorded in `listen_tracks` (migration `021`), keyed by a hash of the lines, the listener's lines and mode, each line's text, speaker, voices, current take and newest take change, and the TTS engine and settings, so a new take or an edited line makes a new track.
+- The URL is signed for 6 hours. Tracks nobody has asked for in 12 hours are deleted, rows and files, whenever another track of the production is built; the retention job deletes the rest with the production's content.
+
 # Additions (2026-10-27): the admin area
 
 Admins are the accounts whose email is in `ADMIN_EMAILS` (comma list, any case). The user object (`/api/me`, `/api/auth/verify`, `PATCH /api/me`, `/api/me/beta-access`) carries `admin: boolean`. Nothing in the database marks an admin.
 
-**Viewing any production.** The read routes of a production (`GET /api/productions/:id`, `…/script`, `…/script/source`, `…/script/file`, `…/call-sheet`, `…/runthrough`, `…/lines/:lineId/audio`, `POST …/lines/audio/warm`, `GET …/sections/:sectionId/lines`, `GET …/characters/:characterId/lines`) answer an admin for anyone's production exactly as they answer its owner (`viewableProduction` in `backend/src/auth.ts`). The production object carries `access: "owner" | "admin"`. Every change to a production an admin doesn't own is refused with 403 `admin_read_only` (`notOwned` in `auth.ts`), on the production routes and on line, section, character, cast-member and take routes alike. `…/cast` (each member's invite link) and `…/join-link` stay the owner's alone: both are credentials, so an admin gets 403 `admin_read_only` there too. Each admin view of someone else's production is written to `admin_audit`, at most one row per admin and production every 10 minutes. Deleting an account rewrites its `e:<email>` audit subjects to `u:<id>`.
+**Viewing any production.** The read routes of a production (`GET /api/productions/:id`, `…/script`, `…/script/source`, `…/script/file`, `…/call-sheet`, `…/runthrough`, `…/lines/:lineId/audio`, `POST …/lines/audio/warm`, `POST …/listen-track`, `GET …/sections/:sectionId/lines`, `GET …/characters/:characterId/lines`) answer an admin for anyone's production exactly as they answer its owner (`viewableProduction` in `backend/src/auth.ts`). The production object carries `access: "owner" | "admin"`. Every change to a production an admin doesn't own is refused with 403 `admin_read_only` (`notOwned` in `auth.ts`), on the production routes and on line, section, character, cast-member and take routes alike. `…/cast` (each member's invite link) and `…/join-link` stay the owner's alone: both are credentials, so an admin gets 403 `admin_read_only` there too. Each admin view of someone else's production is written to `admin_audit`, at most one row per admin and production every 10 minutes. Deleting an account rewrites its `e:<email>` audit subjects to `u:<id>`.
 
 **Admin routes.** Every route under `/api/admin` passes `requireAdmin` (an `onRequest` hook on the whole plugin, `backend/src/routes/admin.ts`): anyone not an admin, signed in or not, gets 404 `not_found`. All answer a request; nothing polls.
 
 | Method | Path | Response |
 | --- | --- | --- |
 | GET | `/api/admin/productions?q=` | `{ productions: [{ id, title, createdAt, archived, contentDeleted, scriptStatus, performanceEndsOn, owner: { id, email, name, key }, linesTotal, linesRecorded, takes, castMembers, lastActivity }] }`, newest activity first, at most 500. `q` matches the title or the owner's email or name (case-insensitive, `%` and `_` are plain characters). `linesRecorded` counts dialogue lines with a take that isn't deleted; `takes` counts takes that aren't deleted; `castMembers` counts everyone who joined, listeners included. |
-| GET | `/api/admin/creators` | `{ creators: [{ key, email, name, signedUpAt, deletedAt, plan: { name: "Free beta", betaAccessAt }, productions, activeProductions, castMembers, linesRecorded, takes, lastSignInAt, lastActivity }] }`: every account that has created a production. There is no billing; `plan` reports the beta. |
+| GET | `/api/admin/creators` | `{ creators: [{ key, email, name, signedUpAt, deletedAt, plan: { name: "Free beta", betaAccessAt }, productions, activeProductions, castMembers, linesRecorded, takes, lastSignInAt, lastActivity }] }`: every account that has created a production. There is no billing; `plan` reports the beta (`betaAccessAt` is set only for accounts that entered the private beta's access code, before the public beta). |
 | GET | `/api/admin/recorders` | `{ recorders: [{ key, name, email, kind: "director" \| "cast", takes, linesRecorded, firstRecordingAt, lastRecordingAt, lastSeenAt, productions: [{ id, title, role: "owner" \| "cast" }] }] }`: everyone with a take, one row per person. |
 | GET | `/api/admin/people/:key` | `{ person: { key, name, emails, accounts, castRows, events: [{ at, kind, text, production }] } }`, events oldest first (the newest 2,000). 400 for a malformed key, 404 for nobody. Recorded in `admin_audit` as `view_person`. |
 | GET | `/api/admin/audit?productionId=` | `{ entries: [{ id, at, action: "view_production" \| "view_person", admin, production, subject }] }`, newest 200. |

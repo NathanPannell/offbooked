@@ -1,5 +1,5 @@
 // Pre-renders the marketing pages after `vite build`, so search engines, link previews and anyone
-// without JavaScript get the real text: dist/index.html (/), privacy.html and terms.html, each with
+// without JavaScript get the real text: dist/index.html (/), pricing.html, privacy.html and terms.html, each with
 // its own title, description, canonical URL, Open Graph and Twitter tags (and structured data on /).
 // The browser hydrates that HTML (src/main.tsx). The app's own screens (/app, /join, /i, /signin,
 // /auth) are served dist/shell.html, the plain build without any page text, kept out of search.
@@ -13,6 +13,10 @@ const SEO = /<!--seo-->[\s\S]*?<!--\/seo-->/;
 
 const template = await readFile(new URL("index.html", dist), "utf8");
 if (!template.includes(ROOT) || !SEO.test(template)) throw new Error("dist/index.html is missing the root element or the <!--seo--> block");
+
+// The commit this build is of (Vercel sets it), so a deploy can be checked against the merge it
+// came from: the staging check (.github/workflows/staging-web.yml) waits for it to match.
+await writeFile(new URL("revision.txt", dist), `${process.env.VERCEL_GIT_COMMIT_SHA || "dev"}\n`);
 
 await writeFile(
   new URL("shell.html", dist),

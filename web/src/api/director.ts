@@ -9,6 +9,7 @@ import type {
   LineAudio,
   LineAudioApi,
   LineKind,
+  ListenTrack,
   Production,
   Render,
   RunThrough,
@@ -53,7 +54,6 @@ export const auth = {
   verify: (token: string) => request<{ sessionToken: string; user: User }>("/auth/verify", { auth: none, json: { token } }),
   me: () => request<{ user: User }>("/me", { auth: director }),
   updateMe: (name: string) => request<{ user: User }>("/me", { method: "PATCH", auth: director, json: { name } }),
-  enterBetaCode: (code: string) => request<{ user: User }>("/me/beta-access", { auth: director, json: { code } }),
   logout: () => request<void>("/auth/logout", { method: "POST", auth: director }),
   /** Deletes the account and every production in it, for good. */
   deleteAccount: () => request<void>("/me", { method: "DELETE", auth: director, json: { confirm: true } }),
@@ -79,6 +79,7 @@ export const productions = {
     line: (lineId, opts = {}) =>
       request<LineAudio>(`/productions/${id}/lines/${lineId}/audio${opts.prefetch ? "?prefetch=1" : ""}`, { auth: director, signal: opts.signal }),
     warm: (lineIds) => request<{ lines: LineAudio[] }>(`/productions/${id}/lines/audio/warm`, { auth: director, json: { lineIds } }),
+    track: (req) => request<{ track: ListenTrack }>(`/productions/${id}/listen-track`, { auth: director, json: req }),
   }),
 };
 

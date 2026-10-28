@@ -24,11 +24,12 @@ const RECORDED = hasRecording(DEMO_LINES);
 /**
  * A listen-through of a few lines of Macbeth, as Lady Macbeth hears it: each line in turn with the
  * castmate who recorded it, words lighting up as they're said, and in "Pause, then read" a pause to
- * say your own line before it plays. It uses no synthesized voices: until the real-cast recording
- * is in place (demoScript.ts) it plays silently, timed by the words.
+ * say your own line before it plays. It opens on "Just listen": the whole scene in one pass. It
+ * uses no synthesized voices: until the real-cast recording is in place (demoScript.ts) it plays
+ * silently, timed by the words.
  */
 export const Demo = forwardRef<DemoHandle>(function Demo(_, ref) {
-  const [mode, setMode] = useState<Mode>("pause");
+  const [mode, setMode] = useState<Mode>("listen");
   const [position, setPosition] = useState<Position | null>(null);
   const [playing, setPlaying] = useState(false);
   useWakeLock(playing);

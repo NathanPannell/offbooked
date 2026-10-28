@@ -24,9 +24,6 @@ async function directorWithPlay(page: Page, title: string): Promise<void> {
   await page.getByRole("button", { name: "Email me a sign-in link" }).click();
   await page.getByRole("link", { name: "Use dev sign-in link" }).click();
   await expect(page).toHaveURL(/\/app\/new$/);
-  // Offbooked is in private beta: a new account enters the access code before setting up a play.
-  await page.getByLabel("Access code").fill("Break a leg!");
-  await page.getByRole("button", { name: "Unlock Offbooked" }).click();
   await page.getByLabel("Title").fill(title);
   await page.getByLabel("First performance").fill(dayFromNow(30));
   await page.getByLabel("Final performance").fill(dayFromNow(33));

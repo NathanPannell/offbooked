@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { requireDirector, SESSION_DAYS, withAdmin, type Director } from "../auth.ts";
-import { codeMatches } from "../beta.ts";
+import { signInAppUrl } from "../config.ts";
 import type { Ctx } from "../context.ts";
 import { randomToken, sha256 } from "../crypto.ts";
 import { HttpError, unauthorized } from "../errors.ts";
@@ -11,7 +11,6 @@ import { enforce, LIMITS } from "../ratelimit.ts";
 import { deleteAccount } from "../retention.ts";
 
 const LOGIN_TOKEN_MINUTES = 15;
-const BETA_TOO_MANY = "Too many tries. Wait an hour, or email us for help.";
 
 export function authRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post("/api/auth/request", async (req, reply) => {
@@ -23,12 +22,15 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     // that opens the app (web/public/.well-known/apple-app-site-association). Without it, a sign-in
     // started in Safari finishes in Safari even on a phone with the app installed.
     const inApp = input.app === true;
+    // Asked for from the staging frontend (EXTRA_APP_URLS), the link finishes there; the app's
+    // universal links only work on APP_URL.
+    const appUrl = inApp ? ctx.config.appUrl : signInAppUrl(ctx.config, req.headers.origin);
     await enforce(ctx.sql, ctx.log, `signin-ip:${req.ip}`, LIMITS.signInIp);
     await enforce(ctx.sql, ctx.log, `signin-email:${email}`, LIMITS.signInEmail, "Too many sign-in links for this email. Wait a few minutes and try again.");
     const token = randomToken();
     await ctx.sql`insert into login_tokens (token_hash, email, expires_at)
                   values (${sha256(token)}, ${email}, now() + ${LOGIN_TOKEN_MINUTES} * interval '1 minute')`;
-    const link = `${ctx.config.appUrl}/auth/verify?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ""}${inApp ? "&app=1" : ""}`;
+    const link = `${appUrl}/auth/verify?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ""}${inApp ? "&app=1" : ""}`;
     if (ctx.mailer.driver === "log") return reply.code(200).send({ devLink: link });
     try {
       await ctx.mailer.send(signInEmail(email, link));
@@ -50,7 +52,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     const [user] = await ctx.sql<Omit<Director, "admin">[]>`
       insert into users (email) values (${login.email})
       on conflict (email) do update set email = excluded.email
-      returning id, email, name, beta_access_at is not null as beta_access`;
+      returning id, email, name`;
     const sessionToken = randomToken();
     await ctx.sql`insert into sessions (token_hash, user_id, expires_at)
                   values (${sha256(sessionToken)}, ${user!.id}, now() + ${SESSION_DAYS} * interval '1 day')`;
@@ -64,23 +66,7 @@ export function authRoutes(app: FastifyInstance, ctx: Ctx) {
     const name = optionalString(body(req.body), "name", 80);
     if (name === undefined) return { user: director };
     const [user] = await ctx.sql<Omit<Director, "admin">[]>`update users set name = ${name} where id = ${director.id}
-      returning id, email, name, beta_access_at is not null as beta_access`;
-    return { user: withAdmin(ctx.config, user!) };
-  });
-
-  // Offbooked is in private beta: entering the access code (BETA_ACCESS_CODE, emailed on request)
-  // lets this account set up productions, for good. Every try counts toward the limits, right or wrong.
-  app.post("/api/me/beta-access", async (req) => {
-    const director = await requireDirector(ctx, req);
-    if (director.betaAccess) return { user: director };
-    const code = requiredString(body(req.body), "code", 200);
-    await enforce(ctx.sql, ctx.log, `beta-code-ip:${req.ip}`, LIMITS.betaCodeIp, BETA_TOO_MANY);
-    await enforce(ctx.sql, ctx.log, `beta-code-user:${director.id}`, LIMITS.betaCodeUser, BETA_TOO_MANY);
-    if (!codeMatches(code, ctx.config.betaAccessCode)) throw new HttpError(400, "wrong_code", "That code doesn't match. Check it and try again.");
-    const [user] = await ctx.sql<Omit<Director, "admin">[]>`
-      update users set beta_access_at = coalesce(beta_access_at, now()) where id = ${director.id}
-      returning id, email, name, beta_access_at is not null as beta_access`;
-    ctx.log.info({ userId: director.id }, "beta access granted");
+      returning id, email, name`;
     return { user: withAdmin(ctx.config, user!) };
   });
 

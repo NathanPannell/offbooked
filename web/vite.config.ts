@@ -19,13 +19,13 @@ function dropUnusedOrtWasm(): Plugin {
 
 /**
  * `vite preview` serves the build the way vercel.json does: the pre-rendered marketing pages at /,
- * /privacy and /terms, and the plain app shell (dist/shell.html) for every other page, so the e2e
+ * /pricing, /privacy and /terms, and the plain app shell (dist/shell.html) for every other page, so the e2e
  * journeys see what production serves.
  */
 function serveLikeVercel(): Plugin {
-  const pages = new Set(["/", "/privacy", "/terms"]);
+  const pages = new Set(["/", "/pricing", "/privacy", "/terms"]);
   // What vercel.json leaves to the files themselves. Not "anything with a dot": invite tokens have dots.
-  const files = /^\/(assets\/|models\/|\.well-known\/|robots\.txt|sitemap\.xml|og\.png|favicon\.svg|\w+\.html)/;
+  const files = /^\/(assets\/|models\/|\.well-known\/|robots\.txt|revision\.txt|sitemap\.xml|og\.png|favicon\.svg|\w+\.html)/;
   return {
     name: "serve-like-vercel",
     configurePreviewServer(server) {

@@ -78,6 +78,20 @@ const silentMs = (r: { kind: string; text: string }) => (r.kind === "stage_direc
 // With `waitMs`, waits that long for clips still being made; without it, starts making them in the
 // background and answers at once (ready: false for those). `priority` orders TTS synthesis.
 export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[], opts: { priority: TtsPriority; waitMs?: number }): Promise<LineAudioView[]> {
+  const resolved = await resolveLineAudio(ctx, productionId, lineIds, opts);
+  return Promise.all(resolved.map(async ({ audioKey, ...view }) => ({ ...view, audioUrl: audioKey ? await ctx.storage.signedUrl(audioKey) : null })));
+}
+
+// A line's audio as lineAudio finds it, with the storage key of its .m4a instead of a signed URL:
+// the listen track (listentrack.ts) joins these files itself.
+export type ResolvedLineAudio = Omit<LineAudioView, "audioUrl"> & { audioKey: string | null };
+
+export async function resolveLineAudio(
+  ctx: Ctx,
+  productionId: string,
+  lineIds: string[],
+  opts: { priority: TtsPriority; waitMs?: number },
+): Promise<ResolvedLineAudio[]> {
   const rows = new Map((await rowsFor(ctx, productionId, lineIds)).map((r) => [r.id, r]));
   const ordered = lineIds.flatMap((id) => (rows.has(id) ? [rows.get(id)!] : []));
   const waitMs = opts.waitMs ?? 0;
@@ -132,18 +146,18 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
   };
 
   // Takes: the normalized .m4a, made on first use.
-  const takeViews = new Map<string, LineAudioView>();
+  const takeViews = new Map<string, ResolvedLineAudio>();
   const takeJobs: Promise<unknown>[] = [];
   for (const [lineId, takes] of mixes) {
     const r = rows.get(lineId)!;
     const source = takes.some((t) => t.recordedBy === "actor") ? "actor" : "director";
     const job = mixedClip(ctx, productionId, takes).then(
-      async (m) => {
-        takeViews.set(lineId, { lineId, audioUrl: await ctx.storage.signedUrl(m.streamKey), durationMs: samplesToMs(m.samples), source, ready: true });
+      (m) => {
+        takeViews.set(lineId, { lineId, audioKey: m.streamKey, durationMs: samplesToMs(m.samples), source, ready: true });
       },
       (err) => {
         ctx.log.warn({ err, lineId }, "mixing a shared line failed");
-        takeViews.set(lineId, { lineId, audioUrl: null, durationMs: placeholderMs(r.text), source, ready: true });
+        takeViews.set(lineId, { lineId, audioKey: null, durationMs: placeholderMs(r.text), source, ready: true });
       },
     );
     ctx.jobs.run("mix shared line for playback", () => job);
@@ -163,7 +177,7 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       const durationMs = samplesToMs(r.normalizedSamples);
       takeViews.set(r.id, {
         lineId: r.id,
-        audioUrl: await ctx.storage.signedUrl(r.streamKey),
+        audioKey: r.streamKey,
         durationMs,
         source,
         ready: true,
@@ -172,11 +186,11 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       continue;
     }
     const job = normalizedTake(ctx, productionId, row, { stream: true, priority: opts.priority }).then(
-      async (t) => {
+      (t) => {
         const durationMs = samplesToMs(t.samples);
         takeViews.set(r.id, {
           lineId: r.id,
-          audioUrl: t.streamKey ? await ctx.storage.signedUrl(t.streamKey) : null,
+          audioKey: t.streamKey ?? null,
           durationMs,
           source,
           ready: true,
@@ -186,7 +200,7 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
       (err) => {
         // An unreadable take plays as silence rather than stalling the run-through.
         ctx.log.warn({ err, takeId: r.takeId }, "take normalize failed");
-        takeViews.set(r.id, { lineId: r.id, audioUrl: null, durationMs: placeholderMs(r.text), source, ready: true });
+        takeViews.set(r.id, { lineId: r.id, audioKey: null, durationMs: placeholderMs(r.text), source, ready: true });
       },
     );
     ctx.jobs.run("normalize take for playback", () => job);
@@ -226,30 +240,28 @@ export async function lineAudio(ctx: Ctx, productionId: string, lineIds: string[
 
   await deadline(Promise.all([...takeJobs, ttsJob]));
 
-  return Promise.all(
-    ordered.map(async (r): Promise<LineAudioView> => {
-      if (r.takeId && r.storageKey) {
-        const view = takeViews.get(r.id);
-        if (view) return view;
-        return { lineId: r.id, audioUrl: null, durationMs: placeholderMs(r.text), source: r.recordedBy ?? "actor", ready: false };
-      }
-      const req = requests.get(r.id);
-      const key = req ? clips.get(req.hash)?.cueKey : null;
-      if (req && key) {
-        return {
-          lineId: r.id,
-          audioUrl: await ctx.storage.signedUrl(key),
-          durationMs: samplesToMs(clips.get(req.hash)!.samples),
-          source: "tts",
-          ready: true,
-          ...(clips.get(req.hash)!.timings ? { segments: clips.get(req.hash)!.timings! } : {}),
-        };
-      }
-      // Still being synthesized, or no TTS here (or synthesis failed): silent, like the render.
-      if (req && !ttsSettled) return { lineId: r.id, audioUrl: null, durationMs: silentMs(r), source: "tts", ready: false };
-      return { lineId: r.id, audioUrl: null, durationMs: silentMs(r), source: "none", ready: true };
-    }),
-  );
+  return ordered.map((r): ResolvedLineAudio => {
+    if (r.takeId && r.storageKey) {
+      const view = takeViews.get(r.id);
+      if (view) return view;
+      return { lineId: r.id, audioKey: null, durationMs: placeholderMs(r.text), source: r.recordedBy ?? "actor", ready: false };
+    }
+    const req = requests.get(r.id);
+    const key = req ? clips.get(req.hash)?.cueKey : null;
+    if (req && key) {
+      return {
+        lineId: r.id,
+        audioKey: key,
+        durationMs: samplesToMs(clips.get(req.hash)!.samples),
+        source: "tts",
+        ready: true,
+        ...(clips.get(req.hash)!.timings ? { segments: clips.get(req.hash)!.timings! } : {}),
+      };
+    }
+    // Still being synthesized, or no TTS here (or synthesis failed): silent, like the render.
+    if (req && !ttsSettled) return { lineId: r.id, audioKey: null, durationMs: silentMs(r), source: "tts", ready: false };
+    return { lineId: r.id, audioKey: null, durationMs: silentMs(r), source: "none", ready: true };
+  });
 }
 
 // One line, waiting for its clip. 404 when the line isn't a dialogue line or stage direction of this production.

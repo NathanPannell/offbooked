@@ -15,14 +15,15 @@ export const LIMITS = {
   inviteIp: { limit: 900, windowSeconds: 600 },
   takeUpload: { limit: 120, windowSeconds: 600 },
   scriptParse: { limit: 10, windowSeconds: 3600 },
+  // Script reads per IP, across accounts: with sign-up open to anyone (public beta), this caps what
+  // one source can spend on Claude by making new accounts.
+  scriptParseIp: { limit: 30, windowSeconds: 3600 },
   completionEmail: { limit: 60, windowSeconds: 86_400 },
   verifySend: { limit: 5, windowSeconds: 3600 }, // verification emails per cast member
   verifyTo: { limit: 5, windowSeconds: 86_400 }, // verification emails per address
   verifyProduction: { limit: 20, windowSeconds: 3600 }, // verification emails per production
   verifySendIp: { limit: 10, windowSeconds: 3600 }, // verification emails asked for per IP
   verifyOpen: { limit: 30, windowSeconds: 900 }, // verification pages opened or confirmed per IP
-  betaCodeUser: { limit: 10, windowSeconds: 3600 }, // beta access code tries per account
-  betaCodeIp: { limit: 30, windowSeconds: 3600 }, // beta access code tries per IP
 } satisfies Record<string, Limit>;
 
 // Fixed window counter. Returns false once the window's count passes the limit.
