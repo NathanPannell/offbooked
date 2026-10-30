@@ -187,6 +187,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     onTrack: state.onTrack,
     covered: engine?.trackReach(state.index) != null,
   });
+  const note = state.waiting && state.playing ? "Getting the next line…" : screenNote;
 
   const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
@@ -452,19 +453,23 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
         ))}
       </ol>
 
-      {!following && currentSegment && (
-        <button
-          type="button"
-          className="back-to-current"
-          onClick={() => {
-            setFollowing(true);
-          }}
-        >
-          <Crosshair size={16} aria-hidden="true" /> Back to current line
-        </button>
-      )}
-
-      <div className="player-controls" role="group" aria-label="Playback">
+      {/* The bar holds its note too ("Getting the next line…", the screen-lock notes), so the
+          script above it is never covered: the follow band ends at the bar's top. */}
+      <div className={`player-controls ${note ? "has-note" : ""}`} role="group" aria-label="Playback">
+        <p className="small muted player-note" role="status" aria-live="polite">
+          {note}
+        </p>
+        {!following && currentSegment && (
+          <button
+            type="button"
+            className="back-to-current"
+            onClick={() => {
+              setFollowing(true);
+            }}
+          >
+            <Crosshair size={16} aria-hidden="true" /> Back to current line
+          </button>
+        )}
         <SpeedButton note={hasRole ? "Only other people's lines change speed. Your own lines, and the pauses to say them, stay at 1×." : undefined} />
         <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">
           <SkipBack size={24} />
@@ -487,10 +492,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
         {/* Balances the speed button, so play stays in the middle. */}
         <span className="controls-spacer" aria-hidden="true" />
       </div>
-
-      <p className="small muted player-waiting" role="status" aria-live="polite">
-        {state.waiting && state.playing ? "Getting the next line…" : screenNote}
-      </p>
 
       <p className="sr-only" aria-live="polite">
         {state.gap ? "Your line. Say it now." : ""}
