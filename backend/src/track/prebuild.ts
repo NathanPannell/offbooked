@@ -166,6 +166,7 @@ export async function prebuildPass(ctx: Ctx, productionId: string): Promise<{ bu
     if (!todo.length) continue;
     // Voices and takes first, outside the build queue (the builds then only join files).
     await resolveLineAudio(ctx, productionId, todo[0]!.req.lineIds, { priority: TTS_PRIORITY.render, waitMs: PREPARE_WAIT_MS });
+    if (stateOf(ctx).stopped) break;
     const claims = [];
     for (const p of todo) {
       if (have.has(p.hash)) continue;
@@ -183,7 +184,11 @@ export async function prebuildPass(ctx: Ctx, productionId: string): Promise<{ bu
     returning storage_key`;
   const keys = dropped.flatMap((d) => (d.storageKey ? [d.storageKey] : []));
   if (keys.length) await ctx.storage.deleteKeys(keys);
-  await ctx.sql`update listen_tracks set prebuilt = false where production_id = ${productionId} and prebuilt and not (hash = any(${hashes}))`;
+  // The current ones are kept, the rest left to the prune; a current one a listener's request
+  // built (or that finished while this pass looked) is kept too.
+  await ctx.sql`
+    update listen_tracks set prebuilt = (hash = any(${hashes}))
+    where production_id = ${productionId} and status = 'ready' and prebuilt <> (hash = any(${hashes}))`;
   ctx.log.info({ productionId, tracks: hashes.length, built, kept: kept.length, dropped: dropped.length, ms: Date.now() - started }, "listen tracks prebuilt");
   return { built, kept: kept.length, dropped: dropped.length };
 }

@@ -58,6 +58,8 @@ interface LoadedTrack {
   /** Each line's first item (its "speak" pause, or its audio), by line index. */
   first: Map<number, number>;
   lastIndex: number;
+  /** When its URL was handed over (Date.now()): see TRACK_URL_FRESH_MS. */
+  at: number;
 }
 
 /**
@@ -78,6 +80,12 @@ export interface LinePosition {
 
 /** Clips downloaded ahead of the current line, and lines the server is asked to make ahead. */
 export const PREFETCH_LINES = 5;
+/**
+ * A track's URL is used for a new source only this long after it was handed over: the server signs
+ * it for 6 hours, and the player asks for a stretch as soon as it opens, which may be long before
+ * play. An older one plays line by line until the same track comes back with a fresh URL.
+ */
+export const TRACK_URL_FRESH_MS = 5 * 3600_000;
 export const WARM_LINES = 25;
 const WAIT_LOOP_MS = 250;
 
@@ -199,11 +207,17 @@ export class PlayerEngine {
 
   /**
    * A listen track for the current part and mode. Playback moves onto it at the next line it
-   * covers (or at once, from a pause). The same file asked for again changes nothing.
+   * covers (or at once, from a pause). The same file asked for again only freshens its URL, and
+   * not while it plays (that would be a new source) unless the one it has is too old to use.
    */
   addTrack(source: TrackSource) {
     const key = source.url.split("?")[0]!;
-    if (this.badTracks.has(key) || this.tracks.some((t) => t.key === key)) return;
+    if (this.badTracks.has(key)) return;
+    const same = this.tracks.find((t) => t.key === key);
+    if (same) {
+      if (same !== this.current || this.stale(same)) Object.assign(same, { url: source.url, at: Date.now() });
+      return;
+    }
     const byLine = new Map(this.lines.map((l, i) => [l.lineId, i]));
     const items = source.items.flatMap((item) => {
       const index = byLine.get(item.lineId);
@@ -214,7 +228,7 @@ export class PlayerEngine {
     items.forEach((item, i) => {
       if (!first.has(item.index)) first.set(item.index, i);
     });
-    const track: LoadedTrack = { url: source.url, key, items, first, lastIndex: items[items.length - 1]!.index };
+    const track: LoadedTrack = { url: source.url, key, items, first, lastIndex: items[items.length - 1]!.index, at: Date.now() };
     // Keep the one playing; a newer one replaces any other.
     this.tracks = [...this.tracks.filter((t) => t === this.current), track];
   }
@@ -516,9 +530,13 @@ export class PlayerEngine {
 
   // Listen tracks ----------------------------------------------------------------------------
 
-  /** The track to play this line from: the one playing when it covers it, else another. */
+  private stale(track: LoadedTrack): boolean {
+    return Date.now() - track.at > TRACK_URL_FRESH_MS;
+  }
+
+  /** The track to play this line from: the one playing when it covers it, else another. Never one whose URL is too old. */
   private trackFor(index: number): LoadedTrack | null {
-    const covers = (t: LoadedTrack) => t.first.has(index);
+    const covers = (t: LoadedTrack) => t.first.has(index) && !this.stale(t);
     if (this.current && covers(this.current)) return this.current;
     return [...this.tracks].reverse().find(covers) ?? null;
   }

@@ -15,6 +15,7 @@ import {
   trackWindow,
   type Poll,
 } from "./listenTrack";
+import { TRACK_URL_FRESH_MS } from "./engine";
 import { NO_PART, sameLines, samePart, type QueueLine } from "./queue";
 
 const queue: QueueLine[] = Array.from({ length: 10 }, (_, i) => ({ lineId: `l${i}`, sectionId: i < 5 ? "s1" : "s2", text: "Some words." }));
@@ -61,7 +62,7 @@ describe("where a stretch starts", () => {
     // Opened, nothing asked yet: the opening stretch, whatever the line.
     expect(stretchToAsk(null, long, part, 0, null)).toBe(0);
     expect(stretchToAsk(null, long, part, 140, null)).toBe(0);
-    const asked = { queue: long, part, start: 0 };
+    const asked = { queue: long, part, start: 0, at: Date.now() };
     expect(stretchToAsk(asked, long, part, 200, 299)).toBeNull();
     // 40 lines before its end: the next stretch, which starts there.
     expect(stretchToAsk(asked, long, part, 260, 299)).toBe(260);
@@ -70,6 +71,9 @@ describe("where a stretch starts", () => {
     // A change of part or mode asks again for the same stretch.
     expect(stretchToAsk(asked, long, { ...part, mode: "skip" }, 10, 299)).toBe(0);
     expect(stretchToAsk(asked, long, NO_PART, 10, 299)).toBe(0);
+    // Asked on open and played hours later: the same stretch again, for a fresh URL.
+    expect(stretchToAsk(asked, long, part, 10, 299, asked.at + TRACK_URL_FRESH_MS - 1)).toBeNull();
+    expect(stretchToAsk(asked, long, part, 10, 299, asked.at + TRACK_URL_FRESH_MS + 1)).toBe(0);
   });
 });
 

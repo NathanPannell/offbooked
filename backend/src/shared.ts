@@ -145,6 +145,9 @@ export async function inferEnsembleVoices(ctx: Ctx, productionId: string): Promi
       updated += done.length;
     }
   }
-  if (updated) ctx.log.info({ productionId, lines: updated }, "shared line voices inferred");
+  if (updated) {
+    ctx.log.info({ productionId, lines: updated }, "shared line voices inferred");
+    prebuildTracks(ctx, productionId, "edit");
+  }
   return updated;
 }

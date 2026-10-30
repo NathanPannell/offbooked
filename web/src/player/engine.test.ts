@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LineAudio, LineAudioApi, TrackItem } from "../api/types";
 import { SPEEDS } from "../audio/speed";
 import { ClipLoader } from "./clips";
-import { PlayerEngine } from "./engine";
+import { PlayerEngine, TRACK_URL_FRESH_MS } from "./engine";
 import { pollTrack, stretchToAsk, trackWindow } from "./listenTrack";
 import { NO_PART, type Part, type QueueLine } from "./queue";
 
@@ -406,6 +406,30 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     expect(calls.filter((c) => !c.prefetch)).toEqual([]);
     expect(calls.length).toBe(fetchedOnOpen);
     expect(new Set(audio.played.map((p) => p.src))).toEqual(new Set(["track:1"]));
+  });
+
+  it("doesn't start a track whose URL is too old, and takes the fresh one when it comes back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { audio, engine } = setup();
+      engine.addTrack(trackOf(["a", "b", "c", "d", "e", "f"], { url: "track:1?sig=old" }));
+      await flush();
+      // The player sat open for longer than the link lasts.
+      vi.setSystemTime(Date.now() + TRACK_URL_FRESH_MS + 1000);
+      expect(engine.trackReach(0)).toBeNull();
+      engine.play();
+      await flush();
+      expect(audio.current.src).toBe("clip:a");
+      // Asked again on play: the same file, a fresh link, entered at the next line.
+      engine.addTrack(trackOf(["a", "b", "c", "d", "e", "f"], { url: "track:1?sig=new" }));
+      expect(engine.trackReach(0)).toBe(5);
+      audio.finish();
+      await flush();
+      expect(audio.current.src).toBe("track:1?sig=new");
+      expect(engine.getState().onTrack).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports the line's time inside the track for highlighting, and 'after' in the pause", async () => {

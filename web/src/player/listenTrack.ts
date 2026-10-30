@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { LineAudioApi, ListenTrack, ListenTrackRequest } from "../api/types";
-import type { PlayerEngine } from "./engine";
+import { TRACK_URL_FRESH_MS, type PlayerEngine } from "./engine";
 import { nextIndex, playableFrom, sameLines, samePart, type Part, type QueueLine } from "./queue";
 
 // Keeps a listen track ready for where the listener is in the play, so the website keeps playing
@@ -64,19 +64,21 @@ export function needsTrack(reach: number | null, index: number, queueLength: num
 
 /**
  * Where to ask for a stretch from, for a listener at `index`, or null to keep the one asked for:
- * it is still this one's stretch (same lines, part and mode), or the engine has a track that covers
- * them for a while yet. `reach`: the last line of the engine's track for `index`.
+ * it is still this one's stretch (same lines, part and mode) and its URL is fresh, or the engine has
+ * a track that covers them for a while yet. `reach`: the last line of the engine's track for `index`.
  */
 export function stretchToAsk(
-  asked: { queue: QueueLine[]; part: Part; start: number } | null,
+  asked: { queue: QueueLine[]; part: Part; start: number; at: number } | null,
   queue: QueueLine[],
   part: Part,
   index: number,
   reach: number | null,
+  now = Date.now(),
 ): number | null {
   const start = trackStart(index, queue.length);
   if (asked && sameLines(asked.queue, queue) && samePart(asked.part, part)) {
-    if (asked.start === start) return null;
+    // Asked on open, hours before play: again, for a URL the engine will still use.
+    if (asked.start === start) return now - asked.at > TRACK_URL_FRESH_MS ? start : null;
     if (!needsTrack(reach, index, queue.length)) return null;
   }
   return start;
@@ -91,8 +93,9 @@ export interface Poll {
 interface Job extends Poll {
   queue: QueueLine[];
   part: Part;
-  /** The first line of the stretch asked for. */
+  /** The first line of the stretch asked for, and when (Date.now()). */
   start: number;
+  at: number;
 }
 
 /**
@@ -134,8 +137,10 @@ export function useListenTrack(opts: {
   part: Part;
   index: number;
   active: boolean;
+  /** Playing: a play after the player sat open for hours asks again for a fresh URL. */
+  playing: boolean;
 }): TrackStatus {
-  const { engine, api, queue, part, index, active } = opts;
+  const { engine, api, queue, part, index, active, playing } = opts;
   const [status, setStatus] = useState<TrackStatus>("off");
   // The request in flight (or the last one), kept across renders.
   const [box] = useState<{ job: Job | null }>(() => ({ job: null }));
@@ -151,7 +156,7 @@ export function useListenTrack(opts: {
     if (current) cancel(current);
     const req = trackWindow(queue, start, part);
     if (!req.lineIds.length) return;
-    const next: Job = { queue, part, start, cancelled: false };
+    const next: Job = { queue, part, start, at: Date.now(), cancelled: false };
     box.job = next;
     setStatus("building");
     pollTrack(next, ask, req, {
@@ -161,7 +166,7 @@ export function useListenTrack(opts: {
       },
       failed: () => setStatus("failed"),
     });
-  }, [engine, api, queue, part, index, active, box]);
+  }, [engine, api, queue, part, index, active, playing, box]);
 
   // Stop asking when the player goes.
   useEffect(

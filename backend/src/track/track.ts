@@ -8,7 +8,7 @@ import { body, uuidList } from "../input.ts";
 import { resolveLineAudio } from "../linestream.ts";
 import { RENDER_SETTINGS } from "../render/plan.ts";
 import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
-import { TTS_PRIORITY } from "../tts/service.ts";
+import { TTS_PRIORITY, type TtsPriority } from "../tts/service.ts";
 import { decodeToPcm, encodeTrack } from "./encode.ts";
 import { MY_LINE_MODES, planTrack, type MyLineMode, type TrackItem } from "./plan.ts";
 
@@ -131,6 +131,8 @@ interface Build {
   done: Promise<void>;
   start: () => void;
 }
+/** A listener's build asks for its clips before the prebuild's preparation, which asks at render priority. */
+const URGENT_PRIORITY = TTS_PRIORITY.cue;
 const builds = new WeakMap<Ctx, { byRow: Map<string, Build>; waiting: Build[]; running: boolean }>();
 const buildsOf = (ctx: Ctx) => {
   let b = builds.get(ctx);
@@ -138,11 +140,11 @@ const buildsOf = (ctx: Ctx) => {
   return b;
 };
 
-function enqueue(ctx: Ctx, rowId: string, urgent: boolean, run: () => Promise<void>): Promise<void> {
+function enqueue(ctx: Ctx, rowId: string, urgent: boolean, run: (urgent: boolean) => Promise<void>): Promise<void> {
   const b = buildsOf(ctx);
   let start!: () => void;
   const started = new Promise<void>((resolve) => (start = resolve));
-  const build: Build = { urgent, start, done: started.then(run).finally(() => b.byRow.delete(rowId)) };
+  const build: Build = { urgent, start, done: started.then(() => run(build.urgent)).finally(() => b.byRow.delete(rowId)) };
   b.byRow.set(rowId, build);
   b.waiting.push(build);
   if (!b.running) {
@@ -203,7 +205,10 @@ export async function claimTrack(
   // Two first requests at once both claim the row: the second leaves the build to the first.
   const already = queued(ctx, claimed.id, urgent);
   if (already) return { status: "building", done: already };
-  return { status: "building", done: enqueue(ctx, claimed.id, urgent, () => buildTrack(ctx, productionId, claimed.id, hash, lines, req)) };
+  return {
+    status: "building",
+    done: enqueue(ctx, claimed.id, urgent, (now) => buildTrack(ctx, productionId, claimed.id, hash, lines, req, now ? URGENT_PRIORITY : TTS_PRIORITY.render)),
+  };
 }
 
 /**
@@ -225,7 +230,15 @@ export async function listenTrack(ctx: Ctx, productionId: string, raw: unknown):
   };
 }
 
-async function buildTrack(ctx: Ctx, productionId: string, rowId: string, hash: string, lines: LineRow[], req: TrackRequest): Promise<void> {
+async function buildTrack(
+  ctx: Ctx,
+  productionId: string,
+  rowId: string,
+  hash: string,
+  lines: LineRow[],
+  req: TrackRequest,
+  priority: TtsPriority,
+): Promise<void> {
   const started = Date.now();
   let workDir: string | undefined;
   let ready = false;
@@ -236,7 +249,7 @@ async function buildTrack(ctx: Ctx, productionId: string, rowId: string, hash: s
       ctx,
       productionId,
       lines.map((l) => l.id),
-      { priority: TTS_PRIORITY.render, waitMs: BUILD_WAIT_MS },
+      { priority, waitMs: BUILD_WAIT_MS },
     );
     if (audio.some((a) => !a.ready)) throw new Error("Some lines were not ready in time");
     const byLine = new Map(audio.map((a) => [a.lineId, a]));

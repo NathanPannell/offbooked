@@ -5,3 +5,5 @@
 -- was given can be deleted as soon as it is out of date.
 alter table listen_tracks add column if not exists prebuilt boolean not null default false;
 alter table listen_tracks add column if not exists served_at timestamptz;
+-- Every track built before this was asked for by a player, which may still be playing it.
+update listen_tracks set served_at = used_at where status = 'ready' and served_at is null and not prebuilt;

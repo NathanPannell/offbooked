@@ -57,7 +57,8 @@ export function normalizeSoon(ctx: Ctx, productionId: string, take: TakeAudioRow
       // As it is now: a listener or the render may have normalized it while it waited.
       const [row] = await ctx.sql<TakeAudioRow[]>`
         select id, storage_key, normalized_key, normalized_samples, stream_key from takes where id = ${take.id} and deleted_at is null`;
-      if (row) await normalizedTake(ctx, productionId, row, { stream: true });
+      // Ahead of the render's and the listen tracks' backlog (render priority): someone just recorded it.
+      if (row) await normalizedTake(ctx, productionId, row, { stream: true, priority: TTS_PRIORITY.cue });
     } catch (err) {
       if (!(err instanceof ContentDeletedError)) ctx.log.error({ err, takeId: take.id }, "take normalization failed");
     }

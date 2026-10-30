@@ -51,6 +51,7 @@ export interface Ticket {
   priority: number;
   seq: number;
   start: (() => void) | null; // set while waiting
+  background?: boolean; // whether it took a background slot when it started (a raise later doesn't change that)
 }
 
 // Runs at most `limit` tasks at once, by priority and then first come first served. Background work
@@ -97,12 +98,11 @@ export class PriorityPool {
       this.waiting.push(t);
       this.pump();
     });
-    const background = PriorityPool.background(t.priority);
     try {
       return await fn();
     } finally {
       this.running--;
-      if (background) this.runningBackground--;
+      if (t.background) this.runningBackground--;
       this.pump();
     }
   }
@@ -119,7 +119,8 @@ export class PriorityPool {
       if (best < 0) return;
       const [t] = this.waiting.splice(best, 1);
       this.running++;
-      if (PriorityPool.background(t!.priority)) this.runningBackground++;
+      t!.background = PriorityPool.background(t!.priority);
+      if (t!.background) this.runningBackground++;
       const start = t!.start!;
       t!.start = null;
       start();
