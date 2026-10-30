@@ -1,5 +1,5 @@
-import { Crosshair, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, Crosshair, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { Fragment, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, RunThrough } from "../api/types";
 import { usePlaybackSpeed } from "../audio/speed";
@@ -13,24 +13,39 @@ import { sceneLabel } from "./sceneLabel";
 import { useResource } from "../lib/useResource";
 import { nowPlaying } from "../native/nowPlaying";
 import { isNativeApp } from "../native/platform";
+import { titleCase } from "../lib/format";
 import { saysLine, speakerLabel, voicesOf } from "../lib/voices";
 import { ClipLoader } from "./clips";
+import { planCues } from "./cuePlan";
 import { PlayerEngine, type PlayerState } from "./engine";
 import { followLine } from "./follow";
 import { lockNote, useListenTrack } from "./listenTrack";
 import { LineText, LiveText, type CueSpan } from "./LiveText";
-import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
-import { changeSettings, defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
+import { NO_PART, placeholderMs, type Part, type QueueLine } from "./queue";
+import {
+  changeSettings,
+  defaultSettings,
+  loadPlace,
+  loadSettings,
+  MY_PART,
+  roleCharacters,
+  savePlace,
+  saveSettings,
+  type PlayerMode,
+  type PlayerSettings,
+} from "./settings";
+import { skippedRows } from "./skippedRows";
 import { cueRange } from "./words";
 
 /** After scrolling by hand, how long before the play is followed again. */
 const RESUME_FOLLOW_MS = 4000;
 
 /** What happens on the listener's own lines: the closed label, a phone-width label, and the fuller option text. */
-const MODES: { mode: MyLineMode; label: string; short: string; option: string }[] = [
+const MODES: { mode: PlayerMode; label: string; short: string; option: string }[] = [
   { mode: "read", label: "Read", short: "Read", option: "Read: play my lines too" },
   { mode: "skip", label: "Silent", short: "Silent", option: "Silent: a gap to say them" },
   { mode: "pause", label: "Pause, then read", short: "Pause", option: "Pause, then read" },
+  { mode: "all", label: "Everything", short: "All", option: "Everything: the whole play, nothing skipped" },
 ];
 
 interface Props {
@@ -100,7 +115,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     return new Set(lines.filter((l) => l.kind === "dialogue" && saysLine(l, ids)).map((l) => l.id));
   }, [roleIds, lines]);
   const hasRole = settings.role !== "";
-  const part = useMemo<Part>(() => (hasRole ? { mine, mode: settings.mode } : NO_PART), [hasRole, mine, settings.mode]);
 
   // The play queue: dialogue and stage directions (read by the narrator), in order.
   const queue = useMemo<QueueLine[]>(
@@ -111,6 +125,19 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     [lines],
   );
   const segmentByLine = useMemo(() => new Map(queue.map((q, index) => [q.lineId, index])), [queue]);
+
+  // With a part, the plan (cuePlan.ts) says what plays: the long stretches between the listener's
+  // lines are left out unless they picked "Everything", on the screen and off it alike.
+  const part = useMemo<Part>(
+    () => (hasRole ? { mine, mode: settings.mode === "all" ? "pause" : settings.mode, plan: planCues(queue, mine, settings.mode !== "all") } : NO_PART),
+    [hasRole, mine, queue, settings.mode],
+  );
+  const rows = useMemo(
+    () => skippedRows(queue, part.plan, (lineId) => titleCase(speakerLabel(lineById.get(lineId) ?? { characterId: null, voiceIds: null }, characterById).name)),
+    [queue, part, lineById, characterById],
+  );
+  const leftOut = useMemo(() => new Set(rows.flatMap((row) => queue.slice(row.from, row.to).map((q) => q.lineId))), [rows, queue]);
+  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
 
   // The listener's cues: the last sentence of the line before each of theirs (in its scene, and
   // not their own), underlined. Keyed by the cue line, with the line each one cues.
@@ -166,6 +193,17 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     engine?.setPart(part);
   }, [engine, part]);
 
+  // Picks up at the line they had got to, once, whenever they come back; a lock or a pause never
+  // loses it (the engine keeps its place), and the play button carries on from there.
+  const placed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!engine || !productionId || !queue.length || placed.current === productionId) return;
+    placed.current = productionId;
+    const lineId = loadPlace(productionId);
+    const index = lineId ? segmentByLine.get(lineId) : undefined;
+    if (index !== undefined) engine.seekToSegment(index, false);
+  }, [engine, productionId, queue, segmentByLine]);
+
   const speed = usePlaybackSpeed();
   useEffect(() => {
     engine?.setSpeed(speed);
@@ -182,12 +220,18 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     status: trackStatus,
     onTrack: state.onTrack,
     covered: engine?.trackReach(state.index) != null,
+    leftOut: leftOut.has(queue[state.index]?.lineId ?? ""),
   });
   const note = state.waiting && state.playing ? "Getting the next line…" : screenNote;
 
   const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
   const currentSeq = currentLine?.seq ?? -Infinity;
+
+  useEffect(() => {
+    if (productionId && state.ended) savePlace(productionId, null);
+    else if (productionId && currentSegment) savePlace(productionId, currentSegment.lineId);
+  }, [productionId, currentSegment, state.ended]);
 
   // Follows the current line between the pinned row and the player bar (follow.ts): a line that
   // fits with the end of its cue above it is placed once as it starts and then stays put; a long
@@ -290,12 +334,96 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
   const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
 
+  // Each row left out, closed unless the listener opened it or is playing inside it.
+  const rowAt = new Map(rows.map((row) => [row.lineId, row]));
+  const isOpen = (row: (typeof rows)[number]) => openRows.has(row.lineId) || (state.index >= row.from && state.index < row.to);
+  const hidden = new Set(
+    rows
+      .filter((row) => !isOpen(row))
+      .flatMap((row) => {
+        const from = lineById.get(queue[row.from]!.lineId)!.seq;
+        const to = lineById.get(queue[row.to - 1]!.lineId)!.seq;
+        return lines.filter((l) => l.seq >= from && l.seq <= to).map((l) => l.id);
+      }),
+  );
+  const toggleRow = (lineId: string) => {
+    const next = new Set(openRows);
+    if (!next.delete(lineId)) next.add(lineId);
+    setOpenRows(next);
+  };
+
   const onLineTap = (line: Line) => {
     if (!engine || !hasAudio) return;
     const index = segmentByLine.get(line.id) ?? queue.findIndex((q) => (lineById.get(q.lineId)?.seq ?? 0) > line.seq);
     if (index < 0) return;
     setFollowing(true);
     engine.seekToSegment(index);
+  };
+
+  const lyricFor = (line: Line) => {
+    const segment = segmentByLine.get(line.id);
+    const isCurrent = segment !== undefined && segment === state.index;
+    const isMine = mine.has(line.id);
+    const skipped = isMine && settings.mode === "skip";
+    const inGap = isCurrent && state.gap !== null;
+    const label = speakerLabel(line, characterById);
+    const who = label.name || undefined;
+    const cue = cues.spans.get(line.id) ?? null;
+    const classes = ["lyric", `kind-${line.kind}`, isCurrent && "is-current", line.seq < currentSeq && "is-past", isMine && "is-mine", skipped && "is-skipped"]
+      .filter(Boolean)
+      .join(" ");
+    if (segment === undefined) {
+      return (
+        <li key={line.id} className={classes}>
+          <p className="lyric-text">{line.text}</p>
+        </li>
+      );
+    }
+    return (
+      <li
+        key={line.id}
+        className={classes}
+        ref={(el) => {
+          if (el) lineRefs.current.set(line.id, el);
+          else lineRefs.current.delete(line.id);
+        }}
+        aria-current={isCurrent ? "true" : undefined}
+      >
+        <button type="button" className="lyric-button" onClick={() => onLineTap(line)} disabled={!hasAudio}>
+          {line.kind === "dialogue" && (
+            <span className="lyric-who">
+              {who && <CharacterName name={who} />}
+              {label.voices && <span className="lyric-voices">{label.voices}</span>}
+              {isMine && <span className="sr-only">{skipped ? "(your line, silent)" : "(your line)"}</span>}
+              {cue && <span className="sr-only">(your cue)</span>}
+            </span>
+          )}
+          {isCurrent && engine && audioRef.current ? (
+            <LiveText
+              text={line.text}
+              kind={line.kind === "stage_direction" ? "stage_direction" : "dialogue"}
+              index={segment}
+              engine={engine}
+              audio={audioRef.current}
+              cue={cue}
+              onAdvance={onAdvance}
+            />
+          ) : (
+            <LineText text={line.text} cue={cue} />
+          )}
+        </button>
+        {inGap && state.gap && (
+          <div
+            className={`gap-meter ${state.gap.endsAt === null ? "is-paused" : ""}`}
+            style={{ "--gap-ms": `${state.gap.durationMs}ms` } as CSSProperties}
+            key={`${state.gap.index}-${state.gap.durationMs}`}
+            aria-hidden="true"
+          >
+            <span />
+          </div>
+        )}
+      </li>
+    );
   };
 
   return (
@@ -351,7 +479,8 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
           placeholder={hasRole ? "Your scenes" : "Scenes"}
           label={(s) => sceneLabel(s.title, speakersBySection.get(s.id) ?? [], characterName)}
           onJump={(sectionId) => {
-            const first = lines.find((l) => l.sectionId === sectionId && segmentByLine.has(l.id));
+            const inScene = lines.filter((l) => l.sectionId === sectionId && segmentByLine.has(l.id));
+            const first = inScene.find((l) => !leftOut.has(l.id)) ?? inScene[0];
             if (first && hasAudio) onLineTap(first);
             else document.getElementById(`rt-section-${sectionId}`)?.scrollIntoView({ block: "start" });
           }}
@@ -365,88 +494,35 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
       )}
 
       <ol className="lyrics" aria-label={`${data.production.title} script`}>
-        {sections.map((section) => (
-          <li key={section.id} id={`rt-section-${section.id}`} className="lyric-section">
-            <h3 className="lyric-section-title">{section.title}</h3>
-            <ol>
-              {lines
-                // A heading that only repeats the scene title above it isn't shown twice (unless it plays).
-                .filter((l) => l.sectionId === section.id && !(repeatsSceneTitle(l, section.title) && !segmentByLine.has(l.id)))
-                .map((line) => {
-                  const segment = segmentByLine.get(line.id);
-                  const isCurrent = segment !== undefined && segment === state.index;
-                  const isMine = mine.has(line.id);
-                  const skipped = isMine && settings.mode === "skip";
-                  const inGap = isCurrent && state.gap !== null;
-                  const label = speakerLabel(line, characterById);
-                  const who = label.name || undefined;
-                  const cue = cues.spans.get(line.id) ?? null;
-                  const classes = [
-                    "lyric",
-                    `kind-${line.kind}`,
-                    isCurrent && "is-current",
-                    line.seq < currentSeq && "is-past",
-                    isMine && "is-mine",
-                    skipped && "is-skipped",
-                  ]
-                    .filter(Boolean)
-                    .join(" ");
-                  if (segment === undefined) {
-                    return (
-                      <li key={line.id} className={classes}>
-                        <p className="lyric-text">{line.text}</p>
-                      </li>
-                    );
-                  }
+        {sections.map((section) => {
+          // A heading that only repeats the scene title above it isn't shown twice (unless it plays).
+          const inSection = lines.filter((l) => l.sectionId === section.id && !(repeatsSceneTitle(l, section.title) && !segmentByLine.has(l.id)));
+          // A scene wholly inside a closed row has nothing to show.
+          if (inSection.length && inSection.every((l) => hidden.has(l.id) && !rowAt.has(l.id))) return null;
+          return (
+            <li key={section.id} id={`rt-section-${section.id}`} className="lyric-section">
+              <h3 className="lyric-section-title">{section.title}</h3>
+              <ol>
+                {inSection.map((line) => {
+                  const row = rowAt.get(line.id);
+                  const lyric = hidden.has(line.id) ? null : lyricFor(line);
+                  if (!row) return lyric;
                   return (
-                    <li
-                      key={line.id}
-                      className={classes}
-                      ref={(el) => {
-                        if (el) lineRefs.current.set(line.id, el);
-                        else lineRefs.current.delete(line.id);
-                      }}
-                      aria-current={isCurrent ? "true" : undefined}
-                    >
-                      <button type="button" className="lyric-button" onClick={() => onLineTap(line)} disabled={!hasAudio}>
-                        {line.kind === "dialogue" && (
-                          <span className="lyric-who">
-                            {who && <CharacterName name={who} />}
-                            {label.voices && <span className="lyric-voices">{label.voices}</span>}
-                            {isMine && <span className="sr-only">{skipped ? "(your line, silent)" : "(your line)"}</span>}
-                            {cue && <span className="sr-only">(your cue)</span>}
-                          </span>
-                        )}
-                        {isCurrent && engine && audioRef.current ? (
-                          <LiveText
-                            text={line.text}
-                            kind={line.kind === "stage_direction" ? "stage_direction" : "dialogue"}
-                            index={segment}
-                            engine={engine}
-                            audio={audioRef.current}
-                            cue={cue}
-                            onAdvance={onAdvance}
-                          />
-                        ) : (
-                          <LineText text={line.text} cue={cue} />
-                        )}
-                      </button>
-                      {inGap && state.gap && (
-                        <div
-                          className={`gap-meter ${state.gap.endsAt === null ? "is-paused" : ""}`}
-                          style={{ "--gap-ms": `${state.gap.durationMs}ms` } as CSSProperties}
-                          key={`${state.gap.index}-${state.gap.durationMs}`}
-                          aria-hidden="true"
-                        >
-                          <span />
-                        </div>
-                      )}
-                    </li>
+                    <Fragment key={line.id}>
+                      <li className={`lyric-skip ${row.to <= state.index ? "is-past" : ""}`}>
+                        <button type="button" aria-expanded={isOpen(row)} onClick={() => toggleRow(row.lineId)}>
+                          {isOpen(row) ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+                          {row.label}
+                        </button>
+                      </li>
+                      {lyric}
+                    </Fragment>
                   );
                 })}
-            </ol>
-          </li>
-        ))}
+              </ol>
+            </li>
+          );
+        })}
       </ol>
 
       {/* The bar holds its note too ("Getting the next line…", the screen-lock notes), so the
@@ -467,7 +543,13 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
           </button>
         )}
         <SpeedButton note={hasRole ? "Only other people's lines change speed. Your own lines, and the pauses to say them, stay at 1×." : undefined} />
-        <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => engine?.previous()}
+          disabled={!hasAudio}
+          aria-label={part.plan ? "Previous cue" : "Previous line"}
+        >
           <SkipBack size={24} />
         </button>
         <button
@@ -482,7 +564,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
         >
           {state.playing ? <Pause size={30} /> : <Play size={30} />}
         </button>
-        <button type="button" className="icon-btn" onClick={() => engine?.next()} disabled={!hasAudio} aria-label="Next line">
+        <button type="button" className="icon-btn" onClick={() => engine?.next()} disabled={!hasAudio} aria-label={part.plan ? "Next cue" : "Next line"}>
           <SkipForward size={24} />
         </button>
         {/* Balances the speed button, so play stays in the middle. */}

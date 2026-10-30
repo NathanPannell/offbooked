@@ -1,13 +1,19 @@
 import type { SpokenSegment, TrackItem } from "../api/types";
 import { applySpeed, clampSpeed } from "../audio/speed";
 import type { Clip, ClipLoader } from "./clips";
+import { positionOf } from "./cuePlan";
 import {
+  firstIndex,
   gapBetweenMs,
   isMine,
+  jumpsTo,
+  nextCue,
   nextIndex,
   NO_PART,
+  pauseBetweenMs,
   playableFrom,
   prefetchWindow,
+  previousCue,
   previousIndex,
   sameLines,
   samePart,
@@ -15,7 +21,7 @@ import {
   type Part,
   type QueueLine,
 } from "./queue";
-import { silenceUrl } from "./silence";
+import { silenceUrl, skipSoundUrl } from "./silence";
 
 export interface Gap {
   index: number;
@@ -88,6 +94,8 @@ export const PREFETCH_LINES = 5;
 export const TRACK_URL_FRESH_MS = 5 * 3600_000;
 export const WARM_LINES = 25;
 const WAIT_LOOP_MS = 250;
+/** A second ⏮ within this long goes to the cue before, like a music player. */
+export const BACK_AGAIN_MS = 3000;
 
 type Phase =
   | { kind: "line"; index: number; clip: Clip }
@@ -124,6 +132,8 @@ export class PlayerEngine {
   private token = 0;
   private retried = new Set<string>();
   private switchedAt = 0;
+  /** When ⏮ last went to a cue (performance.now()). */
+  private backAt = -Infinity;
   private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false, interrupted: false };
   /** Listen tracks ready to play: the one playing (if any) and the newest. */
   private tracks: LoadedTrack[] = [];
@@ -179,7 +189,11 @@ export class PlayerEngine {
     // A track is built for one part and mode: another one needs its own.
     if (!samePart(before, part) && this.tracks.length) this.clearTracks();
     const phase = this.phase;
-    if (!phase) return;
+    if (!phase) {
+      // Not started: the first lines that play are the ones to have ready.
+      if (!samePart(before, part) && this.lines.length) this.prefetchFrom(Math.max(this.state.index, firstIndex(part)));
+      return;
+    }
     if (phase.kind === "track") {
       this.syncTrack();
       return;
@@ -290,7 +304,7 @@ export class PlayerEngine {
   play() {
     if (!this.hasLines) return;
     if (!this.phase || this.state.ended) {
-      const from = this.state.ended || this.state.index < 0 ? 0 : this.state.index;
+      const from = this.state.ended || this.state.index < 0 ? firstIndex(this.part) : this.state.index;
       this.startLine(from, true);
       return;
     }
@@ -327,13 +341,24 @@ export class PlayerEngine {
     if (this.lines[index]) this.startLine(index, autoplay);
   }
 
+  /** With a part, the listener's next cue. Else the next line. Both are seeks on a track. */
   next() {
-    const index = nextIndex(this.lines, Math.max(this.state.index, -1), this.part);
+    const cues = this.part.plan?.cues;
+    const index = cues ? nextCue(cues, this.state.index) : nextIndex(this.lines, Math.max(this.state.index, -1), this.part);
     if (index === null) return;
     this.seekToSegment(index, this.state.playing);
   }
 
+  /** With a part, back to the current cue, and again to the one before. Else the line's start, or the line before. */
   previous() {
+    const plan = this.part.plan;
+    if (plan) {
+      const now = performance.now();
+      const again = now - this.backAt < BACK_AGAIN_MS;
+      this.backAt = now;
+      this.seekToSegment(previousCue(plan, this.state.index, again), this.state.playing);
+      return;
+    }
     const phase = this.phase;
     const elapsed =
       phase?.kind === "track" ? this.trackElapsedMs() : phase?.kind === "line" ? this.audio.currentTime * 1000 : phase?.kind === "pause" ? Infinity : 0;
@@ -462,16 +487,21 @@ export class PlayerEngine {
         return;
       }
     }
-    const next = nextIndex(this.lines, phase.index, this.part);
+    this.advanceFrom(phase.index);
+  };
+
+  /** After line `from`: the pause and the next line, or the fast-forward sound and the cue a jump lands on. The end stops. */
+  private advanceFrom(from: number) {
+    const next = nextIndex(this.lines, from, this.part);
     if (next === null) {
       this.phase = null;
       this.set({ playing: false, ended: true });
       return;
     }
-    if (this.enterTrackBefore(phase.index, next)) return;
-    this.phase = { kind: "pause", index: phase.index, next };
-    this.playUrl(silenceUrl(gapBetweenMs(this.lines, phase.index, next)));
-  };
+    if (this.enterTrackBefore(from, next)) return;
+    this.phase = { kind: "pause", index: from, next };
+    this.playUrl(jumpsTo(this.part, from, next) ? skipSoundUrl() : silenceUrl(gapBetweenMs(this.lines, from, next)));
+  }
 
   private onPlay = () => {
     if (this.phase?.kind === "track") {
@@ -569,7 +599,10 @@ export class PlayerEngine {
   private enterTrackBefore(from: number, next: number): boolean {
     const track = this.trackFor(next);
     if (!track) return false;
-    const atMs = track.items[track.first.get(next)!]!.startMs - gapBetweenMs(this.lines, from, next);
+    const slot = track.first.get(next)!;
+    // Only where the track has `from` just before `next`: its pause is then the one before `next`.
+    if (track.items[slot - 1]?.index !== from) return false;
+    const atMs = track.items[slot]!.startMs - pauseBetweenMs(this.lines, from, next, this.part);
     if (atMs < 0) return false;
     ++this.token;
     this.playTrackAt(next, track, atMs);
@@ -677,7 +710,8 @@ export class PlayerEngine {
   /** Near the end of the track, fetch the lines after it, in case no newer track is ready by then. */
   private prefetchPastTrack(index: number) {
     const track = this.current;
-    if (!track || track.lastIndex - index > PREFETCH_LINES) return;
+    const plan = this.part.plan ?? null;
+    if (!track || positionOf(plan, track.lastIndex) - positionOf(plan, index) > PREFETCH_LINES) return;
     const after = nextIndex(this.lines, track.lastIndex, this.part);
     if (after !== null && !this.trackFor(after)) this.prefetchFrom(after);
   }
@@ -686,16 +720,8 @@ export class PlayerEngine {
   private trackEnded() {
     const last = this.current?.lastIndex ?? this.state.index;
     this.set({ onTrack: false, gap: null });
-    const next = nextIndex(this.lines, last, this.part);
-    if (next === null) {
-      this.phase = null;
-      this.set({ playing: false, ended: true });
-      return;
-    }
     // A newer track that already covers the end of this one goes on from inside it: one new source.
-    if (this.enterTrackBefore(last, next)) return;
-    this.phase = { kind: "pause", index: last, next };
-    this.playUrl(silenceUrl(gapBetweenMs(this.lines, last, next)));
+    this.advanceFrom(last);
   }
 
   /** Off the track (it changed or failed): the current line again, line by line. */

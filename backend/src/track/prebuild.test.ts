@@ -13,11 +13,15 @@ import { NORMALIZE_CONCURRENCY } from "../render/takeaudio.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "../test/helpers.ts";
 import { FakeSynthesizer } from "../test/tts.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
+import { SKIP_PAUSE_MS } from "./skipSound.ts";
+import { planCues, planStretches } from "./cuePlan.ts";
 import { plannedTracks, prebuildTracks, stopPrebuilding } from "./prebuild.ts";
-import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, trackStart } from "./track.ts";
+import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, trackRequest, trackStart, type LineRow } from "./track.ts";
 
 const line = (i: number, characterId: string | null, voiceIds: string[] | null = null) => ({
   id: `line-${i}`,
+  sectionId: "scene",
+  text: "Some words are said here.",
   kind: characterId || voiceIds ? "dialogue" : "stage_direction",
   characterId,
   voiceIds,
@@ -35,21 +39,23 @@ test("the tracks built ahead are the stretches the player asks for, read through
     planned.map((p) => [p.start, p.req.mode, p.req.lineIds.length, p.req.mine.size]),
     [
       [0, "read", 300, 0],
-      [0, "pause", 300, 50], // anna
+      // anna: only the lines that play, the long stretch to the shared line left out, in one file
+      [0, "pause", 102, 51],
       [0, "pause", 300, 220], // ben
       [0, "pause", 300, 270], // anna and ben
       [260, "read", 300, 0],
-      // anna has no lines here: her listen is the full read, as the player asks for it
       [260, "pause", 300, 270],
       [260, "pause", 300, 270],
       [520, "read", 294, 0],
-      [520, "pause", 294, 1], // anna: the shared line is hers too
       [520, "pause", 294, 265],
       [520, "pause", 294, 265],
     ],
     "the same parts twice (two cast members on BEN) are built once",
   );
-  assert.ok(planned[7]!.req.mine.size === 0 && planned[8]!.req.mine.has("line-700"));
+  const anna = planned[1]!.req;
+  assert.ok(anna.mine.has("line-700"), "the shared line is hers too");
+  assert.deepEqual([...anna.skips], ["line-99"]);
+  assert.deepEqual(anna.lineIds.slice(-3), ["line-99", "line-699", "line-700"]);
 
   // Every line's stretch, as the player works it out, is one built ahead and covers that line.
   for (const count of [1, 299, 300, 301, 560, 814, 1806]) {
@@ -66,6 +72,32 @@ test("the tracks built ahead are the stretches the player asks for, read through
     for (const start of built.slice(1)) assert.equal(trackStart(start, count), start);
   }
   assert.equal(TRACK_STRIDE, MAX_TRACK_LINES - 40);
+});
+
+test("what the player asks for with a part hashes the same as what is built ahead", () => {
+  const anna = randomUUID();
+  const rows: LineRow[] = Array.from({ length: 700 }, (_, i) => ({
+    id: randomUUID(),
+    sectionId: i < 300 ? "s1" : "s2",
+    kind: i % 25 === 3 ? "stage_direction" : "dialogue",
+    text: `Line ${i} has a few words in it.`,
+    characterId: i < 5 || (i > 600 && i % 3 === 0) ? anna : randomUUID(),
+    voiceIds: null,
+    currentTakeId: null,
+    takesAt: null,
+  }));
+  const planned = plannedTracks(rows, [[anna]]).filter((p) => p.req.mine.size);
+  assert.ok(planned.length > 0);
+  for (const { req } of planned) {
+    const built = trackIdentity(rows, req, "piper").hash;
+    // As the player sends it (trackWindow): `skips` only when there are some.
+    const body = { lineIds: req.lineIds, mine: [...req.mine], mode: req.mode, ...(req.skips.size ? { skips: [...req.skips] } : {}) };
+    assert.equal(trackIdentity(rows, trackRequest(JSON.parse(JSON.stringify(body))), "piper").hash, built);
+    assert.notEqual(trackIdentity(rows, trackRequest({ ...body, skips: [] }), "piper").hash, req.skips.size ? built : "", "the sound is part of the track");
+  }
+  // With no skips a track hashes as it did before they existed, so the full read stays built.
+  const full = plannedTracks(rows, [])[0]!.req;
+  assert.equal(trackIdentity(rows, trackRequest({ lineIds: full.lineIds }), "piper").hash, trackIdentity(rows, full, "piper").hash);
 });
 
 interface Row {
@@ -173,6 +205,46 @@ describe("listen tracks built ahead", { skip: dbSkip }, () => {
     );
   });
 
+  test("the first ask for a one-act part with lines at either end gets the track built ahead: one file, with the middle left out", async () => {
+    const between = Array.from({ length: 12 }, (_, i) => `${i % 2 ? "BEN" : "CARL"}: Line ${i} between hers.`).join("\n");
+    const made = await productionWithScript(t, alice, `ANNA: First words.\nBEN: Second words.\n${between}\nBEN: Your cue now.\nANNA: Last words.`, "One act");
+    const dana = made.script.characters.find((c: { name: string }) => c.name === "ANNA").id as string;
+    const { joinUrl } = (await t.app.inject({ method: "GET", url: `/api/productions/${made.id}/join-link`, headers: bearer(alice) })).json();
+    const claim = await t.app.inject({
+      method: "POST",
+      url: `/api/join/${joinUrl.split("/join/")[1]}/claim`,
+      payload: { firstName: "Dana", characterIds: [dana] },
+    });
+    assert.equal(claim.statusCode, 200, claim.body);
+    await settle();
+
+    // As the player works it out, with the same code.
+    const all = await trackLines(t.ctx, made.id);
+    const script = all.map((l) => ({ lineId: l.id, sectionId: l.sectionId, kind: l.kind, text: l.text }));
+    const mine = new Set(all.filter((l) => l.characterId === dana).map((l) => l.id));
+    const [only, ...more] = planStretches(script, planCues(script, mine));
+    assert.equal(more.length, 0, "one file");
+    assert.equal(only!.lineIds.length, 3);
+    const res = await t.app.inject({
+      method: "POST",
+      url: "/api/invite/listen-track",
+      headers: invite(claim.json().inviteUrl),
+      payload: { lineIds: only!.lineIds, mine: [...mine], mode: "pause", skips: only!.skips },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    const track = res.json().track;
+    assert.equal(track.status, "ready", "built ahead: no wait, so the first play starts on it");
+    const [row] = await t.ctx.sql<
+      { prebuilt: boolean }[]
+    >`select prebuilt from listen_tracks where production_id = ${made.id} and storage_key like ${"%" + new URL(track.url).pathname.split("/").pop()!.split("?")[0]!}`;
+    assert.equal(row?.prebuilt, true);
+    const items = track.items as { lineId: string; kind: string; startMs: number; durationMs: number }[];
+    const cue = items.findIndex((i) => i.lineId === only!.skips[0]);
+    const after = items.slice(cue).find((i) => i.lineId !== only!.skips[0])!;
+    const last = items.filter((i) => i.lineId === only!.skips[0]).pop()!;
+    assert.equal(after.startMs - (last.startMs + last.durationMs), SKIP_PAUSE_MS, "the sound in place of the pause");
+  });
+
   test("a take rebuilds the tracks holding its line; the ones a listener was given are left to the prune", async () => {
     const before = await rows();
     const ben = playable().find((l) => l.text.startsWith("Very well"))!;
@@ -225,10 +297,10 @@ describe("listen tracks built ahead", { skip: dbSkip }, () => {
   test("a listener's request is built before the ones waiting to be built ahead", async () => {
     const all = await trackLines(t.ctx, pid);
     const engine = await t.ctx.tts!.engine();
-    const ahead = [0, 1, 2].map((i) => trackIdentity(all, { lineIds: [all[i]!.id, all[i + 1]!.id], mine: new Set(), mode: "read" }, engine));
+    const ahead = [0, 1, 2].map((i) => trackIdentity(all, { lineIds: [all[i]!.id, all[i + 1]!.id], mine: new Set(), mode: "read", skips: new Set() }, engine));
     const claims = [];
     for (const a of ahead)
-      claims.push(await claimTrack(t.ctx, pid, a.hash, a.lines, { lineIds: a.lines.map((l) => l.id), mine: new Set(), mode: "read" }, false));
+      claims.push(await claimTrack(t.ctx, pid, a.hash, a.lines, { lineIds: a.lines.map((l) => l.id), mine: new Set(), mode: "read", skips: new Set() }, false));
     const asked = await t.app.inject({
       method: "POST",
       url: `/api/productions/${pid}/listen-track`,

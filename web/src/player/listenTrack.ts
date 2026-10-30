@@ -1,28 +1,21 @@
 import { useEffect, useState } from "react";
 import type { LineAudioApi, ListenTrack, ListenTrackRequest } from "../api/types";
 import { TRACK_URL_FRESH_MS, type PlayerEngine } from "./engine";
-import { nextIndex, playableFrom, sameLines, samePart, type Part, type QueueLine } from "./queue";
+import { playedCount, positionOf, REFRESH_LINES, stretchFrom, TRACK_LINES, TRACK_STRIDE, trackStart } from "./cuePlan";
+import { sameLines, samePart, type Part, type QueueLine } from "./queue";
 
 // Keeps a listen track ready for where the listener is in the play, so the website keeps playing
 // with the phone locked (see PlayerEngine and the server's track/track.ts). The stretch around the
 // current line is asked for as soon as the player opens, before play: the server builds the usual
 // ones ahead of time (track/prebuild.ts), so the first play usually starts on the track. When it
 // isn't ready, play starts line by line and the engine moves onto the track at the next line once
-// it is. Stretches start every TRACK_STRIDE lines, the ones built ahead; near the end of one the
-// next is asked for, and a jump outside it, or a change of part or mode, asks again from there.
+// it is. With a part a track holds only the lines that play (cuePlan.ts), so positions here count
+// those, not script lines, and a one-act part with lines at either end is one file. Stretches start
+// every TRACK_STRIDE played lines, the ones built ahead; near the end of one the next is asked for,
+// and a jump outside it, or a change of part or mode, asks again from there.
 
-/** The most lines one track covers (the server's MAX_TRACK_LINES). */
-export const TRACK_LINES = 300;
-/** Ask for the next stretch once the listener is this close to the end of the one playing. */
-export const REFRESH_LINES = 40;
-/** Stretches start every this many lines (the server's TRACK_STRIDE), so each overlaps the next by REFRESH_LINES. */
-export const TRACK_STRIDE = TRACK_LINES - REFRESH_LINES;
+export { REFRESH_LINES, TRACK_LINES, TRACK_STRIDE, trackStart };
 
-/** Where the stretch for the line at `index` starts, in a queue of `count` lines (the server's trackStart). */
-export function trackStart(index: number, count: number): number {
-  const last = Math.max(0, Math.ceil((count - TRACK_LINES) / TRACK_STRIDE)) * TRACK_STRIDE;
-  return Math.min(Math.floor(Math.max(0, index) / TRACK_STRIDE) * TRACK_STRIDE, last);
-}
 /** How often to ask again while a track is building. */
 export const POLL_MS = 3000;
 /**
@@ -35,31 +28,31 @@ export const MAX_TRIES = 3;
 
 export type TrackStatus = "off" | "building" | "ready" | "failed";
 
-/** The request for the stretch starting at `index`: up to TRACK_LINES lines in playback order. */
-export function trackWindow(queue: QueueLine[], index: number, part: Part, max = TRACK_LINES): ListenTrackRequest {
-  const lineIds: string[] = [];
-  for (let i = playableFrom(queue, index, part); i !== null && lineIds.length < max; i = nextIndex(queue, i, part)) lineIds.push(queue[i]!.lineId);
+/** The request for the stretch starting at the `start`th line that plays: up to TRACK_LINES lines in playback order. */
+export function trackWindow(queue: QueueLine[], start: number, part: Part, max = TRACK_LINES): ListenTrackRequest {
+  const { lineIds, skips } = stretchFrom(queue, part.plan ?? null, Math.max(0, start), max);
   const mine = part.mine ? lineIds.filter((id) => part.mine!.has(id)) : [];
-  return { lineIds, mine, mode: mine.length ? part.mode : "read" };
+  return { lineIds, mine, mode: mine.length ? part.mode : "read", ...(skips.length ? { skips } : {}) };
 }
 
 /**
  * The player bar's note about the screen lock, on the website. `covered`: the engine has a track
  * for the current line. A track that failed, or one the engine dropped (it wouldn't play), leaves
- * this stretch line by line, which a locked phone may stop: say so.
+ * this stretch line by line, which a locked phone may stop: say so. `leftOut`: the listener went
+ * into a stretch their plan leaves out, which no track of theirs holds; that isn't a failure.
  */
-export function lockNote(s: { playing: boolean; interrupted: boolean; status: TrackStatus; onTrack: boolean; covered: boolean }): string {
+export function lockNote(s: { playing: boolean; interrupted: boolean; status: TrackStatus; onTrack: boolean; covered: boolean; leftOut?: boolean }): string {
   if (s.interrupted && !s.playing) return "The phone stopped the play while the screen was off. Press play to carry on.";
-  if (!s.playing || s.status === "off") return "";
+  if (!s.playing || s.status === "off" || s.leftOut) return "";
   if (s.onTrack) return "Ready to play with the screen locked.";
   if (s.status === "building" || (s.status === "ready" && s.covered)) return "Getting ready to play with the screen locked… Keep the screen on until then.";
   return "This part can't play with the screen locked yet. Keep the screen on.";
 }
 
-/** Whether the listener at `index` needs a track asked for: none covers it, or the one that does ends soon. */
-export function needsTrack(reach: number | null, index: number, queueLength: number): boolean {
+/** Whether a listener at `at` of `count` played lines needs a track asked for: none covers them (`reach`: where one ends), or the one that does ends soon. */
+export function needsTrack(reach: number | null, at: number, count: number): boolean {
   if (reach === null) return true;
-  return reach < queueLength - 1 && reach - index < REFRESH_LINES;
+  return reach < count - 1 && reach - at < REFRESH_LINES;
 }
 
 /**
@@ -75,11 +68,14 @@ export function stretchToAsk(
   reach: number | null,
   now = Date.now(),
 ): number | null {
-  const start = trackStart(index, queue.length);
+  const plan = part.plan ?? null;
+  const count = playedCount(queue, plan);
+  const at = positionOf(plan, index);
+  const start = trackStart(at, count);
   if (asked && sameLines(asked.queue, queue) && samePart(asked.part, part)) {
     // Asked on open, hours before play: again, for a URL the engine will still use.
     if (asked.start === start) return now - asked.at > TRACK_URL_FRESH_MS ? start : null;
-    if (!needsTrack(reach, index, queue.length)) return null;
+    if (!needsTrack(reach === null ? null : positionOf(plan, reach), at, count)) return null;
   }
   return start;
 }
@@ -93,7 +89,7 @@ export interface Poll {
 interface Job extends Poll {
   queue: QueueLine[];
   part: Part;
-  /** The first line of the stretch asked for, and when (Date.now()). */
+  /** The stretch asked for, as its first position among the lines that play, and when (Date.now()). */
   start: number;
   at: number;
 }

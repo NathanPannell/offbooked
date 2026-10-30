@@ -2,6 +2,7 @@ import type { ResolvedLineAudio } from "../linestream.ts";
 import { RENDER_SETTINGS, wordCount } from "../render/plan.ts";
 import type { SpokenSegment } from "../tts/service.ts";
 import type { Stretch } from "../render/trim.ts";
+import { SKIP_PAUSE_MS } from "./skipSound.ts";
 
 // Lays out a listen track: a stretch of the listen-through as one file, in the order and with the
 // timing the line-by-line player uses (web/src/player/queue.ts, engine.ts, timing.ts), so the two
@@ -39,8 +40,11 @@ export interface TrackItem {
   wordStartsMs?: number[];
 }
 
-/** What the encoder joins, in order: a clip's .m4a cut or padded to `samples`, or silence. */
-export type TrackPiece = { kind: "clip"; key: string; samples: number } | { kind: "silence"; samples: number };
+/**
+ * What the encoder joins, in order: a clip's .m4a cut or padded to `samples`, silence, or the
+ * fast-forward sound (skipSound.ts) where lines are left out.
+ */
+export type TrackPiece = { kind: "clip"; key: string; samples: number } | { kind: "silence"; samples: number } | { kind: "skip"; samples: number };
 
 export interface TrackPlan {
   items: TrackItem[];
@@ -72,7 +76,11 @@ export function myLinePauseMs(text: string, recordedMs: number | null): number {
 
 const recorded = (source: string) => source === "actor" || source === "director";
 
-export function planTrack(lines: TrackLine[], mine: ReadonlySet<string>, mode: MyLineMode): TrackPlan {
+/**
+ * `skips`: lines the plan (cuePlan.ts) jumps from. The next line in `lines` is where it lands, and
+ * the fast-forward sound takes the place of the pause before it.
+ */
+export function planTrack(lines: TrackLine[], mine: ReadonlySet<string>, mode: MyLineMode, skips: ReadonlySet<string> = new Set()): TrackPlan {
   const items: TrackItem[] = [];
   const pieces: TrackPiece[] = [];
   let cursor = 0;
@@ -86,7 +94,11 @@ export function planTrack(lines: TrackLine[], mine: ReadonlySet<string>, mode: M
 
   lines.forEach((line, i) => {
     const before = lines[i - 1];
-    if (before) silence(msToSamples(before.sectionId === line.sectionId ? RENDER_SETTINGS.gapMs : RENDER_SETTINGS.sectionGapMs));
+    if (before && skips.has(before.lineId)) {
+      const samples = msToSamples(SKIP_PAUSE_MS);
+      pieces.push({ kind: "skip", samples });
+      cursor += samples;
+    } else if (before) silence(msToSamples(before.sectionId === line.sectionId ? RENDER_SETTINGS.gapMs : RENDER_SETTINGS.sectionGapMs));
     const { audio } = line;
     const own = mine.has(line.lineId);
     if (own && mode !== "read") {
