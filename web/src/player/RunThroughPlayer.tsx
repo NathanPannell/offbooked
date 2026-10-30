@@ -19,6 +19,8 @@ import { PlayerEngine, type PlayerState } from "./engine";
 import { followLine } from "./follow";
 import { useListenTrack } from "./listenTrack";
 import { LineText, LiveText, type CueSpan } from "./LiveText";
+import { myLineNumber, myStops, nextMine, previousMine } from "./myLines";
+import { MyLineNav } from "./MyLineNav";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
 import { changeSettings, defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
 import { cueRange } from "./words";
@@ -111,6 +113,9 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     [lines],
   );
   const segmentByLine = useMemo(() => new Map(queue.map((q, index) => [q.lineId, index])), [queue]);
+  // Where "My previous line" and "My next line" land: each of the listener's lines, on its cue.
+  const stops = useMemo(() => (hasRole ? myStops(queue, mine) : []), [hasRole, queue, mine]);
+  const [jumpNote, setJumpNote] = useState("");
 
   // The listener's cues: the last sentence of the line before each of theirs (in its scene, and
   // not their own), underlined. Keyed by the cue line, with the line each one cues.
@@ -294,6 +299,17 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
   const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
 
+  const jumpToMine = (index: number) => {
+    if (!engine) return;
+    setFollowing(true);
+    engine.seekToSegment(index, state.playing);
+    const n = myLineNumber(stops, index);
+    const scene = sections.find((s) => s.id === queue[index]?.sectionId)?.title;
+    setJumpNote(`Your line ${n} of ${stops.length}${scene ? `, ${scene}` : ""}.`);
+  };
+  const nextMineAt = hasAudio ? nextMine(stops, state.index) : null;
+  const previousMineAt = hasAudio ? previousMine(stops, state.index) : null;
+
   const onLineTap = (line: Line) => {
     if (!engine || !hasAudio) return;
     const index = segmentByLine.get(line.id) ?? queue.findIndex((q) => (lineById.get(q.lineId)?.seq ?? 0) > line.seq);
@@ -303,7 +319,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   };
 
   return (
-    <div ref={rootRef} className={`player ${hasRole ? "is-my-part" : ""}`}>
+    <div ref={rootRef} className={`player ${hasRole ? "is-my-part" : ""} ${stops.length > 0 ? "has-my-lines" : ""}`}>
       <audio ref={audioRef} preload="auto" playsInline />
 
       {/* One row pinned to the top: who you are, what happens on your lines, and the scene. */}
@@ -466,6 +482,14 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
       )}
 
       <div className="player-controls" role="group" aria-label="Playback">
+        {stops.length > 0 && (
+          <MyLineNav
+            number={myLineNumber(stops, state.index)}
+            total={stops.length}
+            onPrevious={previousMineAt === null ? null : () => jumpToMine(previousMineAt)}
+            onNext={nextMineAt === null ? null : () => jumpToMine(nextMineAt)}
+          />
+        )}
         <SpeedButton label={hasRole ? "Speed of other people's lines" : "Speed"} />
         <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">
           <SkipBack size={24} />
@@ -495,6 +519,9 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
 
       <p className="sr-only" aria-live="polite">
         {state.gap ? "Your line. Say it now." : ""}
+      </p>
+      <p className="sr-only" aria-live="polite">
+        {jumpNote}
       </p>
     </div>
   );

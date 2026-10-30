@@ -3988,6 +3988,69 @@
   width: var(--tap);
 }
 
+/* With a part picked: "My previous line" and "My next line" on their own row, on top of the play
+   controls, in reach of a thumb. The pills above the bar move up by that row. */
+.has-my-lines .player-controls {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding-top: 4px;
+}
+
+.my-line-nav {
+  display: flex;
+  flex: 0 0 100%;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-4);
+}
+
+.my-line-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink);
+  font: 600 var(--text-sm) / 1 var(--font-sans);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .my-line-btn:hover:not(:disabled) {
+    background: var(--paper-deep);
+  }
+}
+
+.my-line-btn:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.my-line-count {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.my-line-count strong {
+  color: var(--ink);
+}
+
+.has-my-lines .back-to-current {
+  bottom: calc(154px + var(--safe-bottom));
+}
+
+.has-my-lines .player-waiting {
+  bottom: calc(132px + var(--safe-bottom));
+}
+
+.player.has-my-lines {
+  padding-bottom: 46px;
+}
+
 /* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
 .player-waiting {
   position: fixed;
@@ -4041,6 +4104,11 @@
     border-radius: 999px;
     padding: 10px 24px;
     box-shadow: var(--shadow-lg);
+  }
+
+  .step-panel .has-my-lines .player-controls {
+    width: 480px;
+    border-radius: var(--radius-lg);
   }
 }
 
