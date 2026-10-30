@@ -4116,6 +4116,71 @@
   color: var(--ink);
 }
 
+/* "Skip to my cues": a toggle in the pinned row, beside the part and mode pickers. On, it is ink. */
+.skip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 4px 12px;
+  border: 1.5px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+  font: 600 var(--text-sm) / 1.2 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+
+.skip-toggle:hover {
+  border-color: var(--edge-strong);
+}
+
+.skip-toggle[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+/* Held before a long stretch: where the next line is, and the jump, above the player bar. */
+.held-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: calc(150px + var(--safe-bottom));
+  z-index: 27;
+  width: min(440px, calc(100% - 32px));
+  transform: translateX(-50%);
+  padding: var(--s-4);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+.held-text {
+  margin: 0 0 var(--s-3);
+  font-family: var(--font-serif);
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.held-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.held-actions .btn {
+  flex: 1;
+}
+
+/* On a phone the two don't fit side by side: the jump on top, in reach. */
+@media (max-width: 520px) {
+  .held-actions {
+    flex-direction: column-reverse;
+  }
+}
+
 .has-my-lines .back-to-current {
   bottom: calc(154px + var(--safe-bottom));
 }
@@ -4141,7 +4206,10 @@
   border-radius: 999px;
   background: var(--bg);
   box-shadow: var(--shadow-sm);
-  white-space: nowrap;
+  /* The screen-lock notes are a sentence or two: they wrap on a phone rather than run off it. */
+  width: max-content;
+  max-width: calc(100% - 32px);
+  text-align: center;
 }
 
 .player-waiting:empty {
@@ -4186,6 +4254,10 @@
   .step-panel .has-my-lines .player-controls {
     width: 480px;
     border-radius: var(--radius-lg);
+  }
+
+  .step-panel .held-prompt {
+    bottom: 164px;
   }
 }
 

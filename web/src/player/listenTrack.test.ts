@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ListenTrack } from "../api/types";
-import { lockNote, MAX_TRIES, needsTrack, POLL_MS, pollTrack, REFRESH_LINES, RETRY_FAILED_MS, trackWindow, type Poll } from "./listenTrack";
-import { NO_PART, sameLines, samePart, type QueueLine } from "./queue";
+import { lockNote, MAX_TRIES, needsTrack, POLL_MS, pollTrack, REFRESH_LINES, RETRY_FAILED_MS, trackWindow, windowSpan, type Poll } from "./listenTrack";
+import { NO_PART, sameLines, samePart, type Part, type QueueLine } from "./queue";
 
 const queue: QueueLine[] = Array.from({ length: 10 }, (_, i) => ({ lineId: `l${i}`, sectionId: i < 5 ? "s1" : "s2", text: "Some words." }));
 
@@ -16,6 +16,35 @@ describe("the stretch asked for", () => {
     expect(trackWindow(queue, 2, part, 4)).toEqual({ lineIds: ["l2", "l3", "l4", "l5"], mine: ["l4"], mode: "pause" });
     // So the same stretch heard by someone with no lines in it is the same track.
     expect(trackWindow(queue, 5, part, 4)).toEqual({ lineIds: ["l5", "l6", "l7", "l8"], mine: [], mode: "read" });
+  });
+});
+
+describe("the stretch asked for, with Skip to my cues", () => {
+  const gap = { lines: 4, ms: 90_000, scenes: 0 };
+  // Mine: l0, l5, l9. After l0 a skip lands on l4 (l5's cue); after l5 a stop before l9 (cue l8).
+  const part: Part = {
+    mine: new Set(["l0", "l5", "l9"]),
+    mode: "read",
+    jumps: new Map([
+      [0, { kind: "skip", from: 0, to: 4, next: 5, gap }],
+      [5, { kind: "stop", from: 5, to: 8, next: 9, gap }],
+    ]),
+  };
+
+  it("leaves out what a skip leaves out, says where the sound goes, and ends at a stop", () => {
+    const req = trackWindow(queue, 0, part);
+    expect(req).toEqual({ lineIds: ["l0", "l4", "l5"], mine: ["l0", "l5"], mode: "read", skips: ["l0"] });
+    expect(windowSpan(queue, 0, part, req)).toEqual({ start: 0, end: 6, stop: part.jumps!.get(5) });
+  });
+
+  it("after the stop, runs from the jump's cue", () => {
+    const req = trackWindow(queue, 8, part);
+    expect(req).toEqual({ lineIds: ["l8", "l9"], mine: ["l9"], mode: "read" });
+    expect(windowSpan(queue, 8, part, req)).toEqual({ start: 8, end: 10, stop: null });
+  });
+
+  it("is a different track from the same lines without it", () => {
+    expect(samePart(part, { ...part, jumps: undefined })).toBe(false);
   });
 });
 
