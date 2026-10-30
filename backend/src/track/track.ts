@@ -60,8 +60,6 @@ export interface TrackRequest {
   lineIds: string[];
   mine: Set<string>;
   mode: MyLineMode;
-  /** Lines after which "Skip to my cues" leaves lines out: the fast-forward sound plays before the next one. */
-  skips: Set<string>;
 }
 
 export function trackRequest(raw: unknown): TrackRequest {
@@ -72,8 +70,7 @@ export function trackRequest(raw: unknown): TrackRequest {
   const mine = new Set((uuidList(b, "mine", false) ?? []).map((id) => id.toLowerCase()));
   const mode = b.mode ?? "read";
   if (typeof mode !== "string" || !MY_LINE_MODES.includes(mode as MyLineMode)) throw badRequest('mode must be "read", "skip" or "pause".');
-  const skips = new Set((uuidList(b, "skips", false) ?? []).map((id) => id.toLowerCase()));
-  return { lineIds, mine, mode: mode as MyLineMode, skips };
+  return { lineIds, mine, mode: mode as MyLineMode };
 }
 
 export interface LineRow {
@@ -107,7 +104,7 @@ export function trackIdentity(rows: LineRow[], req: TrackRequest, engine: string
   const h = createHash("sha256").update(JSON.stringify({ track: TRACK_SETTINGS, render: RENDER_SETTINGS, engine, mode: req.mode }));
   for (const l of lines) {
     h.update(
-      `\n${l.id}|${l.sectionId}|${l.kind}|${req.mine.has(l.id) ? 1 : 0}${req.skips.has(l.id) ? "|skip" : ""}|${l.characterId ?? ""}|${(l.voiceIds ?? []).join(",")}|${l.currentTakeId ?? ""}|${l.takesAt?.toISOString() ?? ""}|${l.text}`,
+      `\n${l.id}|${l.sectionId}|${l.kind}|${req.mine.has(l.id) ? 1 : 0}|${l.characterId ?? ""}|${(l.voiceIds ?? []).join(",")}|${l.currentTakeId ?? ""}|${l.takesAt?.toISOString() ?? ""}|${l.text}`,
     );
   }
   return { hash: h.digest("hex"), lines };
@@ -260,7 +257,6 @@ async function buildTrack(
       lines.flatMap((l) => (byLine.has(l.id) ? [{ lineId: l.id, sectionId: l.sectionId, text: l.text, audio: byLine.get(l.id)! }] : [])),
       req.mine,
       req.mode,
-      req.skips,
     );
     const keys = [...new Set(plan.pieces.flatMap((p) => (p.kind === "clip" ? [p.key] : [])))];
     const pcm = new Map(keys.map((key, i) => [key, path.join(dir, `clip-${i}.pcm`)]));

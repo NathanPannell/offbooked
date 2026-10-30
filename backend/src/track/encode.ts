@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { RENDER_SETTINGS } from "../render/plan.ts";
-import { fastForwardPcm } from "./fastForward.ts";
 import type { TrackPiece } from "./plan.ts";
 
 // The ffmpeg end of a listen track (track.ts): clips decoded to raw samples, then every piece
@@ -42,12 +41,6 @@ export async function encodeTrack(pieces: TrackPiece[], pcm: Map<string, string>
     for (const piece of pieces) {
       if (piece.kind === "silence") {
         await zeros(piece.samples);
-        continue;
-      }
-      if (piece.kind === "fastForward") {
-        const sound = fastForwardPcm(RATE);
-        await write(sound.subarray(0, piece.samples * 2));
-        if (sound.length < piece.samples * 2) await zeros(piece.samples - sound.length / 2);
         continue;
       }
       const data = await readFile(pcm.get(piece.key)!);

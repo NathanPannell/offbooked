@@ -4,7 +4,6 @@ import {
   LINE_GAP_MS,
   nextIndex,
   NO_PART,
-  pauseBetweenMs,
   placeholderMs,
   playableFrom,
   prefetchWindow,
@@ -14,7 +13,6 @@ import {
   type Part,
   type QueueLine,
 } from "./queue";
-import { FAST_FORWARD_MS } from "./fastForward";
 import { silenceWav } from "./silence";
 
 // Scene 1: a, b, c. Scene 2: d, e, f.
@@ -104,31 +102,5 @@ describe("silence", () => {
     expect(String.fromCharCode(...wav.slice(0, 4))).toBe("RIFF");
     expect(view.getUint32(40, true)).toBe(2 * 2000);
     expect(wav.length).toBe(44 + 4000);
-  });
-});
-
-describe("Skip to my cues", () => {
-  const gap = { lines: 4, audioMs: 90_000, pauseMs: 1_400, scenes: 0 };
-  const skipping: Part = { ...part("read"), jumps: new Map([[1, { kind: "skip", from: 1, to: 4, next: 5, gap }]]) };
-  const stopping: Part = { ...part("read"), jumps: new Map([[1, { kind: "stop", from: 1, to: 4, next: 5, gap }]]) };
-
-  it("after a line with a skip, the next line is where it lands, after the fast-forward sound", () => {
-    expect(nextIndex(lines, 1, skipping)).toBe(4);
-    expect(nextIndex(lines, 2, skipping)).toBe(3);
-    expect(pauseBetweenMs(lines, 1, 4, skipping)).toBe(FAST_FORWARD_MS);
-    expect(pauseBetweenMs(lines, 1, 2, skipping)).toBe(LINE_GAP_MS);
-  });
-
-  it("a stop doesn't skip: the engine stops there and asks", () => {
-    expect(nextIndex(lines, 1, stopping)).toBe(2);
-    expect(pauseBetweenMs(lines, 1, 2, stopping)).toBe(LINE_GAP_MS);
-  });
-
-  it("at a stop, fetches ahead from where the jump lands", () => {
-    expect(prefetchWindow(lines, 0, 3, stopping)).toEqual(["a", "b", "e"]);
-  });
-
-  it("fetches ahead along the skip", () => {
-    expect(prefetchWindow(lines, 0, 3, skipping)).toEqual(["a", "b", "e"]);
   });
 });

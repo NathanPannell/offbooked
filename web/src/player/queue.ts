@@ -1,5 +1,3 @@
-import { sameJumps, type Jump } from "./autoSkip";
-import { FAST_FORWARD_MS } from "./fastForward";
 import { myLinePauseMs, wordCount } from "./timing";
 
 // Pure planning for line-by-line playback: which line plays next, how long the pause before it
@@ -29,8 +27,6 @@ export type MyLineMode = "read" | "skip" | "pause";
 export interface Part {
   mine: Set<string> | null;
   mode: MyLineMode;
-  /** "Skip to my cues": what happens after each of the listener's lines, by its index (autoSkip.ts). */
-  jumps?: ReadonlyMap<number, Jump>;
 }
 
 export const NO_PART: Part = { mine: null, mode: "read" };
@@ -42,7 +38,7 @@ export function samePart(a: Part, b: Part): boolean {
   if ((a.mine?.size ?? 0) !== (b.mine?.size ?? 0)) return false;
   if (a.mine?.size && a.mode !== b.mode) return false;
   for (const id of a.mine ?? []) if (!b.mine?.has(id)) return false;
-  return sameJumps(a.jumps, b.jumps);
+  return true;
 }
 
 /** The same lines in the same order (a reloaded script that didn't change). */
@@ -56,21 +52,9 @@ export function playableFrom(lines: QueueLine[], index: number, _part: Part = NO
   return i < lines.length ? i : null;
 }
 
-/** The line after `index`, or where a skip after it lands. Null at the end of the play. */
+/** The line after `index`. Null at the end of the play. */
 export function nextIndex(lines: QueueLine[], index: number, part: Part = NO_PART): number | null {
-  const jump = part.jumps?.get(index);
-  return playableFrom(lines, jump?.kind === "skip" ? jump.to : index + 1, part);
-}
-
-/** A skip after `index` that lands on `to`: it plays the fast-forward sound instead of the pause. */
-export function skipsTo(part: Part, index: number, to: number): boolean {
-  const jump = part.jumps?.get(index);
-  return jump?.kind === "skip" && jump.to === to;
-}
-
-/** What plays between `from` and the next line `to`: the pause, or the fast-forward sound after a skip. */
-export function pauseBetweenMs(lines: QueueLine[], from: number, to: number, part: Part = NO_PART): number {
-  return skipsTo(part, from, to) ? FAST_FORWARD_MS : gapBetweenMs(lines, from, to);
+  return playableFrom(lines, index + 1, part);
 }
 
 /** The pause between two lines: short within a scene, longer at a scene change. */
@@ -105,14 +89,11 @@ export function stepFor(lines: QueueLine[], index: number, part: Part, recordedM
 }
 
 /** The line IDs to have ready, in playback order from `index` (included). My lines in "skip" are
- * fetched too: a recorded take times their silence. At a "Skip to my cues" stop it goes on from
- * where the jump lands, which is what usually plays next. */
+ * fetched too: a recorded take times their silence. */
 export function prefetchWindow(lines: QueueLine[], index: number, count: number, part: Part = NO_PART): string[] {
   const out: string[] = [];
-  for (let i = playableFrom(lines, index, part); i !== null && out.length < count;) {
+  for (let i = playableFrom(lines, index, part); i !== null && out.length < count; i = nextIndex(lines, i, part)) {
     out.push(lines[i]!.lineId);
-    const jump = part.jumps?.get(i);
-    i = jump?.kind === "stop" ? playableFrom(lines, jump.to, part) : nextIndex(lines, i, part);
   }
   return out;
 }
