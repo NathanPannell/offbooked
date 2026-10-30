@@ -281,17 +281,6 @@ export function warmIds(raw: unknown): string[] {
 
 export const playPriority = (prefetch: unknown): TtsPriority => (prefetch === "1" || prefetch === "true" ? TTS_PRIORITY.prefetch : TTS_PRIORITY.play);
 
-// How long each line with a normalized current take plays, as the player gets it. The player's
-// "Skip to my cues" measures the gaps between the listener's lines with these and estimates the
-// rest from their words.
-export async function takeDurations(ctx: Ctx, productionId: string): Promise<Record<string, number>> {
-  const rows = await ctx.sql<{ id: string; samples: number }[]>`
-    select l.id, t.normalized_samples as samples
-    from lines l join takes t on t.id = l.current_take_id
-    where l.production_id = ${productionId} and l.kind = 'dialogue' and t.normalized_samples is not null`;
-  return Object.fromEntries(rows.map((r) => [r.id, samplesToMs(r.samples)]));
-}
-
 // Where each dialogue line's (and stage direction's) audio will come from, without making
 // anything: the current take's recorder, else "tts" when TTS can voice it, else "none". The player
 // shows these as tags.

@@ -32,16 +32,6 @@ describe("run-through settings", () => {
     expect(parseSettings(JSON.stringify(chosen), actor, roles)).toEqual({ role: "c1", mode: "skip", modePicked: true });
   });
 
-  it("remembers Skip to my cues, off unless turned on", () => {
-    const actor = defaultSettings(true, "full");
-    expect(actor.autoSkip).toBeUndefined();
-    const on = changeSettings(actor, { autoSkip: true });
-    expect(parseSettings(JSON.stringify(on), actor, roles).autoSkip).toBe(true);
-    // Turning it on isn't picking a mode.
-    expect(on.modePicked).toBeUndefined();
-    expect(parseSettings(JSON.stringify({ ...on, autoSkip: "yes" }), actor, roles).autoSkip).toBeUndefined();
-  });
-
   it("restores what was saved, and drops anything this production doesn't allow", () => {
     const fallback = defaultSettings(false, "full");
     expect(parseSettings(JSON.stringify({ role: "c2", mode: "skip", speed: 2.5, modePicked: true }), fallback, roles)).toEqual({

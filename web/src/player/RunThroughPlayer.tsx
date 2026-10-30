@@ -1,4 +1,4 @@
-import { Crosshair, FastForward, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { Crosshair, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { errorMessage } from "../api/client";
 import type { Line, LineAudioApi, RunThrough } from "../api/types";
@@ -19,9 +19,6 @@ import { PlayerEngine, type PlayerState } from "./engine";
 import { followLine } from "./follow";
 import { lockNote, useListenTrack } from "./listenTrack";
 import { LineText, LiveText, type CueSpan } from "./LiveText";
-import { aheadText, listeningMs, planJumps, sameJumps, type Jump } from "./autoSkip";
-import { myLineNumber, myStops, nextMine, previousMine } from "./myLines";
-import { MyLineNav } from "./MyLineNav";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
 import { changeSettings, defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
 import { cueRange } from "./words";
@@ -103,6 +100,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     return new Set(lines.filter((l) => l.kind === "dialogue" && saysLine(l, ids)).map((l) => l.id));
   }, [roleIds, lines]);
   const hasRole = settings.role !== "";
+  const part = useMemo<Part>(() => (hasRole ? { mine, mode: settings.mode } : NO_PART), [hasRole, mine, settings.mode]);
 
   // The play queue: dialogue and stage directions (read by the narrator), in order.
   const queue = useMemo<QueueLine[]>(
@@ -113,24 +111,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     [lines],
   );
   const segmentByLine = useMemo(() => new Map(queue.map((q, index) => [q.lineId, index])), [queue]);
-  // Where "My previous line" and "My next line" land: each of the listener's lines, on its cue.
-  const stops = useMemo(() => (hasRole ? myStops(queue, mine) : []), [hasRole, queue, mine]);
-  const [jumpNote, setJumpNote] = useState("");
-
-  // "Skip to my cues": what happens after each of the listener's lines (autoSkip.ts), measured at
-  // 1× from recorded takes' lengths where the server knows them and the words elsewhere. An
-  // unchanged plan keeps its object, so no listen track is rebuilt.
-  const speed = usePlaybackSpeed();
-  const autoSkip = hasRole && settings.autoSkip === true;
-  const plannedJumps = useMemo(() => {
-    if (!autoSkip) return undefined;
-    const durations = data?.durations ?? {};
-    return planJumps(queue, stops, (id) => durations[id]);
-  }, [autoSkip, data, queue, stops]);
-  const [jumpsBox] = useState<{ jumps: ReadonlyMap<number, Jump> | undefined }>(() => ({ jumps: undefined }));
-  if (!sameJumps(jumpsBox.jumps, plannedJumps)) jumpsBox.jumps = plannedJumps;
-  const jumps = jumpsBox.jumps;
-  const part = useMemo<Part>(() => (hasRole ? { mine, mode: settings.mode, ...(jumps ? { jumps } : {}) } : NO_PART), [hasRole, mine, settings.mode, jumps]);
 
   // The listener's cues: the last sentence of the line before each of theirs (in its scene, and
   // not their own), underlined. Keyed by the cue line, with the line each one cues.
@@ -186,6 +166,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     engine?.setPart(part);
   }, [engine, part]);
 
+  const speed = usePlaybackSpeed();
   useEffect(() => {
     engine?.setSpeed(speed);
   }, [engine, speed]);
@@ -194,9 +175,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   // asked for as soon as the player opens, so the first play starts on it and keeps going with the
   // phone locked (listenTrack.ts). The iOS app plays on with the screen locked natively.
   const onWebsite = useMemo(() => !isNativeApp(), []);
-  // Held before a long stretch, the stretch after the jump is the one to have ready.
-  const trackIndex = state.held ? state.held.to : Math.max(state.index, 0);
-  const trackStatus = useListenTrack({ engine, api: audio, queue, part, index: trackIndex, active: onWebsite, playing: state.playing });
+  const trackStatus = useListenTrack({ engine, api: audio, queue, part, index: Math.max(state.index, 0), active: onWebsite, playing: state.playing });
   const screenNote = lockNote({
     playing: state.playing,
     interrupted: state.interrupted,
@@ -276,27 +255,17 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     return lockScreen.connect(engine);
   }, [engine, lockScreen]);
 
-  // Held before a long stretch ("Skip to my cues"): where the listener's next line is.
-  const held = state.held;
-  const heldScene = held ? data?.sections.find((s) => s.id === queue[held.next]?.sectionId)?.title : undefined;
-  const heldText = held ? `Your next line is in ${heldScene ?? "a later scene"}, ${aheadText(listeningMs(held.gap, speed))} ahead.` : "";
-
   useEffect(() => {
     if (!data) return;
     const who = currentLine?.characterId ? characterName.get(currentLine.characterId) : undefined;
     const section = data.sections.find((s) => s.id === currentLine?.sectionId);
     lockScreen.show({
-      // Held: paused on the lock screen, and its play makes the jump.
-      title: heldText
-        ? `${heldText} Play jumps to your cue.`
-        : currentLine
-          ? `${who ? who + ": " : ""}${currentLine.text}`.slice(0, 120)
-          : data.production.title,
+      title: currentLine ? `${who ? who + ": " : ""}${currentLine.text}`.slice(0, 120) : data.production.title,
       artist: data.production.title,
       album: section?.title ?? "Listen",
       playing: state.playing,
     });
-  }, [currentLine, characterName, data, state.playing, lockScreen, heldText]);
+  }, [currentLine, characterName, data, state.playing, lockScreen]);
 
   if (rt.loading) return <Loading />;
   if (rt.error || !data) {
@@ -321,19 +290,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   const roleName = settings.role === MY_PART ? ownNames || "your part" : (characterName.get(settings.role) ?? "");
   const currentMode = MODES.find((m) => m.mode === settings.mode) ?? MODES[0];
 
-  const jumpToMine = (index: number) => {
-    if (!engine) return;
-    setFollowing(true);
-    engine.seekToSegment(index, state.playing);
-    const n = myLineNumber(stops, index);
-    const scene = sections.find((s) => s.id === queue[index]?.sectionId)?.title;
-    const said = `Your line ${n} of ${stops.length}${scene ? `, ${scene}` : ""}.`;
-    // The same words twice are still read out: they differ by a trailing space.
-    setJumpNote((before) => (before === said ? `${said} ` : said));
-  };
-  const nextMineAt = hasAudio ? nextMine(stops, state.index) : null;
-  const previousMineAt = hasAudio ? previousMine(stops, state.index) : null;
-
   const onLineTap = (line: Line) => {
     if (!engine || !hasAudio) return;
     const index = segmentByLine.get(line.id) ?? queue.findIndex((q) => (lineById.get(q.lineId)?.seq ?? 0) > line.seq);
@@ -343,7 +299,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   };
 
   return (
-    <div ref={rootRef} className={`player ${hasRole ? "is-my-part" : ""} ${stops.length > 0 ? "has-my-lines" : ""}`}>
+    <div ref={rootRef} className={`player ${hasRole ? "is-my-part" : ""}`}>
       <audio ref={audioRef} preload="auto" playsInline />
 
       {/* One row pinned to the top: who you are, what happens on your lines, and the scene. */}
@@ -388,13 +344,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
               </option>
             ))}
           </BarSelect>
-        )}
-        {hasRole && (
-          <button type="button" className="skip-toggle" aria-pressed={autoSkip} onClick={() => update({ autoSkip: !autoSkip })}>
-            <FastForward size={16} aria-hidden="true" />
-            <span className="rt-long">Skip to my cues</span>
-            <span className="rt-short">Skip to cues</span>
-          </button>
         )}
         <SectionNav
           sections={sceneChoices}
@@ -506,27 +455,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
         <p className="small muted player-note" role="status" aria-live="polite">
           {note}
         </p>
-        {held && (
-          <div className="held-prompt raised" role="group" aria-label="Long stretch ahead">
-            <p className="held-text">{heldText}</p>
-            <div className="held-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => engine?.keepListening()}>
-                Keep listening
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => {
-                  setFollowing(true);
-                  engine?.play();
-                }}
-              >
-                Jump to my next cue
-              </button>
-            </div>
-          </div>
-        )}
-        {!following && currentSegment && !held && (
+        {!following && currentSegment && (
           <button
             type="button"
             className="back-to-current"
@@ -536,14 +465,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
           >
             <Crosshair size={16} aria-hidden="true" /> Back to current line
           </button>
-        )}
-        {stops.length > 0 && (
-          <MyLineNav
-            number={myLineNumber(stops, state.index)}
-            total={stops.length}
-            onPrevious={previousMineAt === null ? null : () => jumpToMine(previousMineAt)}
-            onNext={nextMineAt === null ? null : () => jumpToMine(nextMineAt)}
-          />
         )}
         <SpeedButton note={hasRole ? "Only other people's lines change speed. Your own lines, and the pauses to say them, stay at 1×." : undefined} />
         <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">
@@ -569,10 +490,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
       </div>
 
       <p className="sr-only" aria-live="polite">
-        {state.gap ? "Your line. Say it now." : held ? `Paused. ${heldText} Play jumps to your cue.` : ""}
-      </p>
-      <p className="sr-only" aria-live="polite">
-        {jumpNote}
+        {state.gap ? "Your line. Say it now." : ""}
       </p>
     </div>
   );
@@ -609,6 +527,6 @@ function BarSelect({
   );
 }
 
-const IDLE: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false, interrupted: false, held: null };
+const IDLE: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false, interrupted: false };
 const initialState = () => IDLE;
 const noopSubscribe = () => () => {};

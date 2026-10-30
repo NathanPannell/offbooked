@@ -1,20 +1,16 @@
 import type { SpokenSegment, TrackItem } from "../api/types";
 import { applySpeed, clampSpeed } from "../audio/speed";
-import type { Jump } from "./autoSkip";
 import type { Clip, ClipLoader } from "./clips";
-import { fastForwardUrl } from "./fastForward";
 import {
   gapBetweenMs,
   isMine,
   nextIndex,
   NO_PART,
-  pauseBetweenMs,
   playableFrom,
   prefetchWindow,
   previousIndex,
   sameLines,
   samePart,
-  skipsTo,
   stepFor,
   type Part,
   type QueueLine,
@@ -45,11 +41,6 @@ export interface PlayerState {
    * the browser refused the next source, or the system paused it. Cleared once it plays again.
    */
   interrupted: boolean;
-  /**
-   * "Skip to my cues" stopped the play after the listener's line, before a very long stretch
-   * (autoSkip.ts): play() jumps to the cue of their next line, keepListening() plays on.
-   */
-  held: Jump | null;
 }
 
 /** A listen track as the server gives it (see ListenTrack in api/types.ts). */
@@ -103,8 +94,7 @@ type Phase =
   | { kind: "wait"; index: number; afterSpeak: boolean } // the clip is loading; a short silence loops meanwhile
   | { kind: "speak"; index: number; durationMs: number; then: "read" | "next" } // the listener says their line; then it plays, or the next one does
   | { kind: "pause"; index: number; next: number } // the pause between two lines
-  | { kind: "track"; index: number } // playing from a listen track; the line follows its time
-  | { kind: "held"; index: number; jump: Jump }; // stopped after the listener's line, before a long stretch
+  | { kind: "track"; index: number }; // playing from a listen track; the line follows its time
 
 /** Recorded takes time the listener's pause; TTS and silent lines are timed from their words. */
 const recorded = (source: string | undefined) => source === "actor" || source === "director";
@@ -134,7 +124,7 @@ export class PlayerEngine {
   private token = 0;
   private retried = new Set<string>();
   private switchedAt = 0;
-  private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false, interrupted: false, held: null };
+  private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false, interrupted: false };
   /** Listen tracks ready to play: the one playing (if any) and the newest. */
   private tracks: LoadedTrack[] = [];
   /** The track whose file is on the element, while the phase is "track". */
@@ -190,13 +180,6 @@ export class PlayerEngine {
     if (!samePart(before, part) && this.tracks.length) this.clearTracks();
     const phase = this.phase;
     if (!phase) return;
-    // Held, and the stretch no longer stops ("Skip to my cues" turned off): on to the next line, or
-    // where a skip now lands, paused.
-    if (phase.kind === "held") {
-      const jump = part.jumps?.get(phase.index);
-      if (jump?.kind !== "stop") this.startLine(jump?.kind === "skip" ? jump.to : phase.index + 1, false);
-      return;
-    }
     if (phase.kind === "track") {
       this.syncTrack();
       return;
@@ -246,10 +229,8 @@ export class PlayerEngine {
       if (!first.has(item.index)) first.set(item.index, i);
     });
     const track: LoadedTrack = { url: source.url, key, items, first, lastIndex: items[items.length - 1]!.index, at: Date.now() };
-    // Keep the one playing and the newest other one (the stretch after a "Skip to my cues" stop
-    // is asked for while the one before it plays); a newer one replaces any older.
-    const others = this.tracks.filter((t) => t !== this.current);
-    this.tracks = [...this.tracks.filter((t) => t === this.current), ...others.slice(-1), track];
+    // Keep the one playing; a newer one replaces any other.
+    this.tracks = [...this.tracks.filter((t) => t === this.current), track];
   }
 
   /** Drops every track; if one is playing, carries on line by line from the current line. */
@@ -281,7 +262,6 @@ export class PlayerEngine {
       case "wait":
         return { index: phase.index, kind: phase.afterSpeak ? "after" : "before", timeMs: 0, durationMs: 0 };
       case "pause":
-      case "held":
         return { index: phase.index, kind: "after", timeMs: 0, durationMs: 0 };
       case "track": {
         const item = this.trackItem();
@@ -309,11 +289,6 @@ export class PlayerEngine {
   /** Call from a tap: starts audio inside the gesture, which unlocks the element on iOS. */
   play() {
     if (!this.hasLines) return;
-    // Held before a long stretch: play (a tap, or the lock screen's) makes the jump.
-    if (this.phase?.kind === "held") {
-      this.startLine(this.phase.jump.to, true);
-      return;
-    }
     if (!this.phase || this.state.ended) {
       const from = this.state.ended || this.state.index < 0 ? 0 : this.state.index;
       this.startLine(from, true);
@@ -352,14 +327,8 @@ export class PlayerEngine {
     if (this.lines[index]) this.startLine(index, autoplay);
   }
 
-  /** Held before a long stretch: plays on through it instead of jumping. */
-  keepListening() {
-    if (this.phase?.kind === "held") this.startLine(this.phase.jump.from + 1, true);
-  }
-
-  /** The next line in the script, even where "Skip to my cues" would skip it. */
   next() {
-    const index = nextIndex(this.lines, Math.max(this.state.index, -1));
+    const index = nextIndex(this.lines, Math.max(this.state.index, -1), this.part);
     if (index === null) return;
     this.seekToSegment(index, this.state.playing);
   }
@@ -367,13 +336,7 @@ export class PlayerEngine {
   previous() {
     const phase = this.phase;
     const elapsed =
-      phase?.kind === "track"
-        ? this.trackElapsedMs()
-        : phase?.kind === "line"
-          ? this.audio.currentTime * 1000
-          : phase?.kind === "pause" || phase?.kind === "held"
-            ? Infinity
-            : 0;
+      phase?.kind === "track" ? this.trackElapsedMs() : phase?.kind === "line" ? this.audio.currentTime * 1000 : phase?.kind === "pause" ? Infinity : 0;
     const index = previousIndex(this.state.index, elapsed);
     this.seekToSegment(index, this.state.playing);
   }
@@ -423,13 +386,13 @@ export class PlayerEngine {
     if (index === null) {
       this.phase = null;
       this.audio.pause();
-      this.set({ index: this.lines.length - 1, playing: false, ended: true, gap: null, waiting: false, held: null });
+      this.set({ index: this.lines.length - 1, playing: false, ended: true, gap: null, waiting: false });
       return;
     }
     const line = this.lines[index]!;
     // Only a play clears `interrupted`: a move while stopped (a clip that arrives after a refused
     // play, a seek) leaves the note for when the listener is back.
-    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false, onTrack: false, held: null, ...(autoplay ? { interrupted: false } : {}) });
+    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false, onTrack: false, ...(autoplay ? { interrupted: false } : {}) });
     const track = this.trackFor(index);
     if (autoplay && track) {
       this.playTrackAt(index, track);
@@ -490,7 +453,7 @@ export class PlayerEngine {
       this.startLine(phase.next, true);
       return;
     }
-    if (phase.kind === "wait" || phase.kind === "held") return;
+    if (phase.kind === "wait") return;
     if (phase.kind === "speak") {
       this.set({ gap: null });
       // The listener has had their turn; now their line plays ("pause"), or the play moves on ("skip").
@@ -499,32 +462,16 @@ export class PlayerEngine {
         return;
       }
     }
-    this.advanceFrom(phase.index);
-  };
-
-  /**
-   * After line `from`: the pause and the next line, the fast-forward sound and the cue a skip lands
-   * on, or a stop before a very long stretch ("Skip to my cues"). The end of the play stops.
-   */
-  private advanceFrom(from: number) {
-    const jump = this.part.jumps?.get(from);
-    if (jump?.kind === "stop") {
-      this.phase = { kind: "held", index: from, jump };
-      // Not playing first: the pause below is the engine's own, not an interruption.
-      this.set({ index: from, playing: false, gap: null, held: jump });
-      this.audio.pause();
-      return;
-    }
-    const next = nextIndex(this.lines, from, this.part);
+    const next = nextIndex(this.lines, phase.index, this.part);
     if (next === null) {
       this.phase = null;
       this.set({ playing: false, ended: true });
       return;
     }
-    if (this.enterTrackBefore(from, next)) return;
-    this.phase = { kind: "pause", index: from, next };
-    this.playUrl(skipsTo(this.part, from, next) ? fastForwardUrl() : silenceUrl(gapBetweenMs(this.lines, from, next)));
-  }
+    if (this.enterTrackBefore(phase.index, next)) return;
+    this.phase = { kind: "pause", index: phase.index, next };
+    this.playUrl(silenceUrl(gapBetweenMs(this.lines, phase.index, next)));
+  };
 
   private onPlay = () => {
     if (this.phase?.kind === "track") {
@@ -622,11 +569,7 @@ export class PlayerEngine {
   private enterTrackBefore(from: number, next: number): boolean {
     const track = this.trackFor(next);
     if (!track) return false;
-    const slot = track.first.get(next)!;
-    // Only where the track has `from` just before `next`: a skip makes the track jump where line by
-    // line doesn't (or the other way round), and its pause is then another one.
-    if (track.items[slot - 1]?.index !== from) return false;
-    const atMs = track.items[slot]!.startMs - pauseBetweenMs(this.lines, from, next, this.part);
+    const atMs = track.items[track.first.get(next)!]!.startMs - gapBetweenMs(this.lines, from, next);
     if (atMs < 0) return false;
     ++this.token;
     this.playTrackAt(next, track, atMs);
@@ -743,9 +686,16 @@ export class PlayerEngine {
   private trackEnded() {
     const last = this.current?.lastIndex ?? this.state.index;
     this.set({ onTrack: false, gap: null });
-    // A newer track that already covers the end of this one goes on from inside it (one new
-    // source); a track that ends before a long stretch stops there (see advanceFrom).
-    this.advanceFrom(last);
+    const next = nextIndex(this.lines, last, this.part);
+    if (next === null) {
+      this.phase = null;
+      this.set({ playing: false, ended: true });
+      return;
+    }
+    // A newer track that already covers the end of this one goes on from inside it: one new source.
+    if (this.enterTrackBefore(last, next)) return;
+    this.phase = { kind: "pause", index: last, next };
+    this.playUrl(silenceUrl(gapBetweenMs(this.lines, last, next)));
   }
 
   /** Off the track (it changed or failed): the current line again, line by line. */

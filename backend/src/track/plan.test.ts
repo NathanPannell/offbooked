@@ -126,25 +126,3 @@ test("the listener's pause matches the player's: a take's length plus a little, 
   assert.equal(myLinePauseMs("Go [Exit] now.", null), 1000);
   assert.equal(spokenText("To be [aside] or not {beat} to be").replace(/\s+/g, " "), "To be or not to be");
 });
-
-test("after a skip, the fast-forward sound takes the place of the pause before the line it lands on", () => {
-  const plan = planTrack(
-    [line("m", "s1", clip("m", 1000)), line("cue", "s1", clip("cue", 500)), line("n", "s2", clip("n", 500))],
-    new Set(["m", "n"]),
-    "read",
-    new Set(["m"]),
-  );
-  assert.deepEqual(
-    plan.items.map((i) => [i.lineId, i.startMs]),
-    [
-      ["m", 0],
-      ["cue", 1700],
-      ["n", 3400],
-    ],
-  );
-  assert.deepEqual(plan.pieces.slice(0, 3), [
-    { kind: "clip", key: "clips/m.m4a", samples: 48_000 },
-    { kind: "fastForward", samples: 700 * 48 },
-    { kind: "clip", key: "clips/cue.m4a", samples: 24_000 },
-  ]);
-});

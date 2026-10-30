@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import type { LineAudioApi, ListenTrack, ListenTrackRequest } from "../api/types";
-import type { Jump } from "./autoSkip";
 import { TRACK_URL_FRESH_MS, type PlayerEngine } from "./engine";
 import { nextIndex, playableFrom, sameLines, samePart, type Part, type QueueLine } from "./queue";
 
@@ -11,8 +10,6 @@ import { nextIndex, playableFrom, sameLines, samePart, type Part, type QueueLine
 // isn't ready, play starts line by line and the engine moves onto the track at the next line once
 // it is. Stretches start every TRACK_STRIDE lines, the ones built ahead; near the end of one the
 // next is asked for, and a jump outside it, or a change of part or mode, asks again from there.
-// With "Skip to my cues" a stretch is this listener's own (it leaves lines out and may end at a
-// stop), so nothing is built ahead for it: it starts at their line and is built when asked for.
 
 /** The most lines one track covers (the server's MAX_TRACK_LINES). */
 export const TRACK_LINES = 300;
@@ -38,31 +35,12 @@ export const MAX_TRIES = 3;
 
 export type TrackStatus = "off" | "building" | "ready" | "failed";
 
-/**
- * The request for the stretch starting at `index`: up to TRACK_LINES lines in playback order. With
- * "Skip to my cues", the lines a skip leaves out aren't in it (`skips` says where the fast-forward
- * sound goes), and it ends at a stop: what follows is asked for on its own (see stopAfter).
- */
+/** The request for the stretch starting at `index`: up to TRACK_LINES lines in playback order. */
 export function trackWindow(queue: QueueLine[], index: number, part: Part, max = TRACK_LINES): ListenTrackRequest {
   const lineIds: string[] = [];
-  const skips: string[] = [];
-  for (let i = playableFrom(queue, index, part); i !== null && lineIds.length < max; i = nextIndex(queue, i, part)) {
-    lineIds.push(queue[i]!.lineId);
-    const jump = part.jumps?.get(i);
-    if (jump?.kind === "stop") break;
-    if (jump?.kind === "skip" && lineIds.length < max) skips.push(queue[i]!.lineId);
-  }
+  for (let i = playableFrom(queue, index, part); i !== null && lineIds.length < max; i = nextIndex(queue, i, part)) lineIds.push(queue[i]!.lineId);
   const mine = part.mine ? lineIds.filter((id) => part.mine!.has(id)) : [];
-  return { lineIds, mine, mode: mine.length ? part.mode : "read", ...(skips.length ? { skips } : {}) };
-}
-
-/** Where a stretch asked for from `index` ends, as [start, end) line indexes, and the stop it ends at. */
-export function windowSpan(queue: QueueLine[], index: number, part: Part, req: ListenTrackRequest): { start: number; end: number; stop: Jump | null } {
-  const last = req.lineIds[req.lineIds.length - 1];
-  let end = index;
-  while (end < queue.length && queue[end]!.lineId !== last) end++;
-  const jump = part.jumps?.get(end);
-  return { start: index, end: end + 1, stop: jump?.kind === "stop" ? jump : null };
+  return { lineIds, mine, mode: mine.length ? part.mode : "read" };
 }
 
 /**
@@ -86,31 +64,24 @@ export function needsTrack(reach: number | null, index: number, queueLength: num
 
 /**
  * Where to ask for a stretch from, for a listener at `index`, or null to keep the one asked for:
- * it covers them (to its stop, or to where the next one is asked for) and its URL is fresh, or the
- * engine has a track that covers them for a while yet. `reach`: the last line of the engine's track
- * for `index`. From the grid of tracks built ahead, unless "Skip to my cues" plans jumps: a grid
- * line may be on the far side of a stop from the listener, so those stretches start at their line.
+ * it is still this one's stretch (same lines, part and mode) and its URL is fresh, or the engine has
+ * a track that covers them for a while yet. `reach`: the last line of the engine's track for `index`.
  */
 export function stretchToAsk(
-  asked: { queue: QueueLine[]; part: Part; start: number; end: number; stop: Jump | null; at: number } | null,
+  asked: { queue: QueueLine[]; part: Part; start: number; at: number } | null,
   queue: QueueLine[],
   part: Part,
   index: number,
   reach: number | null,
   now = Date.now(),
 ): number | null {
-  const start = part.jumps?.size ? index : trackStart(index, queue.length);
-  if (!asked || !sameLines(asked.queue, queue) || !samePart(asked.part, part)) return start;
-  const coverEnd = asked.stop || asked.end >= queue.length ? asked.end : asked.end - REFRESH_LINES;
-  // Asked on open, hours before play: again, for a URL the engine will still use.
-  if (index >= asked.start && index < coverEnd) return now - asked.at > TRACK_URL_FRESH_MS ? asked.start : null;
-  if (!asked.stop && !needsTrack(reach, index, queue.length)) return null;
+  const start = trackStart(index, queue.length);
+  if (asked && sameLines(asked.queue, queue) && samePart(asked.part, part)) {
+    // Asked on open, hours before play: again, for a URL the engine will still use.
+    if (asked.start === start) return now - asked.at > TRACK_URL_FRESH_MS ? start : null;
+    if (!needsTrack(reach, index, queue.length)) return null;
+  }
   return start;
-}
-
-/** Where to fetch the stretch after a stop from, once the listener at `index` nears the stop that stretch `job` ends at. */
-export function stopToFetch(job: { end: number; stop: Jump | null } | null, index: number): number | null {
-  return job?.stop && index >= job.end - REFRESH_LINES ? job.stop.to : null;
 }
 
 /** One stretch being asked for: cancelled when the listener moves on, the player goes, or it gives up. */
@@ -125,11 +96,6 @@ interface Job extends Poll {
   /** The first line of the stretch asked for, and when (Date.now()). */
   start: number;
   at: number;
-  end: number;
-  /** It ends at a "Skip to my cues" stop: the stretch after the jump is asked for separately. */
-  stop: Jump | null;
-  ready?: boolean;
-  failed?: boolean;
 }
 
 /**
@@ -177,69 +143,35 @@ export function useListenTrack(opts: {
   const { engine, api, queue, part, index, active, playing } = opts;
   const [status, setStatus] = useState<TrackStatus>("off");
   // The request in flight (or the last one), kept across renders.
-  // The request in flight (or the last one), kept across renders, and the one for the stretch
-  // after a stop it ends at.
-  const [box] = useState<{ job: Job | null; ahead: Job | null }>(() => ({ job: null, ahead: null }));
+  const [box] = useState<{ job: Job | null }>(() => ({ job: null }));
 
   useEffect(() => {
     const ask = api.track;
     if (!engine || !ask || !active || index < 0 || !queue.length) return;
-    const same = (job: Job | null): job is Job => Boolean(job && !job.cancelled && sameLines(job.queue, queue) && samePart(job.part, part));
-    const start = (from: number, main: boolean): Job | null => {
-      const req = trackWindow(queue, from, part);
-      if (!req.lineIds.length) return null;
-      const job: Job = { queue, part, ...windowSpan(queue, from, part, req), at: Date.now(), cancelled: false };
-      if (main) setStatus("building");
-      pollTrack(job, ask, req, {
-        ready: (track) => {
-          job.ready = true;
-          engine.addTrack(track);
-          if (box.job === job) setStatus("ready");
-        },
-        failed: () => {
-          job.failed = true;
-          if (box.job === job) setStatus("failed");
-        },
-      });
-      return job;
-    };
-
-    // A stretch fetched ahead of a stop that no longer fits (the skips or the part changed).
-    if (box.ahead && !same(box.ahead)) {
-      cancel(box.ahead);
-      box.ahead = null;
-    }
-
-    const askMain = () => {
-      const current = box.job;
-      const from = stretchToAsk(current && !current.cancelled ? current : null, queue, part, index, engine.trackReach(index));
-      if (from === null) return;
-      if (current) cancel(current);
-      // The stretch after a stop, already asked for: it is the one now.
-      const ahead = box.ahead;
-      if (same(ahead) && ahead.start === from) {
-        box.job = ahead;
-        box.ahead = null;
-        setStatus(ahead.ready ? "ready" : ahead.failed ? "failed" : "building");
-        return;
-      }
-      box.job = start(from, true);
-    };
-    askMain();
-
-    // Near a stop, the stretch after the jump, so the jump needs no request with the phone locked.
-    const after = stopToFetch(box.job, index);
-    if (after !== null && !(same(box.ahead) && box.ahead.start === after)) {
-      if (box.ahead) cancel(box.ahead);
-      box.ahead = start(after, false);
-    }
+    const current = box.job;
+    // Ask again only once the listener is in another stretch (near the end of this one, or a jump)
+    // and the engine has no track that covers them for a while yet, or the part, mode or script changed.
+    const start = stretchToAsk(current && !current.cancelled ? current : null, queue, part, index, engine.trackReach(index));
+    if (start === null) return;
+    if (current) cancel(current);
+    const req = trackWindow(queue, start, part);
+    if (!req.lineIds.length) return;
+    const next: Job = { queue, part, start, at: Date.now(), cancelled: false };
+    box.job = next;
+    setStatus("building");
+    pollTrack(next, ask, req, {
+      ready: (track) => {
+        engine.addTrack(track);
+        setStatus("ready");
+      },
+      failed: () => setStatus("failed"),
+    });
   }, [engine, api, queue, part, index, active, playing, box]);
 
   // Stop asking when the player goes.
   useEffect(
     () => () => {
       if (box.job) cancel(box.job);
-      if (box.ahead) cancel(box.ahead);
     },
     [box],
   );

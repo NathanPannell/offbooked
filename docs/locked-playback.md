@@ -14,10 +14,6 @@ What the listen-through does on the plain mobile website (iOS Safari, Android Ch
 
 It does what it does on screen: the cue plays, then a silence as long as the line takes to say (the countdown is only on screen), then the line is read so the listener can check themselves. That silence is the prompt; nothing is added for screen-off listening. "Skip" leaves the silence alone, "Read" plays the line.
 
-## "Skip to my cues" with the screen off
-
-The skips are in the track, which is the listener's own, so it isn't built ahead: it is asked for from their line when the player opens and built then. The server leaves out the lines a skip passes over and plays the fast-forward sound in place of the pause (`skips` in the track request), so a locked phone skips without a new source. A stop before a very long stretch ends the track there; the player pauses (the lock screen shows it paused, its title saying where the next line is) and asks for the stretch after the jump as the listener nears the stop, so pressing play on the lock screen lands on a track that is already built. If it isn't ready yet, the jump starts line by line, which a locked iPhone may refuse until the screen is on.
-
 ## What the listener sees
 
 Under the player's controls, while it plays:
