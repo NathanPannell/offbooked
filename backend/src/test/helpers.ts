@@ -64,6 +64,8 @@ export async function createTestApp(
     RENDER_DEBOUNCE_MS: "0",
     // Tests that upload takes don't need ffmpeg behind each one; the ones about it turn it on.
     NORMALIZE_ON_UPLOAD: "0",
+    // Nor tracks built ahead after every take and edit; track/prebuild.test.ts turns it on.
+    PREBUILD_TRACKS: "0",
     ...opts.env,
   });
   const mailer = new LogMailer(silentLog);

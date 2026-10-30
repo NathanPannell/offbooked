@@ -3,6 +3,7 @@ import type { Ctx } from "./context.ts";
 import type { Sql } from "./db.ts";
 import { PARSE_MODEL } from "./parse/label.ts";
 import { checkCastComplete } from "./render/queue.ts";
+import { prebuildTracks } from "./track/prebuild.ts";
 
 // Shared lines: lines several characters say together. sync_shared_lines (migration 011) works out
 // groups from character names and gives each shared line its voices: a named group's members, or,
@@ -82,6 +83,7 @@ export async function afterCastChange(ctx: Ctx, productionId: string): Promise<v
   inferInBackground(ctx, productionId);
   // A line deleted or joined, or a duplicate part merged, can leave every picked part recorded.
   checkCastComplete(ctx, productionId);
+  prebuildTracks(ctx, productionId, "edit");
 }
 
 export function inferInBackground(ctx: Ctx, productionId: string): void {

@@ -10,6 +10,7 @@ import { probeDurationSeconds } from "./render/ffmpeg.ts";
 import { checkCastComplete } from "./render/queue.ts";
 import { normalizeSoon } from "./render/takeaudio.ts";
 import { ContentDeletedError, sweepIfDeleted } from "./retention.ts";
+import { prebuildTracks } from "./track/prebuild.ts";
 import { takeColumns, takeView, type TakeRow } from "./views.ts";
 
 // Take uploads, shared by the actor endpoint and the director's endpoint: same body,
@@ -139,7 +140,10 @@ export async function acceptTake(ctx: Ctx, req: FastifyRequest, u: TakeUpload) {
     if (inserted) await tx`update lines set current_take_id = ${id}, updated_at = now() where id = ${u.lineId}`;
     return !!inserted;
   });
-  if (created) normalizeSoon(ctx, u.productionId, { id, storageKey: key, normalizedKey: null, normalizedSamples: null, streamKey: null });
+  if (created) {
+    normalizeSoon(ctx, u.productionId, { id, storageKey: key, normalizedKey: null, normalizedSamples: null, streamKey: null });
+    prebuildTracks(ctx, u.productionId, "take");
+  }
   return respond(true);
 }
 
@@ -159,6 +163,7 @@ export async function setTakeDeleted(ctx: Ctx, takeId: string, deleted: boolean)
   });
   // Putting a take back can complete the cast.
   if (take && !deleted) checkCastComplete(ctx, take.productionId);
+  if (take) prebuildTracks(ctx, take.productionId, "take");
 }
 
 const PARTS_DIR = path.join(tmpdir(), "offbooked-take-parts");

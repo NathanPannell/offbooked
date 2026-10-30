@@ -19,9 +19,10 @@ import { MY_LINE_MODES, planTrack, type MyLineMode, type TrackItem } from "./pla
 // player still starts line by line (at once) and moves onto the track at the next line once it is
 // built; moving between lines within it is a seek.
 //
-// Built in-process on request, one at a time, from the same .m4a clips line-by-line playback
-// serves (so nothing is synthesized or normalized twice), each cut or padded to its exact length,
-// then encoded once. Cached by a hash of everything that goes into it.
+// Built in-process, one at a time, from the same .m4a clips line-by-line playback serves (so
+// nothing is synthesized or normalized twice), each cut or padded to its exact length, then encoded
+// once. Cached by a hash of everything that goes into it. Built on request, and ahead of time for
+// the usual listens (prebuild.ts); a listener's request goes before the ones built ahead.
 
 export const TRACK_SETTINGS = { version: 1, bitrate: "64k" } as const;
 /** The most lines one track covers (about 20 to 30 minutes of a play). */
@@ -36,7 +37,20 @@ const BUILD_WAIT_MS = 5 * 60_000;
  */
 export const RETRY_FAILED_MS = 10 * 60_000;
 /** Tracks nobody has asked for in this long are deleted (rows and files) when another is built. */
-const PRUNE_AFTER_HOURS = 12;
+export const PRUNE_AFTER_HOURS = 12;
+/**
+ * Tracks start every TRACK_STRIDE lines of the play, so the stretch a listener asks for is one built
+ * ahead: a track from line 0, one from 260, one from 520… (the last one ends the play). Each holds
+ * MAX_TRACK_LINES, so it overlaps the next by the 40 lines in which the player asks for the next one
+ * (web/src/player/listenTrack.ts, trackStart; keep them in step).
+ */
+export const TRACK_STRIDE = 260;
+
+/** Where the track for the line at `index` starts, in a play of `count` lines. */
+export function trackStart(index: number, count: number): number {
+  const last = Math.max(0, Math.ceil((count - MAX_TRACK_LINES) / TRACK_STRIDE)) * TRACK_STRIDE;
+  return Math.min(Math.floor(Math.max(0, index) / TRACK_STRIDE) * TRACK_STRIDE, last);
+}
 
 const RATE = RENDER_SETTINGS.sampleRate;
 
@@ -59,7 +73,7 @@ export function trackRequest(raw: unknown): TrackRequest {
   return { lineIds, mine, mode: mode as MyLineMode };
 }
 
-interface LineRow {
+export interface LineRow {
   id: string;
   sectionId: string;
   kind: string;
@@ -70,17 +84,23 @@ interface LineRow {
   takesAt: Date | null;
 }
 
-// Everything that changes what a line sounds like: its text, speaker, voices, current take and the
-// newest change to any of its takes (a shared line plays its voices' takes), plus the settings.
-async function identity(ctx: Ctx, productionId: string, req: TrackRequest): Promise<{ hash: string; lines: LineRow[] }> {
-  const rows = await ctx.sql<LineRow[]>`
+/** A production's playable lines (all of them, in script order, or just `lineIds`) with what goes into a track's hash. */
+export async function trackLines(ctx: Ctx, productionId: string, lineIds?: string[]): Promise<LineRow[]> {
+  return ctx.sql<LineRow[]>`
     select l.id, l.section_id, l.kind, l.text, l.character_id, l.voice_ids, l.current_take_id,
       (select max(greatest(t.created_at, coalesce(t.deleted_at, t.created_at))) from takes t where t.line_id = l.id) as takes_at
     from lines l
-    where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction') and l.id = any(${req.lineIds}::uuid[])`;
+    where l.production_id = ${productionId} and l.kind in ('dialogue', 'stage_direction')
+      ${lineIds ? ctx.sql`and l.id = any(${lineIds}::uuid[])` : ctx.sql``}
+    order by l.seq`;
+}
+
+// Everything that changes what a line sounds like: its text, speaker, voices, current take and the
+// newest change to any of its takes (a shared line plays its voices' takes), plus the settings.
+// `rows` may hold more lines than the request; the track has the requested ones, in its order.
+export function trackIdentity(rows: LineRow[], req: TrackRequest, engine: string | null): { hash: string; lines: LineRow[] } {
   const byId = new Map(rows.map((r) => [r.id, r]));
   const lines = req.lineIds.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
-  const engine = ctx.tts ? await ctx.tts.engine() : null;
   const h = createHash("sha256").update(JSON.stringify({ track: TRACK_SETTINGS, render: RENDER_SETTINGS, engine, mode: req.mode }));
   for (const l of lines) {
     h.update(
@@ -88,6 +108,11 @@ async function identity(ctx: Ctx, productionId: string, req: TrackRequest): Prom
     );
   }
   return { hash: h.digest("hex"), lines };
+}
+
+async function identity(ctx: Ctx, productionId: string, req: TrackRequest): Promise<{ hash: string; lines: LineRow[] }> {
+  const rows = await trackLines(ctx, productionId, req.lineIds);
+  return trackIdentity(rows, req, ctx.tts ? await ctx.tts.engine() : null);
 }
 
 interface TrackRow {
@@ -99,14 +124,87 @@ interface TrackRow {
   updatedAt: Date;
 }
 
-// Builds in progress on this server, by row id, and the one-at-a-time chain they run on.
-const building = new WeakMap<Ctx, Set<string>>();
-const chains = new WeakMap<Ctx, Promise<void>>();
-const inProgress = (ctx: Ctx) => {
-  let set = building.get(ctx);
-  if (!set) building.set(ctx, (set = new Set()));
-  return set;
+// Builds waiting or running on this server, by row id, and the queue they run from: one at a time,
+// a listener's before the ones built ahead (prebuild.ts).
+interface Build {
+  urgent: boolean;
+  done: Promise<void>;
+  start: () => void;
+}
+const builds = new WeakMap<Ctx, { byRow: Map<string, Build>; waiting: Build[]; running: boolean }>();
+const buildsOf = (ctx: Ctx) => {
+  let b = builds.get(ctx);
+  if (!b) builds.set(ctx, (b = { byRow: new Map(), waiting: [], running: false }));
+  return b;
 };
+
+function enqueue(ctx: Ctx, rowId: string, urgent: boolean, run: () => Promise<void>): Promise<void> {
+  const b = buildsOf(ctx);
+  let start!: () => void;
+  const started = new Promise<void>((resolve) => (start = resolve));
+  const build: Build = { urgent, start, done: started.then(run).finally(() => b.byRow.delete(rowId)) };
+  b.byRow.set(rowId, build);
+  b.waiting.push(build);
+  if (!b.running) {
+    b.running = true;
+    ctx.jobs.run("build listen tracks", async () => {
+      try {
+        while (b.waiting.length) {
+          const i = b.waiting.findIndex((w) => w.urgent);
+          const [next] = b.waiting.splice(Math.max(0, i), 1);
+          next!.start();
+          await next!.done.catch(() => undefined);
+        }
+      } finally {
+        b.running = false;
+      }
+    });
+  }
+  return build.done;
+}
+
+/** A build of this row waiting or running here, if any; a listener's request moves a waiting one to the front. */
+function queued(ctx: Ctx, rowId: string, urgent: boolean): Promise<void> | null {
+  const build = buildsOf(ctx).byRow.get(rowId);
+  if (!build) return null;
+  if (urgent) build.urgent = true;
+  return build.done;
+}
+
+/**
+ * Finds the track, or starts its build when there is none. `urgent`: a listener asked, and it goes
+ * first; otherwise it is built ahead (prebuild.ts) and marked `prebuilt`. `done` settles when a
+ * build started or found here is over.
+ */
+export async function claimTrack(
+  ctx: Ctx,
+  productionId: string,
+  hash: string,
+  lines: LineRow[],
+  req: TrackRequest,
+  urgent: boolean,
+): Promise<{ status: TrackView["status"]; row?: TrackRow; done?: Promise<void> }> {
+  const [row] = await ctx.sql<TrackRow[]>`
+    select id, status, storage_key, duration_ms, items, updated_at from listen_tracks where production_id = ${productionId} and hash = ${hash}`;
+  if (row?.status === "ready" && row.storageKey && row.items) return { status: "ready", row };
+  if (row?.status === "building") {
+    const done = queued(ctx, row.id, urgent);
+    if (done) return { status: "building", done };
+  }
+  if (row?.status === "failed" && Date.now() - row.updatedAt.getTime() < RETRY_FAILED_MS) return { status: "failed" };
+  // New, failed a while ago, or left "building" by a restart: (re)build it.
+  const [claimed] = await ctx.sql<{ id: string }[]>`
+    insert into listen_tracks (production_id, hash, status, prebuilt) values (${productionId}, ${hash}, 'building', ${!urgent})
+    on conflict (production_id, hash) do update set status = 'building', error = null, updated_at = now(), used_at = now(),
+      prebuilt = listen_tracks.prebuilt or excluded.prebuilt
+      where listen_tracks.status <> 'ready'
+    returning id`;
+  if (!claimed) return claimTrack(ctx, productionId, hash, lines, req, urgent); // finished meanwhile
+  // Two first requests at once both claim the row: the second leaves the build to the first.
+  const already = queued(ctx, claimed.id, urgent);
+  if (already) return { status: "building", done: already };
+  return { status: "building", done: enqueue(ctx, claimed.id, urgent, () => buildTrack(ctx, productionId, claimed.id, hash, lines, req)) };
+}
 
 /**
  * The track for these lines, part and mode: ready (with its URL and items), still building (ask
@@ -116,33 +214,15 @@ export async function listenTrack(ctx: Ctx, productionId: string, raw: unknown):
   const req = trackRequest(raw);
   const { hash, lines } = await identity(ctx, productionId, req);
   if (!lines.length) throw badRequest("None of those lines can be played.");
-  const [row] = await ctx.sql<TrackRow[]>`
-    select id, status, storage_key, duration_ms, items, updated_at from listen_tracks where production_id = ${productionId} and hash = ${hash}`;
-  if (row?.status === "ready" && row.storageKey && row.items) {
-    await ctx.sql`update listen_tracks set used_at = now() where id = ${row.id}`;
-    return {
-      track: { status: "ready", url: await ctx.storage.signedUrl(row.storageKey, TRACK_URL_TTL_SECONDS), durationMs: row.durationMs ?? 0, items: row.items },
-    };
-  }
-  if (row?.status === "building" && inProgress(ctx).has(row.id)) return { track: { status: "building" } };
-  if (row?.status === "failed" && Date.now() - row.updatedAt.getTime() < RETRY_FAILED_MS) return { track: { status: "failed" } };
-  // New, failed a while ago, or left "building" by a restart: (re)build it.
-  const [claimed] = await ctx.sql<{ id: string }[]>`
-    insert into listen_tracks (production_id, hash, status) values (${productionId}, ${hash}, 'building')
-    on conflict (production_id, hash) do update set status = 'building', error = null, updated_at = now(), used_at = now()
-      where listen_tracks.status <> 'ready'
-    returning id`;
-  if (!claimed) return listenTrack(ctx, productionId, raw); // finished meanwhile
-  // Two first requests at once both claim the row: the second leaves the build to the first.
-  if (inProgress(ctx).has(claimed.id)) return { track: { status: "building" } };
-  inProgress(ctx).add(claimed.id);
-  const run = (chains.get(ctx) ?? Promise.resolve()).then(() => buildTrack(ctx, productionId, claimed.id, hash, lines, req));
-  chains.set(
-    ctx,
-    run.catch(() => undefined),
-  );
-  ctx.jobs.run("build a listen track", () => run);
-  return { track: { status: "building" } };
+  const { status, row } = await claimTrack(ctx, productionId, hash, lines, req, true);
+  if (status !== "ready" || !row) return { track: { status } as TrackView };
+  // Gone meanwhile (an out-of-date prebuilt track nobody had been given): build it again.
+  const [served] = await ctx.sql`
+    update listen_tracks set used_at = now(), served_at = coalesce(served_at, now()) where id = ${row.id} returning id`;
+  if (!served) return listenTrack(ctx, productionId, raw);
+  return {
+    track: { status: "ready", url: await ctx.storage.signedUrl(row.storageKey!, TRACK_URL_TTL_SECONDS), durationMs: row.durationMs ?? 0, items: row.items! },
+  };
 }
 
 async function buildTrack(ctx: Ctx, productionId: string, rowId: string, hash: string, lines: LineRow[], req: TrackRequest): Promise<void> {
@@ -190,17 +270,20 @@ async function buildTrack(ctx: Ctx, productionId: string, rowId: string, hash: s
       update listen_tracks set status = 'failed', error = ${String((err as Error).message).slice(0, 500)}, updated_at = now()
       where id = ${rowId} and status = 'building'`;
   } finally {
-    inProgress(ctx).delete(rowId);
     if (workDir) await rm(workDir, { recursive: true, force: true });
   }
   // Outside the build's try: a prune that fails mustn't mark the track just built as failed.
   if (ready) await pruneTracks(ctx, productionId).catch((err) => ctx.log.warn({ err, productionId }, "pruning listen tracks failed"));
 }
 
-/** Deletes this production's tracks nobody has asked for in a while, rows and files. */
+/**
+ * Deletes this production's tracks nobody has asked for in a while, rows and files. Prebuilt ones
+ * stay while they are current; the prebuild deletes or lets go of them once they aren't.
+ */
 export async function pruneTracks(ctx: Ctx, productionId: string): Promise<number> {
   const gone = await ctx.sql<{ storageKey: string | null }[]>`
-    delete from listen_tracks where production_id = ${productionId} and used_at < now() - ${PRUNE_AFTER_HOURS} * interval '1 hour' and status <> 'building'
+    delete from listen_tracks
+    where production_id = ${productionId} and used_at < now() - ${PRUNE_AFTER_HOURS} * interval '1 hour' and status <> 'building' and not prebuilt
     returning storage_key`;
   const keys = gone.flatMap((g) => (g.storageKey ? [g.storageKey] : []));
   if (keys.length) await ctx.storage.deleteKeys(keys);

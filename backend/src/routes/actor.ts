@@ -11,6 +11,7 @@ import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts
 import { listenTrack } from "../track/track.ts";
 import { takeRecorder, type RecordedBy } from "../recorders.ts";
 import { runThrough } from "../runthrough.ts";
+import { prebuildTracks } from "../track/prebuild.ts";
 import { partCards } from "./join.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
 import { acceptTake, MAX_TAKE_BYTES, setTakeDeleted } from "../takes.ts";
@@ -97,6 +98,7 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
       select c.id from characters c where c.production_id = ${s.production.id} and not c.is_group and c.id = any(${characterIds}::uuid[])`;
     if (rows.length !== characterIds.length) throw badRequest("Some of those parts aren't in this production.");
     await sql`insert into actor_characters ${sql(characterIds.map((characterId) => ({ actorId: s.actor.id, characterId })))} on conflict do nothing`;
+    prebuildTracks(ctx, s.production.id, "part");
     const characters = await sql<{ id: string; name: string }[]>`
       select c.id, c.name from actor_characters ac join characters c on c.id = ac.character_id
       where ac.actor_id = ${s.actor.id} order by lower(c.name)`;
@@ -227,6 +229,8 @@ export function actorRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get("/api/invite/runthrough", async (req) => {
     const s = await requireActor(ctx, req);
+    // About to listen: the usual tracks are built now if anything is missing (track/prebuild.ts).
+    prebuildTracks(ctx, s.production.id, "open");
     return runThrough(ctx, s.production, s.characterIds);
   });
 

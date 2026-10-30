@@ -47,7 +47,7 @@ const VOICE_SWITCH_MS = 200;
 export const TTS_PRIORITY = { play: 0, prefetch: 1, cue: 2, render: 3 } as const;
 export type TtsPriority = (typeof TTS_PRIORITY)[keyof typeof TTS_PRIORITY];
 
-interface Ticket {
+export interface Ticket {
   priority: number;
   seq: number;
   start: (() => void) | null; // set while waiting

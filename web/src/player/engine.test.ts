@@ -3,7 +3,8 @@ import type { LineAudio, LineAudioApi, TrackItem } from "../api/types";
 import { SPEEDS } from "../audio/speed";
 import { ClipLoader } from "./clips";
 import { PlayerEngine } from "./engine";
-import type { Part, QueueLine } from "./queue";
+import { pollTrack, stretchToAsk, trackWindow } from "./listenTrack";
+import { NO_PART, type Part, type QueueLine } from "./queue";
 
 // A stand-in for <audio>: records what plays and at what rate; tests end each clip by hand.
 class FakeAudio extends EventTarget {
@@ -380,6 +381,31 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     expect(audio.current.src).toBe("track:1");
     expect(audio.currentTime).toBe(0);
     expect(engine.getState().onTrack).toBe(true);
+  });
+
+  it("with the track built ahead and asked for when the player opens, the first play is on it and waits for no line", async () => {
+    const { audio, engine, calls } = setup();
+    const track = trackOf(["a", "b", "c", "d", "e", "f"]);
+    // What useListenTrack does on open, before play: the opening stretch, ready at the first ask.
+    const start = stretchToAsk(null, lines, NO_PART, 0, engine.trackReach(0));
+    expect(start).toBe(0);
+    const req = trackWindow(lines, start!, NO_PART);
+    const ask = vi.fn(() => Promise.resolve({ track: { status: "ready" as const, durationMs: 14_000, ...track } }));
+    pollTrack({ cancelled: false }, ask, req, { ready: (t) => engine.addTrack(t), failed: () => {} });
+    await flush();
+    expect(ask).toHaveBeenCalledOnce();
+    expect(ask).toHaveBeenCalledWith({ lineIds: ["a", "b", "c", "d", "e", "f"], mine: [], mode: "read" });
+    const fetchedOnOpen = calls.length;
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    expect(engine.getState()).toMatchObject({ index: 0, onTrack: true, playing: true });
+    audio.currentTime = startOf(track, "c");
+    audio.dispatchEvent(new Event("timeupdate"));
+    expect(engine.getState().index).toBe(2);
+    // Only the opening lines fetched ahead on open, in case the track wasn't ready; nothing since.
+    expect(calls.filter((c) => !c.prefetch)).toEqual([]);
+    expect(calls.length).toBe(fetchedOnOpen);
+    expect(new Set(audio.played.map((p) => p.src))).toEqual(new Set(["track:1"]));
   });
 
   it("reports the line's time inside the track for highlighting, and 'after' in the pause", async () => {

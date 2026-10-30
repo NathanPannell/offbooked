@@ -171,15 +171,11 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     engine?.setSpeed(speed);
   }, [engine, speed]);
 
-  // On the website, once someone presses play, the stretch ahead is built into one file on the
-  // server and playback moves onto it, so it keeps going with the phone locked (listenTrack.ts).
-  // The iOS app plays on with the screen locked natively.
-  const [started, setStarted] = useState(false);
-  useEffect(() => {
-    if (state.playing) setStarted(true);
-  }, [state.playing]);
+  // On the website the stretch ahead plays from one file the server builds (usually ahead of time),
+  // asked for as soon as the player opens, so the first play starts on it and keeps going with the
+  // phone locked (listenTrack.ts). The iOS app plays on with the screen locked natively.
   const onWebsite = useMemo(() => !isNativeApp(), []);
-  const trackStatus = useListenTrack({ engine, api: audio, queue, part, index: state.index, active: started && onWebsite });
+  const trackStatus = useListenTrack({ engine, api: audio, queue, part, index: Math.max(state.index, 0), active: onWebsite });
   const screenNote = lockNote({
     playing: state.playing,
     interrupted: state.interrupted,

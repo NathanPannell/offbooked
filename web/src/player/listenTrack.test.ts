@@ -1,6 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ListenTrack } from "../api/types";
-import { lockNote, MAX_TRIES, needsTrack, POLL_MS, pollTrack, REFRESH_LINES, RETRY_FAILED_MS, trackWindow, type Poll } from "./listenTrack";
+import {
+  lockNote,
+  MAX_TRIES,
+  needsTrack,
+  POLL_MS,
+  pollTrack,
+  REFRESH_LINES,
+  RETRY_FAILED_MS,
+  stretchToAsk,
+  TRACK_LINES,
+  TRACK_STRIDE,
+  trackStart,
+  trackWindow,
+  type Poll,
+} from "./listenTrack";
 import { NO_PART, sameLines, samePart, type QueueLine } from "./queue";
 
 const queue: QueueLine[] = Array.from({ length: 10 }, (_, i) => ({ lineId: `l${i}`, sectionId: i < 5 ? "s1" : "s2", text: "Some words." }));
@@ -25,6 +39,37 @@ describe("when to ask", () => {
     expect(needsTrack(299, 0, 500)).toBe(false);
     expect(needsTrack(299, 299 - REFRESH_LINES + 1, 500)).toBe(true);
     expect(needsTrack(499, 480, 500)).toBe(false);
+  });
+});
+
+describe("where a stretch starts", () => {
+  it("every 260 lines, the ones the server builds ahead, the last one running to the end", () => {
+    expect(TRACK_STRIDE).toBe(TRACK_LINES - REFRESH_LINES);
+    expect([0, 259, 260, 519, 520, 790, 813].map((i) => trackStart(i, 814))).toEqual([0, 0, 260, 260, 520, 520, 520]);
+    expect(trackStart(250, 290)).toBe(0);
+    for (const count of [1, 300, 301, 814, 1806])
+      for (let i = 0; i < count; i++) {
+        const start = trackStart(i, count);
+        expect(i - start).toBeLessThan(TRACK_LINES);
+        expect(start % TRACK_STRIDE).toBe(0);
+      }
+  });
+
+  it("is asked for from the line the play is at before it starts, and again only when the stretch or the listen changes", () => {
+    const long: QueueLine[] = Array.from({ length: 814 }, (_, i) => ({ lineId: `l${i}`, sectionId: "s", text: "Words." }));
+    const part = { mine: new Set(["l3"]), mode: "pause" as const };
+    // Opened, nothing asked yet: the opening stretch, whatever the line.
+    expect(stretchToAsk(null, long, part, 0, null)).toBe(0);
+    expect(stretchToAsk(null, long, part, 140, null)).toBe(0);
+    const asked = { queue: long, part, start: 0 };
+    expect(stretchToAsk(asked, long, part, 200, 299)).toBeNull();
+    // 40 lines before its end: the next stretch, which starts there.
+    expect(stretchToAsk(asked, long, part, 260, 299)).toBe(260);
+    // A jump back into a track the engine already holds asks for nothing.
+    expect(stretchToAsk({ ...asked, start: 260 }, long, part, 100, 299)).toBeNull();
+    // A change of part or mode asks again for the same stretch.
+    expect(stretchToAsk(asked, long, { ...part, mode: "skip" }, 10, 299)).toBe(0);
+    expect(stretchToAsk(asked, long, NO_PART, 10, 299)).toBe(0);
   });
 });
 

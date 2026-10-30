@@ -4,15 +4,25 @@ import type { PlayerEngine } from "./engine";
 import { nextIndex, playableFrom, sameLines, samePart, type Part, type QueueLine } from "./queue";
 
 // Keeps a listen track ready for where the listener is in the play, so the website keeps playing
-// with the phone locked (see PlayerEngine and the server's track/track.ts). The player starts line
-// by line as before; once someone has pressed play, the stretch from the current line is built on
-// the server and the engine moves onto it at the next line. Near its end the next stretch is
-// asked for, and a jump outside it, or a change of part or mode, asks again from there.
+// with the phone locked (see PlayerEngine and the server's track/track.ts). The stretch around the
+// current line is asked for as soon as the player opens, before play: the server builds the usual
+// ones ahead of time (track/prebuild.ts), so the first play usually starts on the track. When it
+// isn't ready, play starts line by line and the engine moves onto the track at the next line once
+// it is. Stretches start every TRACK_STRIDE lines, the ones built ahead; near the end of one the
+// next is asked for, and a jump outside it, or a change of part or mode, asks again from there.
 
 /** The most lines one track covers (the server's MAX_TRACK_LINES). */
 export const TRACK_LINES = 300;
 /** Ask for the next stretch once the listener is this close to the end of the one playing. */
 export const REFRESH_LINES = 40;
+/** Stretches start every this many lines (the server's TRACK_STRIDE), so each overlaps the next by REFRESH_LINES. */
+export const TRACK_STRIDE = TRACK_LINES - REFRESH_LINES;
+
+/** Where the stretch for the line at `index` starts, in a queue of `count` lines (the server's trackStart). */
+export function trackStart(index: number, count: number): number {
+  const last = Math.max(0, Math.ceil((count - TRACK_LINES) / TRACK_STRIDE)) * TRACK_STRIDE;
+  return Math.min(Math.floor(Math.max(0, index) / TRACK_STRIDE) * TRACK_STRIDE, last);
+}
 /** How often to ask again while a track is building. */
 export const POLL_MS = 3000;
 /**
@@ -52,6 +62,26 @@ export function needsTrack(reach: number | null, index: number, queueLength: num
   return reach < queueLength - 1 && reach - index < REFRESH_LINES;
 }
 
+/**
+ * Where to ask for a stretch from, for a listener at `index`, or null to keep the one asked for:
+ * it is still this one's stretch (same lines, part and mode), or the engine has a track that covers
+ * them for a while yet. `reach`: the last line of the engine's track for `index`.
+ */
+export function stretchToAsk(
+  asked: { queue: QueueLine[]; part: Part; start: number } | null,
+  queue: QueueLine[],
+  part: Part,
+  index: number,
+  reach: number | null,
+): number | null {
+  const start = trackStart(index, queue.length);
+  if (asked && sameLines(asked.queue, queue) && samePart(asked.part, part)) {
+    if (asked.start === start) return null;
+    if (!needsTrack(reach, index, queue.length)) return null;
+  }
+  return start;
+}
+
 /** One stretch being asked for: cancelled when the listener moves on, the player goes, or it gives up. */
 export interface Poll {
   timer?: ReturnType<typeof setTimeout>;
@@ -61,9 +91,8 @@ export interface Poll {
 interface Job extends Poll {
   queue: QueueLine[];
   part: Part;
-  /** The stretch asked for, as line indexes [start, end). */
+  /** The first line of the stretch asked for. */
   start: number;
-  end: number;
 }
 
 /**
@@ -95,8 +124,8 @@ export function pollTrack(
 }
 
 /**
- * Asks for listen tracks while `active` (someone has pressed play, on the website) and hands each
- * ready one to the engine. Returns where the newest one stands.
+ * Asks for listen tracks while `active` (the player is open, on the website) and hands each ready
+ * one to the engine. Returns where the newest one stands.
  */
 export function useListenTrack(opts: {
   engine: PlayerEngine | null;
@@ -115,17 +144,14 @@ export function useListenTrack(opts: {
     const ask = api.track;
     if (!engine || !ask || !active || index < 0 || !queue.length) return;
     const current = box.job;
-    // Same script, part and mode as the stretch asked for last: ask again only once the listener
-    // is outside it or near its end, and the engine has no track that covers them for a while yet.
-    if (current && !current.cancelled && sameLines(current.queue, queue) && samePart(current.part, part)) {
-      const coverEnd = current.end < queue.length ? current.end - REFRESH_LINES : queue.length;
-      if (index >= current.start && index < coverEnd) return;
-      if (!needsTrack(engine.trackReach(index), index, queue.length)) return;
-    }
+    // Ask again only once the listener is in another stretch (near the end of this one, or a jump)
+    // and the engine has no track that covers them for a while yet, or the part, mode or script changed.
+    const start = stretchToAsk(current && !current.cancelled ? current : null, queue, part, index, engine.trackReach(index));
+    if (start === null) return;
     if (current) cancel(current);
-    const req = trackWindow(queue, index, part);
+    const req = trackWindow(queue, start, part);
     if (!req.lineIds.length) return;
-    const next: Job = { queue, part, start: index, end: index + req.lineIds.length, cancelled: false };
+    const next: Job = { queue, part, start, cancelled: false };
     box.job = next;
     setStatus("building");
     pollTrack(next, ask, req, {
