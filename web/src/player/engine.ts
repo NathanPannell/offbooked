@@ -292,8 +292,9 @@ export class PlayerEngine {
     }
     const token = this.token;
     this.set({ playing: true, ended: false, interrupted: false });
-    void this.audio.play().catch(() => {
-      if (token === this.token) this.set({ playing: false, interrupted: this.hidden() });
+    void this.audio.play().catch((err: unknown) => {
+      // A pause before it started aborts it: the listener's own, never an interruption.
+      if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false, interrupted: this.hidden() });
     });
   }
 
@@ -375,7 +376,9 @@ export class PlayerEngine {
       return;
     }
     const line = this.lines[index]!;
-    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false, onTrack: false, interrupted: false });
+    // Only a play clears `interrupted`: a move while stopped (a clip that arrives after a refused
+    // play, a seek) leaves the note for when the listener is back.
+    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false, onTrack: false, ...(autoplay ? { interrupted: false } : {}) });
     const track = this.trackFor(index);
     if (autoplay && track) {
       this.playTrackAt(index, track);

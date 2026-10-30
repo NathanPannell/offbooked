@@ -623,6 +623,36 @@ describe("with the phone locked", () => {
     expect(engine.getState()).toMatchObject({ playing: true, interrupted: false });
   });
 
+  it("a clip that arrives after a refused play keeps the interruption for when the listener is back", async () => {
+    let hidden = false;
+    const { audio, engine, held, answer } = setup({ hidden: () => hidden, hold: (id) => id === "b" });
+    await flush();
+    engine.play();
+    await flush();
+    audio.finish(); // a
+    await flush();
+    hidden = true;
+    audio.refuse = true;
+    audio.finish(); // the pause; b isn't here yet, and the wait for it is refused
+    await flush();
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: true, waiting: true });
+    held.filter((h) => h.lineId === "b").forEach((h) => h.resolve(answer("b")));
+    await flush();
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: true });
+  });
+
+  it("a pause before a play has started (AbortError) is the listener's, not an interruption", async () => {
+    const { audio, engine } = setup({ hidden: () => true });
+    await flush();
+    engine.play();
+    await flush();
+    engine.pause();
+    audio.play = () => Promise.reject(new DOMException("aborted by pause", "AbortError"));
+    engine.play();
+    await flush();
+    expect(engine.getState().interrupted).toBe(false);
+  });
+
   it("a refusal on a page that is showing isn't an interruption (no tap yet)", async () => {
     const { audio, engine } = setup({ hidden: () => false });
     await flush();
