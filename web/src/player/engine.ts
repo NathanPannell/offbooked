@@ -36,6 +36,11 @@ export interface PlayerState {
   waiting: boolean;
   /** Playing from a listen track: one long source, which keeps going with the phone locked. */
   onTrack: boolean;
+  /**
+   * Playback stopped without the listener asking while the page was hidden (the phone locked):
+   * the browser refused the next source, or the system paused it. Cleared once it plays again.
+   */
+  interrupted: boolean;
 }
 
 /** A listen track as the server gives it (see ListenTrack in api/types.ts). */
@@ -86,6 +91,8 @@ type Phase =
 /** Recorded takes time the listener's pause; TTS and silent lines are timed from their words. */
 const recorded = (source: string | undefined) => source === "actor" || source === "director";
 
+const pageHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+
 /**
  * Plays the run-through line by line through one <audio> element: each line's clip, then a short
  * silence, then the next. Pauses, the listener's speaking pauses and waits for a clip are silent
@@ -97,6 +104,9 @@ const recorded = (source: string | undefined) => source === "actor" || source ==
  * the play as one file, built by the server for this part and mode), the engine moves onto it at
  * the next line it covers and from then on only seeks: the current line, the gap meter and the
  * speed for each line follow the track's time (timeupdate, and animation frames while visible).
+ * Each move onto a track costs one new source and no more: from a line that ends, the track is
+ * entered in the pause before the next line (when the track holds that pause); a play after a
+ * pause (a tap, or the lock screen's play) carries on from the same moment in the track.
  */
 export class PlayerEngine {
   private lines: QueueLine[] = [];
@@ -106,7 +116,7 @@ export class PlayerEngine {
   private token = 0;
   private retried = new Set<string>();
   private switchedAt = 0;
-  private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false };
+  private state: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false, interrupted: false };
   /** Listen tracks ready to play: the one playing (if any) and the newest. */
   private tracks: LoadedTrack[] = [];
   /** The track whose file is on the element, while the phase is "track". */
@@ -114,11 +124,14 @@ export class PlayerEngine {
   /** Tracks that failed to play, by key: never tried again on this screen. */
   private badTracks = new Set<string>();
   private frame = 0;
+  /** The next item boundary in the track, while it plays (see syncTrack). */
+  private boundary: ReturnType<typeof setTimeout> | undefined;
   private listeners = new Set<() => void>();
 
   constructor(
     private audio: HTMLAudioElement,
     private clips: ClipLoader,
+    private hidden: () => boolean = pageHidden,
   ) {
     audio.addEventListener("ended", this.onEnded);
     audio.addEventListener("play", this.onPlay);
@@ -267,10 +280,21 @@ export class PlayerEngine {
       this.startLine(from, true);
       return;
     }
+    // Paused line by line with a track ready for this point: carry on from the same moment in the
+    // track, so the play needs no new source after this one (the phone may be locked by then).
+    const at = this.trackPoint();
+    if (at) {
+      this.cancelGap();
+      ++this.token;
+      this.set({ playing: true, ended: false, interrupted: false });
+      this.playTrackAt(at.index, at.track, at.ms);
+      return;
+    }
     const token = this.token;
-    this.set({ playing: true, ended: false });
-    void this.audio.play().catch(() => {
-      if (token === this.token) this.set({ playing: false });
+    this.set({ playing: true, ended: false, interrupted: false });
+    void this.audio.play().catch((err: unknown) => {
+      // A pause before it started aborts it: the listener's own, never an interruption.
+      if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false, interrupted: this.hidden() });
     });
   }
 
@@ -314,9 +338,16 @@ export class PlayerEngine {
     }
     // Loading a new src resets playbackRate to defaultPlaybackRate; applySpeed sets both.
     applySpeed(this.audio, opts.rate ?? 1);
+    this.startPlaying(token);
+  }
+
+  /**
+   * Plays the element. A newer src aborts the previous play(); only a refusal stops playback: no
+   * user gesture yet, or (marked `interrupted`) a locked phone that won't start the new source.
+   */
+  private startPlaying(token: number) {
     void this.audio.play().catch((err: unknown) => {
-      // A newer src aborts the previous play(); only a refusal (no user gesture yet) stops playback.
-      if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false });
+      if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false, interrupted: this.hidden() });
     });
   }
 
@@ -345,7 +376,9 @@ export class PlayerEngine {
       return;
     }
     const line = this.lines[index]!;
-    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false, onTrack: false });
+    // Only a play clears `interrupted`: a move while stopped (a clip that arrives after a refused
+    // play, a seek) leaves the note for when the listener is back.
+    this.set({ index, ended: false, gap: null, playing: autoplay, waiting: false, onTrack: false, ...(autoplay ? { interrupted: false } : {}) });
     const track = this.trackFor(index);
     if (autoplay && track) {
       this.playTrackAt(index, track);
@@ -421,13 +454,14 @@ export class PlayerEngine {
       this.set({ playing: false, ended: true });
       return;
     }
+    if (this.enterTrackBefore(phase.index, next)) return;
     this.phase = { kind: "pause", index: phase.index, next };
     this.playUrl(silenceUrl(gapBetweenMs(this.lines, phase.index, next)));
   };
 
   private onPlay = () => {
     if (this.phase?.kind === "track") {
-      this.set({ playing: true, ended: false });
+      this.set({ playing: true, ended: false, interrupted: false });
       this.syncTrack();
       this.startFrames();
       return;
@@ -436,11 +470,13 @@ export class PlayerEngine {
     this.set({
       playing: true,
       ended: false,
+      interrupted: false,
       gap: gap ? { ...gap, endsAt: performance.now() + gap.remainingMs } : null,
     });
   };
 
   private onPause = () => {
+    clearTimeout(this.boundary);
     const gap = this.state.gap;
     if (gap && this.phase?.kind === "track") this.set({ gap: { ...gap, endsAt: null } });
     if (gap && this.phase?.kind === "speak") {
@@ -448,9 +484,10 @@ export class PlayerEngine {
       this.set({ gap: { ...gap, endsAt: null, remainingMs } });
     }
     // The end of each clip, and switching src, pause the element without the listener asking.
-    // Anything else (the OS, a headset button, another tab's audio) stops playback.
-    if (this.audio.ended || performance.now() - this.switchedAt < 150) return;
-    this.set({ playing: false });
+    // Anything else (the OS, a headset button, another tab's audio) stops playback; a pause the
+    // engine made itself (pause(), a seek while paused) has already stopped it.
+    if (this.audio.ended || performance.now() - this.switchedAt < 150 || !this.state.playing) return;
+    this.set({ playing: false, interrupted: this.hidden() });
   };
 
   // A signed URL that expired, or a clip that won't decode: fetch it again once, else skip it.
@@ -486,8 +523,43 @@ export class PlayerEngine {
     return [...this.tracks].reverse().find(covers) ?? null;
   }
 
-  /** Plays the track from this line's first item. Synchronous up to play(), like startLine. */
-  private playTrackAt(index: number, track: LoadedTrack) {
+  /**
+   * Where a line-by-line pause would carry on in a track that covers it: the same moment in the
+   * line's audio or its speaking pause; the start of the line's audio while waiting for it after
+   * that pause; else the start of the line (waiting for it, or in the pause before it). Null when
+   * on a track already or none covers it.
+   */
+  private trackPoint(): { index: number; track: LoadedTrack; ms: number } | null {
+    const phase = this.phase;
+    if (!phase || phase.kind === "track") return null;
+    const index = phase.kind === "pause" ? phase.next : phase.index;
+    const track = this.trackFor(index);
+    if (!track) return null;
+    const kind = phase.kind === "speak" ? "speak" : phase.kind === "line" || (phase.kind === "wait" && phase.afterSpeak) ? "line" : null;
+    const item = kind && track.items.find((i) => i.index === index && i.kind === kind);
+    if (item) {
+      const into = phase.kind === "wait" ? 0 : Math.min(this.audio.currentTime * 1000, item.durationMs);
+      return { index, track, ms: item.startMs + into };
+    }
+    return { index, track, ms: track.items[track.first.get(index)!]!.startMs };
+  }
+
+  /**
+   * After line `from` ends line by line: onto a track that covers `next` and holds the pause
+   * before it, at the start of that pause, so the pause and what follows need no new source.
+   */
+  private enterTrackBefore(from: number, next: number): boolean {
+    const track = this.trackFor(next);
+    if (!track) return false;
+    const atMs = track.items[track.first.get(next)!]!.startMs - gapBetweenMs(this.lines, from, next);
+    if (atMs < 0) return false;
+    ++this.token;
+    this.playTrackAt(next, track, atMs);
+    return true;
+  }
+
+  /** Plays the track from this line's first item, or `atMs` into it. Synchronous up to play(), like startLine. */
+  private playTrackAt(index: number, track: LoadedTrack, atMs?: number) {
     const token = this.token;
     const item = track.items[track.first.get(index)!]!;
     this.phase = { kind: "track", index };
@@ -497,13 +569,11 @@ export class PlayerEngine {
       this.audio.src = track.url;
     }
     this.current = track;
-    this.seek(item.startMs / 1000);
+    this.seek((atMs ?? item.startMs) / 1000);
     this.set({ onTrack: true, waiting: false });
     this.syncTrack();
     this.prefetchPastTrack(index);
-    void this.audio.play().catch((err: unknown) => {
-      if (token === this.token && !(err instanceof DOMException && err.name === "AbortError")) this.set({ playing: false });
-    });
+    this.startPlaying(token);
     this.startFrames();
   }
 
@@ -530,6 +600,12 @@ export class PlayerEngine {
 
   /** The item playing now (or the last one before the gap that is playing). */
   private trackItem(): (TrackItem & { index: number }) | null {
+    const slot = this.trackSlot();
+    return slot === null ? null : this.current!.items[slot]!;
+  }
+
+  /** Where trackItem's item sits in the current track's items. */
+  private trackSlot(): number | null {
     const items = this.current?.items;
     if (!items?.length) return null;
     const ms = this.audio.currentTime * 1000;
@@ -540,14 +616,23 @@ export class PlayerEngine {
       if (items[mid]!.startMs <= ms) lo = mid;
       else hi = mid - 1;
     }
-    return items[lo]!;
+    return lo;
   }
 
-  /** Follows the track's time: the current line, the speed for it, and the listener's pause. */
+  /**
+   * Follows the track's time: the current line, the speed for it, and the listener's pause. Runs on
+   * timeupdate and animation frames, and once more at the next item boundary: with the phone
+   * locked there are no frames and timeupdate comes about 4 times a second, so at 4× up to a second
+   * of the next item would play at the wrong speed (the listener's pause cut short). The timer only
+   * changes the speed and the line shown; playback never waits on it.
+   */
   private syncTrack() {
+    clearTimeout(this.boundary);
+    this.boundary = undefined;
     if (this.phase?.kind !== "track") return;
-    const item = this.trackItem();
-    if (!item) return;
+    const slot = this.trackSlot();
+    if (slot === null) return;
+    const item = this.current!.items[slot]!;
     const ms = this.audio.currentTime * 1000;
     const inside = ms < item.startMs + item.durationMs;
     if (item.index !== this.phase.index || item.index !== this.state.index) {
@@ -565,6 +650,10 @@ export class PlayerEngine {
         this.set({ gap: { index: item.index, durationMs: item.durationMs, endsAt: playing ? performance.now() + remainingMs : null, remainingMs } });
       }
     } else if (gap) this.set({ gap: null });
+    const boundaryMs = inside ? item.startMs + item.durationMs : this.current!.items[slot + 1]?.startMs;
+    if (this.state.playing && boundaryMs !== undefined && boundaryMs > ms) {
+      this.boundary = setTimeout(() => this.syncTrack(), (boundaryMs - ms) / (this.audio.playbackRate || 1) + 1);
+    }
   }
 
   /** Near the end of the track, fetch the lines after it, in case no newer track is ready by then. */
@@ -585,6 +674,8 @@ export class PlayerEngine {
       this.set({ playing: false, ended: true });
       return;
     }
+    // A newer track that already covers the end of this one goes on from inside it: one new source.
+    if (this.enterTrackBefore(last, next)) return;
     this.phase = { kind: "pause", index: last, next };
     this.playUrl(silenceUrl(gapBetweenMs(this.lines, last, next)));
   }
@@ -613,6 +704,7 @@ export class PlayerEngine {
 
   destroy() {
     this.token++;
+    clearTimeout(this.boundary);
     if (this.frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.frame);
     this.audio.removeEventListener("timeupdate", this.onTimeUpdate);
     this.audio.removeEventListener("ended", this.onEnded);
