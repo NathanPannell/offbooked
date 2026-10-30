@@ -2,6 +2,8 @@
 
 Remote line recording and run-through playback for theatre casts. A director uploads a script, shares one link per actor, each actor records their lines on their phone, and the server stitches everything into a lyrics-style run-through. The MVP backlog is in GitHub issues; #1 lists every credential and decision.
 
+`GOALS.md` lists the current goals; a daily status routine reads it from `origin/staging`, so tick a goal off in the same PR as the work that finishes it.
+
 ## Layout
 
 - `backend/`: Node 24 + Fastify API and, later, the ffmpeg render worker. TypeScript runs through Node's type stripping, so there is no build step. `tsc` is for typechecking only.
