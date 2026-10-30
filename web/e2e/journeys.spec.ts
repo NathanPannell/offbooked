@@ -235,6 +235,7 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await second.getByRole("group", { name: "Playback" }).getByRole("button", { name: "Speed 1×" }).click();
   await expect(second.getByRole("dialog", { name: "Playback speed" })).toContainText("Your own lines, and the pauses to say them, stay at 1×.");
   await second.keyboard.press("Escape");
+  await expect(second.getByRole("dialog", { name: "Playback speed" })).toBeHidden();
 
   // Someone who isn't reading skips straight to the listen-through, with no part and no name.
   const listener = await browser.newContext({ ...testInfo.project.use });
@@ -245,6 +246,11 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await expect(ears).toHaveURL(/\/i\/[^/]+\/play$/);
   await expect(ears.getByLabel("Your part")).toHaveValue("");
   await expect(ears.getByLabel("Your lines")).toHaveCount(0);
+  // With no part, everything plays at the speed, so there's nothing to say about lines at 1×.
+  await ears.getByRole("group", { name: "Playback" }).getByRole("button", { name: "Speed 1×" }).click();
+  const earsSheet = ears.getByRole("dialog", { name: "Playback speed" });
+  await expect(earsSheet.getByRole("button", { name: /^4×/ })).toBeVisible();
+  await expect(earsSheet).not.toContainText("stay at 1×");
   await listener.close();
 
   // Picking a part isn't recording it: the call sheet counts parts started by their recordings.
@@ -328,15 +334,14 @@ test("the speed is easy to find: every speed at once, 4× really plays at 4×, r
 
   const play = controls.getByRole("button", { name: "Play", exact: true });
   await expect(play).toBeEnabled();
-  await play.click();
-  const rate = () => page.locator("audio").evaluate((a: HTMLAudioElement) => ({ rate: a.playbackRate, pitch: a.preservesPitch }));
-  await expect.poll(rate).toEqual({ rate: 4, pitch: true });
-  // Not just the setting: the media clock runs four times as fast as the wall clock while a line plays.
-  const measured = await page.locator("audio").evaluate(
+  // Not just the setting: while a line plays, the media clock runs four times as fast as the wall
+  // clock, pitch kept. The scene is short at 4× (about 1.4 s of lines), so watching starts before the tap.
+  const measuring = page.locator("audio").evaluate(
     (a: HTMLAudioElement) =>
-      new Promise<{ media: number; wall: number }>((resolve) => {
+      new Promise<{ media: number; wall: number; pitch: boolean }>((resolve) => {
         let media = 0;
         let wall = 0;
+        let pitch = true;
         let last: { t: number; now: number; src: string } | null = null;
         const start = performance.now();
         const step = () => {
@@ -345,14 +350,18 @@ test("the speed is easy to find: every speed at once, 4× really plays at 4×, r
           if (last && !a.paused && a.playbackRate === 4 && sample.src === last.src && sample.t > last.t) {
             media += sample.t - last.t;
             wall += (now - last.now) / 1000;
+            pitch &&= a.preservesPitch;
           }
           last = sample;
-          if (now - start < 4000 && wall < 0.8) requestAnimationFrame(step);
-          else resolve({ media, wall });
+          if (now - start < 6000 && wall < 0.8) requestAnimationFrame(step);
+          else resolve({ media, wall, pitch });
         };
         requestAnimationFrame(step);
       }),
   );
+  await play.click();
+  const measured = await measuring;
+  expect(measured.pitch).toBe(true);
   expect(measured.wall).toBeGreaterThan(0.3);
   expect(measured.media / measured.wall).toBeGreaterThan(3.2);
   expect(measured.media / measured.wall).toBeLessThan(4.8);
@@ -365,6 +374,7 @@ test("the speed is easy to find: every speed at once, 4× really plays at 4×, r
   await sheet.getByRole("button", { name: /^1.5×/ }).click();
   await expect(speed).toHaveAccessibleName("Speed 1.5×");
   await play.click();
+  const rate = () => page.locator("audio").evaluate((a: HTMLAudioElement) => ({ rate: a.playbackRate, pitch: a.preservesPitch }));
   await expect.poll(rate).toEqual({ rate: 1.5, pitch: true });
 });
 
