@@ -231,6 +231,11 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await expect(second.locator(".lyric.is-mine")).toHaveCount(2);
   await expect(second.locator(".lyric-cue").first()).toBeVisible();
   await expect(second.getByRole("button", { name: /Score me/ })).toHaveCount(0);
+  // The speed is for everyone else's lines, and says so: theirs stay at 1×.
+  await second.getByRole("group", { name: "Playback" }).getByRole("button", { name: "Speed 1×" }).click();
+  await expect(second.getByRole("dialog", { name: "Playback speed" })).toContainText("Your own lines, and the pauses to say them, stay at 1×.");
+  await second.keyboard.press("Escape");
+  await expect(second.getByRole("dialog", { name: "Playback speed" })).toBeHidden();
 
   // Someone who isn't reading skips straight to the listen-through, with no part and no name.
   const listener = await browser.newContext({ ...testInfo.project.use });
@@ -241,6 +246,11 @@ test("a director uploads a script and shares the cast link, and a cast member op
   await expect(ears).toHaveURL(/\/i\/[^/]+\/play$/);
   await expect(ears.getByLabel("Your part")).toHaveValue("");
   await expect(ears.getByLabel("Your lines")).toHaveCount(0);
+  // With no part, everything plays at the speed, so there's nothing to say about lines at 1×.
+  await ears.getByRole("group", { name: "Playback" }).getByRole("button", { name: "Speed 1×" }).click();
+  const earsSheet = ears.getByRole("dialog", { name: "Playback speed" });
+  await expect(earsSheet.getByRole("button", { name: /^4×/ })).toBeVisible();
+  await expect(earsSheet).not.toContainText("stay at 1×");
   await listener.close();
 
   // Picking a part isn't recording it: the call sheet counts parts started by their recordings.
@@ -295,33 +305,77 @@ test("the screen stays on while the run-through plays", async ({ page }) => {
   await expect.poll(wakeLock).toEqual({ requested: 1, released: 1 });
 });
 
-test("the run-through plays at the chosen speed, remembered on this device", async ({ page }) => {
+test("the speed is easy to find: every speed at once, 4× really plays at 4×, remembered on this device", async ({ page }) => {
   await signInAsDirector(page);
   await createProduction(page, "Hamlet (speed)");
   await page.getByRole("button", { name: "Listen", exact: true }).click();
   const controls = page.getByRole("group", { name: "Playback" });
-  const speed = controls.getByRole("button", { name: /^Speed: / });
-  await expect(speed).toHaveText("1×");
-  // A tap steps up; the keyboard works too.
-  await speed.click();
-  await expect(speed).toHaveText("1.25×");
+  // A labelled button in the player bar, not a bare "1×".
+  const speed = controls.getByRole("button", { name: /^Speed / });
+  await expect(speed).toHaveAccessibleName("Speed 1×");
+  await expect(speed).toHaveAttribute("aria-haspopup", "dialog");
+
+  // It opens every speed at once, the one in use marked; the keyboard works too.
   await speed.focus();
   await page.keyboard.press("Enter");
-  await expect(speed).toHaveText("1.5×");
+  const sheet = page.getByRole("dialog", { name: "Playback speed" });
+  const choices = sheet.getByRole("group", { name: "Speeds" }).getByRole("button");
+  await expect(choices).toHaveText([/^0.5×/, /^0.75×/, /^1×/, /^1.25×/, /^1.5×/, /^2×/, /^3×/, /^4×/]);
+  await expect(sheet.getByRole("button", { name: /^1×/ })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(speed).toBeFocused();
+
+  // 4× is one pick away.
+  await speed.click();
+  await sheet.getByRole("button", { name: /^4×/ }).click();
+  await expect(sheet).toBeHidden();
+  await expect(speed).toHaveAccessibleName("Speed 4×");
 
   const play = controls.getByRole("button", { name: "Play", exact: true });
   await expect(play).toBeEnabled();
+  // Not just the setting: while a line plays, the media clock runs four times as fast as the wall
+  // clock, pitch kept. The scene is short at 4× (about 1.4 s of lines), so watching starts before the tap.
+  const measuring = page.locator("audio").evaluate(
+    (a: HTMLAudioElement) =>
+      new Promise<{ media: number; wall: number; pitch: boolean }>((resolve) => {
+        let media = 0;
+        let wall = 0;
+        let pitch = true;
+        let last: { t: number; now: number; src: string } | null = null;
+        const start = performance.now();
+        const step = () => {
+          const now = performance.now();
+          const sample = { t: a.currentTime, now, src: a.currentSrc };
+          if (last && !a.paused && a.playbackRate === 4 && sample.src === last.src && sample.t > last.t) {
+            media += sample.t - last.t;
+            wall += (now - last.now) / 1000;
+            pitch &&= a.preservesPitch;
+          }
+          last = sample;
+          if (now - start < 6000 && wall < 0.8) requestAnimationFrame(step);
+          else resolve({ media, wall, pitch });
+        };
+        requestAnimationFrame(step);
+      }),
+  );
   await play.click();
-  const rate = () => page.locator("audio").evaluate((a: HTMLAudioElement) => ({ rate: a.playbackRate, pitch: a.preservesPitch }));
-  await expect.poll(rate).toEqual({ rate: 1.5, pitch: true });
+  const measured = await measuring;
+  expect(measured.pitch).toBe(true);
+  expect(measured.wall).toBeGreaterThan(0.3);
+  expect(measured.media / measured.wall).toBeGreaterThan(3.2);
+  expect(measured.media / measured.wall).toBeLessThan(4.8);
 
   // Remembered on this device; a new choice plays from the first line.
   await page.reload();
-  await expect(speed).toHaveText("1.5×");
+  await expect(speed).toHaveAccessibleName("Speed 4×");
   await speed.click();
-  await expect(speed).toHaveText("2×");
+  await expect(sheet.getByRole("button", { name: /^4×/ })).toHaveAttribute("aria-pressed", "true");
+  await sheet.getByRole("button", { name: /^1.5×/ }).click();
+  await expect(speed).toHaveAccessibleName("Speed 1.5×");
   await play.click();
-  await expect.poll(rate).toEqual({ rate: 2, pitch: true });
+  const rate = () => page.locator("audio").evaluate((a: HTMLAudioElement) => ({ rate: a.playbackRate, pitch: a.preservesPitch }));
+  await expect.poll(rate).toEqual({ rate: 1.5, pitch: true });
 });
 
 test("a take the server won't store stays on the phone through a reload, then goes up by itself", async ({ page, browser }, testInfo) => {
@@ -369,10 +423,14 @@ test("a take the server won't store stays on the phone through a reload, then go
   await phone.reload();
   await expect(kept).toBeVisible();
   await expect(phone.getByRole("button", { name: "Play your take, kept on this device" })).toBeVisible();
-  // Listen back has the playback speed beside it.
-  const speed = phone.getByRole("button", { name: /^Playback speed: 1×/ });
+  // Listen back has the playback speed beside it, the same speed as every other player.
+  const speed = phone.getByRole("button", { name: "Speed 1×" });
   await speed.click();
-  await expect(phone.getByRole("button", { name: /^Playback speed: 1.25×/ })).toBeVisible();
+  await phone
+    .getByRole("dialog", { name: "Playback speed" })
+    .getByRole("button", { name: /^1.25×/ })
+    .click();
+  await expect(phone.getByRole("button", { name: "Speed 1.25×" })).toBeVisible();
 
   // The server is back: the take goes up without the actor doing anything.
   refusing = false;
