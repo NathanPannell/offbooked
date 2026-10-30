@@ -17,7 +17,7 @@ import { saysLine, speakerLabel, voicesOf } from "../lib/voices";
 import { ClipLoader } from "./clips";
 import { PlayerEngine, type PlayerState } from "./engine";
 import { followLine } from "./follow";
-import { useListenTrack } from "./listenTrack";
+import { lockNote, useListenTrack } from "./listenTrack";
 import { LineText, LiveText, type CueSpan } from "./LiveText";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
 import { changeSettings, defaultSettings, loadSettings, MY_PART, roleCharacters, saveSettings, type PlayerSettings } from "./settings";
@@ -180,14 +180,13 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   }, [state.playing]);
   const onWebsite = useMemo(() => !isNativeApp(), []);
   const trackStatus = useListenTrack({ engine, api: audio, queue, part, index: state.index, active: started && onWebsite });
-  const lockNote =
-    !state.playing || trackStatus === "off"
-      ? ""
-      : state.onTrack
-        ? "Ready to play with the screen locked."
-        : trackStatus === "building" || trackStatus === "ready"
-          ? "Getting ready to play with the screen locked…"
-          : "";
+  const screenNote = lockNote({
+    playing: state.playing,
+    interrupted: state.interrupted,
+    status: trackStatus,
+    onTrack: state.onTrack,
+    covered: engine?.trackReach(state.index) != null,
+  });
 
   const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
@@ -490,7 +489,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
       </div>
 
       <p className="small muted player-waiting" role="status" aria-live="polite">
-        {state.waiting && state.playing ? "Getting the next line…" : lockNote}
+        {state.waiting && state.playing ? "Getting the next line…" : screenNote}
       </p>
 
       <p className="sr-only" aria-live="polite">
@@ -531,6 +530,6 @@ function BarSelect({
   );
 }
 
-const IDLE: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false };
+const IDLE: PlayerState = { index: -1, playing: false, gap: null, ended: false, waiting: false, onTrack: false, interrupted: false };
 const initialState = () => IDLE;
 const noopSubscribe = () => () => {};

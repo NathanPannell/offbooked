@@ -108,6 +108,9 @@ export class ScreenKeeper {
 
   private onVisibility = () => {
     if (this.env.document.visibilityState === "visible") this.acquire();
+    // With the screen off there is no screen to keep on: stop the video, so the run-through's
+    // audio is the only media playing in a locked phone (it starts again when the page shows).
+    else this.video?.pause();
   };
 }
 

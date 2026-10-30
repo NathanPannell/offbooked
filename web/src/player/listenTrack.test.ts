@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ListenTrack } from "../api/types";
-import { MAX_TRIES, needsTrack, POLL_MS, pollTrack, REFRESH_LINES, RETRY_FAILED_MS, trackWindow, type Poll } from "./listenTrack";
+import { lockNote, MAX_TRIES, needsTrack, POLL_MS, pollTrack, REFRESH_LINES, RETRY_FAILED_MS, trackWindow, type Poll } from "./listenTrack";
 import { NO_PART, sameLines, samePart, type QueueLine } from "./queue";
 
 const queue: QueueLine[] = Array.from({ length: 10 }, (_, i) => ({ lineId: `l${i}`, sectionId: i < 5 ? "s1" : "s2", text: "Some words." }));
@@ -99,5 +99,27 @@ describe("asking for a stretch", () => {
     clearTimeout(poll.timer);
     await vi.advanceTimersByTimeAsync(POLL_MS * 10);
     expect(ask).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the note about the screen lock", () => {
+  const base = { playing: true, interrupted: false, status: "building" as const, onTrack: false, covered: false };
+
+  it("says when it can play locked, and to keep the screen on until then", () => {
+    expect(lockNote({ ...base, status: "ready", onTrack: true, covered: true })).toBe("Ready to play with the screen locked.");
+    expect(lockNote(base)).toMatch(/^Getting ready to play with the screen locked… Keep the screen on/);
+    // Ready, and the engine moves onto it at the next line.
+    expect(lockNote({ ...base, status: "ready", covered: true })).toMatch(/^Getting ready/);
+  });
+
+  it("is honest when this stretch can't play locked: a failed track, or one the engine dropped", () => {
+    expect(lockNote({ ...base, status: "failed" })).toBe("This part can't play with the screen locked yet. Keep the screen on.");
+    expect(lockNote({ ...base, status: "ready", covered: false })).toBe("This part can't play with the screen locked yet. Keep the screen on.");
+  });
+
+  it("says the phone stopped it, back on the page; says nothing paused, or in the app", () => {
+    expect(lockNote({ ...base, playing: false, interrupted: true })).toMatch(/^The phone stopped the play while the screen was off/);
+    expect(lockNote({ ...base, playing: false })).toBe("");
+    expect(lockNote({ ...base, status: "off" })).toBe("");
   });
 });

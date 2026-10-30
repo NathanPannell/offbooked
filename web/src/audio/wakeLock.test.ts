@@ -164,6 +164,16 @@ describe("ScreenKeeper", () => {
     expect(video.paused).toBe(false);
   });
 
+  it("stops the video while the screen is off, so only the run-through's audio plays", async () => {
+    const { keeper, video, doc } = setup({ api: false });
+    keeper.hold();
+    expect(video.paused).toBe(false);
+    doc.show("hidden");
+    expect(video.paused).toBe(true);
+    doc.show("visible");
+    expect(video.paused).toBe(false);
+  });
+
   it("doesn't switch to the video for a refusal that lands after it was let go", async () => {
     const { keeper, video, request } = setup({ refuse: true });
     keeper.hold()();

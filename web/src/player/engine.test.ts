@@ -14,8 +14,11 @@ class FakeAudio extends EventTarget {
   defaultPlaybackRate = 1;
   preservesPitch = false;
   ended = false;
+  /** Set to refuse play(), as a locked phone may for a new source. */
+  refuse = false;
   played: { src: string; rate: number }[] = [];
   play() {
+    if (this.refuse) return Promise.reject(new DOMException("not now", "NotAllowedError"));
     this.ended = false;
     this.played.push({ src: this.src, rate: this.playbackRate });
     this.dispatchEvent(new Event("play"));
@@ -40,7 +43,12 @@ const isSilence = (src: string) => src.startsWith("blob:");
 const lines: QueueLine[] = ["a", "b", "c", "d", "e", "f"].map((id, i) => ({ lineId: id, sectionId: i < 3 ? "s1" : "s2", text: "Five words are spoken here." }));
 
 function setup(
-  opts: { hold?: (lineId: string, prefetch: boolean) => boolean; source?: (lineId: string) => LineAudio["source"]; segments?: LineAudio["segments"] } = {},
+  opts: {
+    hold?: (lineId: string, prefetch: boolean) => boolean;
+    source?: (lineId: string) => LineAudio["source"];
+    segments?: LineAudio["segments"];
+    hidden?: () => boolean;
+  } = {},
 ) {
   const calls: { lineId: string; prefetch: boolean }[] = [];
   const held: { lineId: string; resolve: (a: LineAudio) => void }[] = [];
@@ -62,7 +70,7 @@ function setup(
   };
   const audio = new FakeAudio();
   const clips = new ClipLoader(api, () => 1200);
-  const engine = new PlayerEngine(audio as unknown as HTMLAudioElement, clips);
+  const engine = new PlayerEngine(audio as unknown as HTMLAudioElement, clips, opts.hidden ?? (() => false));
   engine.setLines(lines);
   return { audio, clips, engine, calls, held, answer };
 }
@@ -338,10 +346,11 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     expect(engine.getState().onTrack).toBe(false);
     audio.finish(); // a
     await flush();
-    audio.finish(); // the pause after a
-    await flush();
+    // Onto the track at once, in the pause before b (the track holds it): one new source.
     expect(audio.current.src).toBe("track:1");
-    expect(audio.currentTime).toBe(startOf(track, "b"));
+    expect(audio.currentTime).toBeCloseTo(startOf(track, "b") - 0.35);
+    expect(engine.getState()).toMatchObject({ index: 0, onTrack: true, playing: true });
+    tick(audio, startOf(track, "b"));
     expect(engine.getState()).toMatchObject({ index: 1, onTrack: true, playing: true });
 
     // The current line follows the track's time.
@@ -410,6 +419,39 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     expect(audio.playbackRate).toBe(2);
     engine.setSpeed(3);
     expect(audio.playbackRate).toBe(3);
+  });
+
+  it("changes speed at each item boundary even with no timeupdate or frame (a locked phone)", async () => {
+    const { audio, engine } = setup();
+    engine.setPart({ mine: new Set(["b"]), mode: "pause" });
+    engine.setSpeed(4);
+    const track = trackOf(["a", "b", "c"], { speak: ["b"], pauseThenRead: true });
+    engine.addTrack(track);
+    await flush();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      engine.play();
+      tick(audio, 0.5);
+      expect(audio.playbackRate).toBe(4);
+      // The rest of a lasts 1.5 s of media, 375 ms at 4×: then the pause after it plays at 1×.
+      audio.currentTime = 2.0;
+      vi.advanceTimersByTime(376);
+      expect(audio.playbackRate).toBe(1);
+      // Into my speaking pause, and out of it into c, with no timeupdate on the way.
+      audio.currentTime = startOf(track, "b", "speak");
+      vi.advanceTimersByTime(351);
+      expect(engine.getState().gap).toMatchObject({ index: 1 });
+      expect(audio.playbackRate).toBe(1);
+      audio.currentTime = startOf(track, "c");
+      vi.advanceTimersByTime(startOf(track, "c") * 1000);
+      expect(engine.getState().index).toBe(2);
+      expect(audio.playbackRate).toBe(4);
+      // Paused: nothing is left waiting.
+      engine.pause();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(SPEEDS)("at %s× on a track, other people's lines play at it; my pause and my line at 1×", async (speed) => {
@@ -500,5 +542,201 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     audio.finish();
     await flush();
     expect(audio.current.src).toBe("clip:e");
+  });
+  it("at the end of a track, a newer one that covers its end is entered in the pause: one new source", async () => {
+    const { audio, engine } = setup();
+    const first = trackOf(["a", "b"]);
+    engine.addTrack(first);
+    await flush();
+    engine.play();
+    // Asked for 40 lines before the end of the first, the next stretch starts back inside it.
+    const second = trackOf(["a", "b", "c", "d"], { url: "track:2" });
+    engine.addTrack(second);
+    tick(audio, startOf(first, "b") + 1);
+    audio.finish(); // the end of track 1
+    await flush();
+    expect(audio.current.src).toBe("track:2");
+    expect(audio.currentTime).toBeCloseTo(startOf(second, "c") - 0.35);
+    expect(engine.getState()).toMatchObject({ index: 1, onTrack: true, playing: true });
+    tick(audio, startOf(second, "c") + 0.1);
+    expect(engine.getState().index).toBe(2);
+    expect(audio.played.map((p) => p.src).filter(isSilence)).toEqual([]);
+  });
+
+  it("play after a pause line by line carries on from the same moment in a track that is ready now", async () => {
+    const { audio, engine } = setup();
+    await flush();
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("clip:a");
+    audio.currentTime = 0.8;
+    engine.pause();
+    const track = trackOf(["a", "b", "c"]);
+    engine.addTrack(track);
+    // The lock screen's play (or a tap): the rest of a, from the track.
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    expect(audio.currentTime).toBeCloseTo(startOf(track, "a") + 0.8);
+    expect(engine.getState()).toMatchObject({ index: 0, onTrack: true, playing: true });
+  });
+
+  it("play in the pause between lines, or in my speaking pause, picks up the track at the same place", async () => {
+    const { audio, engine } = setup();
+    engine.setPart({ mine: new Set(["b"]), mode: "pause" });
+    await flush();
+    engine.play();
+    await flush();
+    audio.finish(); // a
+    await flush();
+    expect(isSilence(audio.current.src)).toBe(true);
+    engine.pause(); // in the pause before b
+    const track = trackOf(["a", "b", "c"], { speak: ["b"], pauseThenRead: true });
+    engine.addTrack(track);
+    engine.play();
+    // The pause before b is already under way: on to b (its speaking pause).
+    expect(audio.current.src).toBe("track:1");
+    expect(audio.currentTime).toBeCloseTo(startOf(track, "b", "speak"));
+    expect(engine.getState().gap).toMatchObject({ index: 1 });
+
+    const again = setup();
+    again.engine.setPart({ mine: new Set(["b"]), mode: "pause" });
+    await flush();
+    again.engine.seekToSegment(1);
+    expect(again.engine.getState().gap).toMatchObject({ index: 1 });
+    again.audio.currentTime = 1.5; // 1.5 s into my speaking pause
+    again.engine.pause();
+    again.engine.addTrack(track);
+    again.engine.play();
+    expect(again.audio.current.src).toBe("track:1");
+    expect(again.audio.currentTime).toBeCloseTo(startOf(track, "b", "speak") + 1.5);
+    expect(again.engine.getState().gap).toMatchObject({ index: 1, remainingMs: 500 });
+  });
+
+  it("a track that only starts at the next line can't hold the pause: the pause plays, then the track", async () => {
+    const { audio, engine } = setup();
+    await flush();
+    engine.play();
+    await flush();
+    engine.addTrack(trackOf(["b", "c"]));
+    audio.finish(); // a
+    await flush();
+    expect(isSilence(audio.current.src)).toBe(true);
+    audio.finish(); // the pause
+    await flush();
+    expect(audio.current.src).toBe("track:1");
+    expect(audio.currentTime).toBe(0);
+  });
+});
+
+describe("with the phone locked", () => {
+  // Stands in for performance.now(), so a pause comes long enough after a source change to count.
+  const later = () => {
+    const now = performance.now();
+    vi.spyOn(performance, "now").mockReturnValue(now + 1000);
+  };
+  afterEach(() => vi.restoreAllMocks());
+
+  it("marks playback interrupted when a hidden page won't start the next source, and play clears it", async () => {
+    let hidden = false;
+    const { audio, engine } = setup({ hidden: () => hidden });
+    await flush();
+    engine.play();
+    await flush();
+    hidden = true;
+    audio.refuse = true;
+    audio.finish(); // a ends; the pause after it is refused
+    await flush();
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: true });
+    // The lock screen's play (or a tap, back on the page) carries on.
+    audio.refuse = false;
+    engine.play();
+    await flush();
+    expect(engine.getState()).toMatchObject({ playing: true, interrupted: false });
+  });
+
+  it("a clip that arrives after a refused play keeps the interruption for when the listener is back", async () => {
+    let hidden = false;
+    const { audio, engine, held, answer } = setup({ hidden: () => hidden, hold: (id) => id === "b" });
+    await flush();
+    engine.play();
+    await flush();
+    audio.finish(); // a
+    await flush();
+    hidden = true;
+    audio.refuse = true;
+    audio.finish(); // the pause; b isn't here yet, and the wait for it is refused
+    await flush();
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: true, waiting: true });
+    held.filter((h) => h.lineId === "b").forEach((h) => h.resolve(answer("b")));
+    await flush();
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: true });
+  });
+
+  it("a pause before a play has started (AbortError) is the listener's, not an interruption", async () => {
+    const { audio, engine } = setup({ hidden: () => true });
+    await flush();
+    engine.play();
+    await flush();
+    engine.pause();
+    audio.play = () => Promise.reject(new DOMException("aborted by pause", "AbortError"));
+    engine.play();
+    await flush();
+    expect(engine.getState().interrupted).toBe(false);
+  });
+
+  it("a refusal on a page that is showing isn't an interruption (no tap yet)", async () => {
+    const { audio, engine } = setup({ hidden: () => false });
+    await flush();
+    audio.refuse = true;
+    engine.play();
+    await flush();
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: false });
+  });
+
+  it("a pause the system makes while hidden is an interruption; one the listener asks for isn't", async () => {
+    let hidden = true;
+    const { audio, engine } = setup({ hidden: () => hidden });
+    await flush();
+    engine.play();
+    await flush();
+    later();
+    engine.pause(); // the lock screen's pause button
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: false });
+    engine.play();
+    later();
+    audio.pause(); // a phone call, another app's audio
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: true });
+    audio.dispatchEvent(new Event("play")); // the system lets it carry on
+    expect(engine.getState()).toMatchObject({ playing: true, interrupted: false });
+    hidden = false;
+    later();
+    audio.pause();
+    expect(engine.getState()).toMatchObject({ playing: false, interrupted: false });
+  });
+
+  it("plays a whole scene change, my speaking pause and my line with no timer at all: only ended events", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "requestAnimationFrame"] });
+    try {
+      const settle = async () => {
+        for (let i = 0; i < 20; i++) await Promise.resolve();
+      };
+      const { audio, engine } = setup();
+      engine.setPart({ mine: new Set(["c"]), mode: "pause" });
+      await settle();
+      engine.play();
+      await settle();
+      const heard: string[] = [];
+      for (let i = 0; i < 40 && !engine.getState().ended; i++) {
+        if (!isSilence(audio.current.src)) heard.push(audio.current.src);
+        audio.finish();
+        await settle();
+      }
+      expect(engine.getState().ended).toBe(true);
+      expect(heard).toEqual(["clip:a", "clip:b", "clip:c", "clip:d", "clip:e", "clip:f"]);
+      // Nothing was left waiting on a timer, which a locked phone would hold back.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
