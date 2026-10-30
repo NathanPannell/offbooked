@@ -1,7 +1,8 @@
 import type { Ctx } from "../context.ts";
 import { resolveLineAudio } from "../linestream.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
-import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, type LineRow, type TrackRequest } from "./track.ts";
+import { planCues, planStretches, type PlanLine } from "./cuePlan.ts";
+import { claimTrack, trackIdentity, trackLines, type LineRow, type TrackRequest } from "./track.ts";
 
 // Listen tracks built ahead of time, so the first play starts on one file instead of line by line
 // while its track is made (track.ts). Measured on production on 2026-10-30: a 300-line track of a
@@ -9,12 +10,12 @@ import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, t
 // re-normalizing takes from an older pipeline, and until then the line-by-line player waited up to
 // 21 s for some lines ("Getting the next line…").
 //
-// What is built: every stretch the player asks for (tracks start every TRACK_STRIDE lines) for the
-// full read with no part, and for each cast member's default listen, "Pause, then read" on the
-// parts they picked, for the stretches with their lines in them (the rest are the full read, as in
-// the player). Other parts and modes are built when first asked for, as before. Each stretch's
-// voices and takes are made ready first, outside the build queue, so a listener's own request
-// never waits behind a slow synthesis.
+// What is built: every stretch the player asks for (tracks start every TRACK_STRIDE played lines)
+// for the full read with no part, and for each cast member's default listen: "Pause, then read" on
+// the parts they picked, with the long stretches between their lines left out (cuePlan.ts, the
+// player's own code). So a one-act part with lines at either end is one short file. Other parts and
+// modes are built when first asked for, as before. Each stretch's voices and takes are made ready
+// first, outside the build queue, so a listener's own request never waits behind a slow synthesis.
 //
 // When: kicked by events only, never on a timer of its own. After a take, a deleted or restored
 // take, or an edit to the script, the pass waits for TRACK_PREBUILD_QUIET_MS (2 minutes) without another (a cast recording
@@ -23,8 +24,9 @@ import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, t
 // time per server; a kick during its pass runs it again afterwards. An idle server sends nothing.
 //
 // Cost: a 300-line track is about 25 to 35 minutes of 64 kb/s AAC, 12 to 17 MB. A recorded
-// 800-line play with five cast members keeps about 4 full-read tracks and 3 or 4 per cast member
-// current, ~20 tracks, ~300 MB; a take rebuilds only the stretches holding its line. Prebuilt
+// 800-line play with five cast members keeps about 4 full-read tracks and at most 3 or 4 per cast
+// member current (a small part's fit in one), under 20 tracks, under 300 MB; a take rebuilds only
+// the tracks holding its line. Prebuilt
 // tracks no listener was given are deleted as soon as they are out of date; ones a listener was
 // given are left to the usual 12-hour prune, since a phone may still be playing them.
 
@@ -116,24 +118,28 @@ export interface PlannedTrack {
 /**
  * The tracks to keep built for a play: each stretch the player asks for (web/src/player/
  * listenTrack.ts trackWindow, from a trackStart), read through, and for each cast member's parts
- * in "Pause, then read" where the stretch has their lines (a stretch without them is the full read,
- * as the player asks for it). By stretch, so the opening is ready first.
+ * the player's default for them: "Pause, then read" on the lines of the plan (cuePlan.ts). A part
+ * with no lines is the full read, as the player asks for it. By stretch, so the opening is ready first.
  */
-export function plannedTracks(lines: Pick<LineRow, "id" | "kind" | "characterId" | "voiceIds">[], parts: string[][]): PlannedTrack[] {
-  const out: PlannedTrack[] = [];
+export function plannedTracks(lines: Pick<LineRow, "id" | "sectionId" | "kind" | "text" | "characterId" | "voiceIds">[], parts: string[][]): PlannedTrack[] {
+  const script: PlanLine[] = lines.map((l) => ({ lineId: l.id, sectionId: l.sectionId, kind: l.kind, text: l.text }));
+  const out: PlannedTrack[] = planStretches(script, null).map(({ start, lineIds, skips }) => ({
+    start,
+    req: { lineIds, mine: new Set(), mode: "read", skips: new Set(skips) },
+  }));
   const casts = [...new Map(parts.filter((p) => p.length).map((p) => [[...p].sort().join(","), new Set(p)])).values()];
-  for (let start = 0; start < lines.length; start += TRACK_STRIDE) {
-    const stretch = lines.slice(start, start + MAX_TRACK_LINES);
-    const lineIds = stretch.map((l) => l.id);
-    out.push({ start, req: { lineIds, mine: new Set(), mode: "read" } });
-    for (const ids of casts) {
-      // As the player's saysLine: the line's speaker, or one of the voices of a shared line.
-      const mine = stretch.filter((l) => l.kind === "dialogue" && ((l.characterId && ids.has(l.characterId)) || (l.voiceIds ?? []).some((v) => ids.has(v))));
-      if (mine.length) out.push({ start, req: { lineIds, mine: new Set(mine.map((l) => l.id)), mode: "pause" } });
+  for (const ids of casts) {
+    // As the player's saysLine: the line's speaker, or one of the voices of a shared line.
+    const own = lines.filter((l) => l.kind === "dialogue" && ((l.characterId && ids.has(l.characterId)) || (l.voiceIds ?? []).some((v) => ids.has(v))));
+    const mine = new Set(own.map((l) => l.id));
+    const plan = planCues(script, mine);
+    if (!plan) continue;
+    for (const { start, lineIds, skips } of planStretches(script, plan)) {
+      const theirs = lineIds.filter((id) => mine.has(id));
+      out.push({ start, req: { lineIds, mine: new Set(theirs), mode: theirs.length ? "pause" : "read", skips: new Set(skips) } });
     }
-    if (start + MAX_TRACK_LINES >= lines.length) break;
   }
-  return out;
+  return out.sort((a, b) => a.start - b.start);
 }
 
 /** Builds whichever of the production's usual tracks are missing, one stretch at a time, and drops the out-of-date ones. */
@@ -165,7 +171,8 @@ export async function prebuildPass(ctx: Ctx, productionId: string): Promise<{ bu
     const todo = planned.filter((p) => p.start === start && !have.has(p.hash));
     if (!todo.length) continue;
     // Voices and takes first, outside the build queue (the builds then only join files).
-    await resolveLineAudio(ctx, productionId, todo[0]!.req.lineIds, { priority: TTS_PRIORITY.render, waitMs: PREPARE_WAIT_MS });
+    const ids = [...new Set(todo.flatMap((p) => p.req.lineIds))];
+    await resolveLineAudio(ctx, productionId, ids, { priority: TTS_PRIORITY.render, waitMs: PREPARE_WAIT_MS });
     if (stateOf(ctx).stopped) break;
     const claims = [];
     for (const p of todo) {

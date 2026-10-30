@@ -72,6 +72,28 @@ test("my lines: read plays them, skip leaves a silence to say them, pause leaves
   );
 });
 
+test("a jump leaves its lines out by not listing them: the fast-forward sound takes the place of the pause before the line it lands on", () => {
+  const plan = planTrack(
+    [line("a", "s1", clip("a", 1000)), line("x", "s1", clip("x", 500)), line("b", "s2", clip("b", 1000)), line("c", "s2", clip("c", 1000))],
+    new Set(["a"]),
+    "read",
+    new Set(["x"]),
+  );
+  assert.deepEqual(
+    plan.items.map((i) => [i.lineId, i.startMs]),
+    [
+      ["a", 0],
+      ["x", 1350],
+      ["b", 1850 + 650], // not the 1200 ms of a scene change
+      ["c", 3500 + 350],
+    ],
+  );
+  assert.deepEqual(
+    plan.pieces.map((p) => p.kind),
+    ["clip", "silence", "clip", "skip", "clip", "silence", "clip"],
+  );
+});
+
 test("a line with nothing to play keeps its silence without a clip's timings; a direction nobody voices takes no time", () => {
   const silent: ResolvedLineAudio = {
     lineId: "b",

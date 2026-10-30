@@ -210,6 +210,8 @@ export interface ListenTrackRequest {
   /** The listener's own lines, and what happens on them. */
   mine: string[];
   mode: "read" | "skip" | "pause";
+  /** Lines the listener's plan jumps from (player/cuePlan.ts): the fast-forward sound plays before the next listed line. */
+  skips?: string[];
 }
 
 /** Line audio calls, scoped to a director's production or an actor's invite. */

@@ -59,9 +59,9 @@ export function nativeNowPlaying(plugin = OffbookedNative): NowPlaying {
 }
 
 /**
- * The lock screen's buttons on the website. Next and previous move by line; no seek handlers, so
- * iOS shows them as track buttons rather than skip-15-seconds. "stop" (some Android headsets and
- * notifications) pauses.
+ * The lock screen's buttons on the website. Next and previous move by line, or with a part by cue
+ * (PlayerEngine); no seek handlers, so iOS shows them as track buttons rather than skip-15-seconds.
+ * "stop" (some Android headsets and notifications) pauses.
  */
 const WEB_ACTIONS = { play: "play", pause: "pause", stop: "pause", nexttrack: "next", previoustrack: "previous" } as const;
 

@@ -6,7 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { encodeCue, makeTone } from "../render/ffmpeg.ts";
-import { decodeToPcm, encodeTrack } from "./encode.ts";
+import { decodeToPcm, encodeTrack, skipPcm } from "./encode.ts";
 
 const exec = promisify(execFile);
 const RATE = 48_000;
@@ -66,6 +66,27 @@ test("clips and silences are joined into one .m4a, each clip cut or padded to it
     assert.ok(quiet(6, 14), "then a second of silence");
     assert.ok(loud(16, 24), "then b");
     assert.ok(quiet(26, 34), "b's padding and the last gap are silent");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the fast-forward sound goes into the file where a skip is, quiet, with silence after it", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "offbooked-track-test-"));
+  try {
+    const out = path.join(dir, "track.m4a");
+    await encodeTrack([{ kind: "skip", samples: (RATE * 650) / 1000 }], new Map(), out, "64k");
+    const rms = await levels(out, dir);
+    assert.ok(
+      rms.slice(1, 7).some((v) => v > 200),
+      "it is heard",
+    );
+    assert.ok(Math.max(...rms) < 32768 * 0.09, "and it is quiet");
+    assert.ok(
+      rms.slice(-2).every((v) => v < 100),
+      "then a breath of silence",
+    );
+    assert.equal(skipPcm(RATE).length, (RATE * 650 * 2) / 1000);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { changeSettings, defaultSettings, MY_PART, parseSettings, roleCharacters } from "./settings";
+import { describe, expect, it, vi } from "vitest";
+import { changeSettings, defaultSettings, loadPlace, MY_PART, parseSettings, roleCharacters, savePlace } from "./settings";
 
 describe("run-through settings", () => {
   const roles = new Set([MY_PART, "c1", "c2"]);
@@ -16,6 +16,30 @@ describe("run-through settings", () => {
     const picked = changeSettings(defaultSettings(true, "full"), { mode: "read" });
     expect(picked.modePicked).toBe(true);
     expect(parseSettings(JSON.stringify(picked), defaultSettings(true, "full"), roles).mode).toBe("read");
+  });
+
+  it("remembers Everything, the one way to hear the whole play with a part", () => {
+    const picked = changeSettings(defaultSettings(true, "full"), { mode: "all" });
+    expect(parseSettings(JSON.stringify(picked), defaultSettings(true, "full"), roles).mode).toBe("all");
+  });
+
+  it("remembers the line reached per production, and forgets it once the play has finished", () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => store.set(k, v),
+      removeItem: (k: string) => store.delete(k),
+    });
+    try {
+      expect(loadPlace("p1")).toBeNull();
+      savePlace("p1", "line-9");
+      expect(loadPlace("p1")).toBe("line-9");
+      expect(loadPlace("p2")).toBeNull();
+      savePlace("p1", null);
+      expect(loadPlace("p1")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("doesn't let a mode saved along with another change stick", () => {

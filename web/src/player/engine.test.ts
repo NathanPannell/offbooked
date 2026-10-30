@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LineAudio, LineAudioApi, TrackItem } from "../api/types";
 import { SPEEDS } from "../audio/speed";
 import { ClipLoader } from "./clips";
-import { PlayerEngine, TRACK_URL_FRESH_MS } from "./engine";
+import { planCues } from "./cuePlan";
+import { BACK_AGAIN_MS, PlayerEngine, TRACK_URL_FRESH_MS } from "./engine";
 import { pollTrack, stretchToAsk, trackWindow } from "./listenTrack";
 import { NO_PART, type Part, type QueueLine } from "./queue";
+import { skipSoundUrl } from "./silence";
+import { SKIP_PAUSE_MS } from "./skipSound";
 
 // A stand-in for <audio>: records what plays and at what rate; tests end each clip by hand.
 class FakeAudio extends EventTarget {
@@ -788,5 +791,260 @@ describe("with the phone locked", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("with a part: the plan, cue to cue", () => {
+  // MARA speaks at either end of twelve lines; j is her second line's cue, and l her last.
+  const ids = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"];
+  const script: QueueLine[] = ids.map((id) => ({ lineId: id, sectionId: "s1", text: "Five words are spoken here." }));
+  const mine = new Set(["b", "k"]);
+  const part: Part = { mine, mode: "read", plan: planCues(script, mine) };
+
+  function cast(opts: { hidden?: () => boolean } = {}) {
+    const made = setup({ hidden: opts.hidden });
+    made.engine.setLines(script);
+    made.engine.setPart(part);
+    return made;
+  }
+
+  // What the server lays out for that plan: 2 s a line, 350 ms between, the sound where lines are left out.
+  function planned(url = "track:one") {
+    const items: TrackItem[] = [];
+    let t = 0;
+    part.plan!.played.forEach((index, i) => {
+      if (i) t += part.plan!.jumps.has(part.plan!.played[i - 1]!) ? SKIP_PAUSE_MS : 350;
+      items.push({ lineId: script[index]!.lineId, kind: "line", startMs: t, durationMs: 2000, source: "tts" });
+      t += 2000;
+    });
+    return { url, items };
+  }
+  const at = (track: { items: TrackItem[] }, id: string) => track.items.find((i) => i.lineId === id)!.startMs / 1000;
+  const tick = (audio: FakeAudio, seconds: number) => {
+    audio.currentTime = seconds;
+    audio.dispatchEvent(new Event("timeupdate"));
+  };
+
+  it("plays the fast-forward sound and then the cue, line by line, and never stops to ask", async () => {
+    const { audio, engine } = cast();
+    await flush();
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("clip:a");
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    expect(audio.current.src).toBe(skipSoundUrl());
+    audio.finish();
+    await flush();
+    expect(audio.current.src).toBe("clip:j");
+    expect(engine.getState().playing).toBe(true);
+  });
+
+  it("starts at the first line that plays, and ends after their last when the rest is left out", async () => {
+    const lateLines = new Set(["g", "h"]);
+    const { audio, engine } = setup();
+    engine.setLines(script);
+    engine.setPart({ mine: lateLines, mode: "read", plan: planCues(script, lateLines) });
+    await flush();
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("clip:f");
+    await playTo(audio, "h");
+    audio.finish();
+    await flush();
+    expect(engine.getState().ended).toBe(true);
+    expect(engine.getState().playing).toBe(false);
+  });
+
+  it("before play, gets the first lines that play ready, not the opening it will skip", async () => {
+    const late = new Set(["g", "h"]);
+    const { calls, engine } = setup();
+    engine.setLines(script);
+    await flush();
+    calls.length = 0;
+    engine.setPart({ mine: late, mode: "read", plan: planCues(script, late) });
+    await flush();
+    expect(calls[0]?.lineId).toBe("f");
+  });
+
+  it("⏭ goes to the next cue, ⏮ restarts the current one, and a second ⏮ within 3 s the one before", async () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+    try {
+      const { engine } = cast();
+      await flush();
+      expect(part.plan!.cues).toEqual([0, 9]);
+      engine.next();
+      expect(engine.getState().index).toBe(0);
+      engine.next();
+      expect(engine.getState().index).toBe(9);
+      engine.seekToSegment(10, false); // into her line
+      engine.previous();
+      expect(engine.getState().index).toBe(9);
+      now.mockReturnValue(1000 + BACK_AGAIN_MS - 1);
+      engine.previous();
+      expect(engine.getState().index).toBe(0);
+      now.mockReturnValue(1000 + 3 * BACK_AGAIN_MS);
+      engine.seekToSegment(10, false);
+      engine.previous();
+      now.mockReturnValue(1000 + 5 * BACK_AGAIN_MS);
+      engine.previous();
+      expect(engine.getState().index).toBe(9);
+      // Past the last cue, ⏭ stays put.
+      engine.seekToSegment(10, false);
+      engine.next();
+      expect(engine.getState().index).toBe(10);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("⏮ before the first cue goes back to the start of what plays, never forward", async () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+    try {
+      const late = new Set(["d", "k"]);
+      const { engine } = setup();
+      engine.setLines(script);
+      engine.setPart({ mine: late, mode: "read", plan: planCues(script, late) });
+      await flush();
+      expect(engine.getState().index).toBe(-1);
+      engine.previous();
+      expect(engine.getState().index).toBe(0);
+      engine.seekToSegment(1, false);
+      now.mockReturnValue(1000 + 2 * BACK_AGAIN_MS);
+      engine.previous();
+      expect(engine.getState().index).toBe(0);
+      // On the first cue, a second ⏮ goes to the start too.
+      engine.seekToSegment(2, false);
+      now.mockReturnValue(1000 + 4 * BACK_AGAIN_MS);
+      engine.previous();
+      expect(engine.getState().index).toBe(2);
+      engine.previous();
+      expect(engine.getState().index).toBe(0);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("just listening, ⏮ and ⏭ still move line by line", async () => {
+    const { engine } = setup();
+    await flush();
+    engine.seekToSegment(1, false);
+    engine.next();
+    expect(engine.getState().index).toBe(2);
+    engine.previous();
+    expect(engine.getState().index).toBe(1);
+  });
+
+  it("on the track, a whole listen is one source: the first play, the jump, ⏭, ⏮ and a pause are all seeks", async () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+    try {
+      const { audio, engine, calls } = cast({ hidden: () => true });
+      await flush();
+      calls.length = 0;
+      const track = planned();
+      engine.addTrack(track);
+      engine.play();
+      await flush();
+      expect(audio.current.src).toBe("track:one");
+      expect(audio.currentTime).toBe(at(track, "a"));
+      // Straight across the jump: the file holds the sound, so nothing happens but time passing.
+      tick(audio, at(track, "b") + 1.9);
+      expect(engine.getState().index).toBe(1);
+      tick(audio, at(track, "j") + 0.1);
+      expect(engine.getState().index).toBe(9);
+      // A fluffed line: ⏮ from the headphones, to the cue, then ⏮ twice to the cue before.
+      tick(audio, at(track, "k") + 0.5);
+      engine.previous();
+      expect(audio.currentTime).toBe(at(track, "j"));
+      now.mockReturnValue(1000 + BACK_AGAIN_MS + 1);
+      engine.previous();
+      expect(audio.currentTime).toBe(at(track, "j"));
+      engine.previous();
+      expect(audio.currentTime).toBe(at(track, "a"));
+      engine.next();
+      expect(audio.currentTime).toBe(at(track, "j"));
+      engine.pause();
+      tick(audio, at(track, "j") + 1);
+      engine.play();
+      expect(audio.currentTime).toBe(at(track, "j") + 1);
+      expect(new Set(audio.played.map((p) => p.src))).toEqual(new Set(["track:one"]));
+      expect(calls).toEqual([]);
+      audio.finish();
+      await flush();
+      expect(engine.getState().ended).toBe(true);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("moves onto the track across a jump: in the sound, just before the cue", async () => {
+    const { audio, engine } = cast();
+    await flush();
+    engine.play();
+    await playTo(audio, "b");
+    const track = planned();
+    engine.addTrack(track);
+    audio.finish();
+    await flush();
+    expect(audio.current.src).toBe("track:one");
+    expect(audio.currentTime).toBeCloseTo(at(track, "j") - SKIP_PAUSE_MS / 1000);
+  });
+
+  it("a line tapped in a stretch left out plays on through it to the cue, and the track takes over there", async () => {
+    const { audio, engine } = cast();
+    await flush();
+    const track = planned();
+    engine.addTrack(track);
+    engine.seekToSegment(7);
+    await flush();
+    expect(engine.trackReach(7)).toBeNull();
+    expect(audio.current.src).toBe("clip:h");
+    await playTo(audio, "i");
+    audio.finish(); // the line ends
+    await flush();
+    audio.finish(); // the pause before the cue, line by line: the track has no "i"
+    await flush();
+    expect(audio.current.src).toBe("track:one");
+    expect(audio.currentTime).toBe(at(track, "j"));
+  });
+
+  it("picks up where it was: a place restored after a reload plays from there, on the track, with one tap", async () => {
+    const { audio, engine } = cast();
+    await flush();
+    const track = planned();
+    engine.addTrack(track);
+    engine.seekToSegment(9, false);
+    expect(engine.getState()).toMatchObject({ index: 9, playing: false });
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("track:one");
+    expect(audio.currentTime).toBe(at(track, "j"));
+  });
+
+  it("from the end, play starts again at the first line that plays", async () => {
+    const { audio, engine } = cast();
+    await flush();
+    engine.seekToSegment(11);
+    await flush();
+    audio.finish();
+    await flush();
+    expect(engine.getState().ended).toBe(true);
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("clip:a");
+  });
+
+  it("keeps playing when the plan changes under it, without a stop or a prompt", async () => {
+    const { audio, engine } = cast();
+    await flush();
+    engine.play();
+    await playTo(audio, "b");
+    engine.setPart({ ...part, plan: planCues(script, mine, false) });
+    audio.finish();
+    await flush();
+    audio.finish();
+    await flush();
+    expect(audio.current.src).toBe("clip:c");
   });
 });

@@ -1,3 +1,5 @@
+import type { CuePlan } from "./cuePlan";
+import { SKIP_PAUSE_MS } from "./skipSound";
 import { myLinePauseMs, wordCount } from "./timing";
 
 // Pure planning for line-by-line playback: which line plays next, how long the pause before it
@@ -27,6 +29,8 @@ export type MyLineMode = "read" | "skip" | "pause";
 export interface Part {
   mine: Set<string> | null;
   mode: MyLineMode;
+  /** What plays and where ⏮ and ⏭ land (cuePlan.ts); null with no lines of theirs. */
+  plan?: CuePlan | null;
 }
 
 export const NO_PART: Part = { mine: null, mode: "read" };
@@ -38,7 +42,8 @@ export function samePart(a: Part, b: Part): boolean {
   if ((a.mine?.size ?? 0) !== (b.mine?.size ?? 0)) return false;
   if (a.mine?.size && a.mode !== b.mode) return false;
   for (const id of a.mine ?? []) if (!b.mine?.has(id)) return false;
-  return true;
+  const [x, y] = [a.plan?.played, b.plan?.played];
+  return x?.length === y?.length && (x ?? []).every((index, i) => index === y![i]);
 }
 
 /** The same lines in the same order (a reloaded script that didn't change). */
@@ -52,9 +57,39 @@ export function playableFrom(lines: QueueLine[], index: number, _part: Part = NO
   return i < lines.length ? i : null;
 }
 
-/** The line after `index`. Null at the end of the play. */
+/** The line after `index`, or where a jump after it lands. Null at the end of the play, or after the listener's last line when the rest is left out. */
 export function nextIndex(lines: QueueLine[], index: number, part: Part = NO_PART): number | null {
-  return playableFrom(lines, index + 1, part);
+  return playableFrom(lines, part.plan?.jumps.get(index) ?? index + 1, part);
+}
+
+/** A jump after `from` that lands on `to`: the fast-forward sound plays instead of the pause. */
+export function jumpsTo(part: Part, from: number, to: number): boolean {
+  return part.plan?.jumps.get(from) === to;
+}
+
+/** What plays between `from` and the next line `to`: the pause, or the fast-forward sound after a jump. */
+export function pauseBetweenMs(lines: QueueLine[], from: number, to: number, part: Part = NO_PART): number {
+  return jumpsTo(part, from, to) ? SKIP_PAUSE_MS : gapBetweenMs(lines, from, to);
+}
+
+/** Where the play starts for this listener: the first line that plays. */
+export const firstIndex = (part: Part): number => part.plan?.played[0] ?? 0;
+
+/** The next cue after `index`, or null past the last. */
+export function nextCue(cues: readonly number[], index: number): number | null {
+  return cues.find((cue) => cue > index) ?? null;
+}
+
+/**
+ * ⏮ with a part: the current cue (the last one at or before `index`, so a fluffed line can be run
+ * again), or the one before it when `again`, like a music player. Before the first cue, back to
+ * the start of what plays: never forward.
+ */
+export function previousCue(plan: CuePlan, index: number, again: boolean): number {
+  let at = -1;
+  for (let i = 0; i < plan.cues.length && plan.cues[i]! <= index; i++) at = i;
+  const to = again ? at - 1 : at;
+  return to < 0 ? plan.played[0]! : plan.cues[to]!;
 }
 
 /** The pause between two lines: short within a scene, longer at a scene change. */

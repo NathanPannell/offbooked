@@ -9,6 +9,7 @@ import { resolveLineAudio } from "../linestream.ts";
 import { RENDER_SETTINGS } from "../render/plan.ts";
 import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { TTS_PRIORITY, type TtsPriority } from "../tts/service.ts";
+import { TRACK_LINES } from "./cuePlan.ts";
 import { decodeToPcm, encodeTrack } from "./encode.ts";
 import { MY_LINE_MODES, planTrack, type MyLineMode, type TrackItem } from "./plan.ts";
 
@@ -26,7 +27,7 @@ import { MY_LINE_MODES, planTrack, type MyLineMode, type TrackItem } from "./pla
 
 export const TRACK_SETTINGS = { version: 1, bitrate: "64k" } as const;
 /** The most lines one track covers (about 20 to 30 minutes of a play). */
-export const MAX_TRACK_LINES = 300;
+export const MAX_TRACK_LINES = TRACK_LINES;
 /** Signed track URLs last long enough for a long listen with pauses (the player keeps the first URL it plays). */
 export const TRACK_URL_TTL_SECONDS = 6 * 3600;
 /** How long a build waits for clips still being made before giving up (the player asks again later). */
@@ -38,19 +39,11 @@ const BUILD_WAIT_MS = 5 * 60_000;
 export const RETRY_FAILED_MS = 10 * 60_000;
 /** Tracks nobody has asked for in this long are deleted (rows and files) when another is built. */
 export const PRUNE_AFTER_HOURS = 12;
-/**
- * Tracks start every TRACK_STRIDE lines of the play, so the stretch a listener asks for is one built
- * ahead: a track from line 0, one from 260, one from 520… (the last one ends the play). Each holds
- * MAX_TRACK_LINES, so it overlaps the next by the 40 lines in which the player asks for the next one
- * (web/src/player/listenTrack.ts, trackStart; keep them in step).
- */
-export const TRACK_STRIDE = 260;
-
-/** Where the track for the line at `index` starts, in a play of `count` lines. */
-export function trackStart(index: number, count: number): number {
-  const last = Math.max(0, Math.ceil((count - MAX_TRACK_LINES) / TRACK_STRIDE)) * TRACK_STRIDE;
-  return Math.min(Math.floor(Math.max(0, index) / TRACK_STRIDE) * TRACK_STRIDE, last);
-}
+// Tracks start every TRACK_STRIDE lines that play, so the stretch a listener asks for is one built
+// ahead: a track from the 0th, one from the 260th, one from the 520th… (the last one ends the play).
+// Each holds MAX_TRACK_LINES, so it overlaps the next by the 40 lines in which the player asks for
+// the next one. cuePlan.ts is the player's own code, so the two can't drift.
+export { TRACK_STRIDE, trackStart } from "./cuePlan.ts";
 
 const RATE = RENDER_SETTINGS.sampleRate;
 
@@ -60,6 +53,8 @@ export interface TrackRequest {
   lineIds: string[];
   mine: Set<string>;
   mode: MyLineMode;
+  /** Lines the listener's plan jumps from (cuePlan.ts): the fast-forward sound plays before the next listed line. */
+  skips: Set<string>;
 }
 
 export function trackRequest(raw: unknown): TrackRequest {
@@ -70,7 +65,8 @@ export function trackRequest(raw: unknown): TrackRequest {
   const mine = new Set((uuidList(b, "mine", false) ?? []).map((id) => id.toLowerCase()));
   const mode = b.mode ?? "read";
   if (typeof mode !== "string" || !MY_LINE_MODES.includes(mode as MyLineMode)) throw badRequest('mode must be "read", "skip" or "pause".');
-  return { lineIds, mine, mode: mode as MyLineMode };
+  const skips = new Set((uuidList(b, "skips", false) ?? []).map((id) => id.toLowerCase()));
+  return { lineIds, mine, mode: mode as MyLineMode, skips };
 }
 
 export interface LineRow {
@@ -104,7 +100,7 @@ export function trackIdentity(rows: LineRow[], req: TrackRequest, engine: string
   const h = createHash("sha256").update(JSON.stringify({ track: TRACK_SETTINGS, render: RENDER_SETTINGS, engine, mode: req.mode }));
   for (const l of lines) {
     h.update(
-      `\n${l.id}|${l.sectionId}|${l.kind}|${req.mine.has(l.id) ? 1 : 0}|${l.characterId ?? ""}|${(l.voiceIds ?? []).join(",")}|${l.currentTakeId ?? ""}|${l.takesAt?.toISOString() ?? ""}|${l.text}`,
+      `\n${l.id}|${l.sectionId}|${l.kind}|${req.mine.has(l.id) ? 1 : 0}${req.skips.has(l.id) ? "|skip" : ""}|${l.characterId ?? ""}|${(l.voiceIds ?? []).join(",")}|${l.currentTakeId ?? ""}|${l.takesAt?.toISOString() ?? ""}|${l.text}`,
     );
   }
   return { hash: h.digest("hex"), lines };
@@ -257,6 +253,7 @@ async function buildTrack(
       lines.flatMap((l) => (byLine.has(l.id) ? [{ lineId: l.id, sectionId: l.sectionId, text: l.text, audio: byLine.get(l.id)! }] : [])),
       req.mine,
       req.mode,
+      req.skips,
     );
     const keys = [...new Set(plan.pieces.flatMap((p) => (p.kind === "clip" ? [p.key] : [])))];
     const pcm = new Map(keys.map((key, i) => [key, path.join(dir, `clip-${i}.pcm`)]));

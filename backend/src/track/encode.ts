@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { RENDER_SETTINGS } from "../render/plan.ts";
 import type { TrackPiece } from "./plan.ts";
+import { skipSamples } from "./skipSound.ts";
 
 // The ffmpeg end of a listen track (track.ts): clips decoded to raw samples, then every piece
 // streamed in order into one AAC encode.
@@ -12,6 +13,14 @@ const RATE = RENDER_SETTINGS.sampleRate;
 /** Any audio file as raw 48 kHz mono 16-bit samples. */
 export async function decodeToPcm(input: string, output: string): Promise<void> {
   await run("ffmpeg", ["-hide_banner", "-nostdin", "-y", "-i", input, "-vn", "-ac", "1", "-ar", String(RATE), "-f", "s16le", "-acodec", "pcm_s16le", output]);
+}
+
+/** The fast-forward sound and its pause as raw mono 16-bit little-endian samples, as the track encoder takes them. */
+export function skipPcm(rate = RATE): Buffer {
+  const samples = skipSamples(rate);
+  const buf = Buffer.alloc(samples.length * 2);
+  samples.forEach((s, i) => buf.writeInt16LE(Math.round(s * 32767), i * 2));
+  return buf;
 }
 
 // Streams the pieces as raw samples into one AAC encode: each clip cut or padded to its planned
@@ -43,7 +52,7 @@ export async function encodeTrack(pieces: TrackPiece[], pcm: Map<string, string>
         await zeros(piece.samples);
         continue;
       }
-      const data = await readFile(pcm.get(piece.key)!);
+      const data = piece.kind === "skip" ? skipPcm() : await readFile(pcm.get(piece.key)!);
       const bytes = piece.samples * 2;
       await write(data.subarray(0, Math.min(bytes, data.length - (data.length % 2))));
       if (data.length < bytes) await zeros(Math.ceil((bytes - data.length) / 2));

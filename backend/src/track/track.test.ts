@@ -29,8 +29,9 @@ interface Item {
 
 test("a track request lists lines, optionally the listener's, and a mode", () => {
   const id = randomUUID();
-  assert.deepEqual(trackRequest({ lineIds: [id.toUpperCase(), id] }), { lineIds: [id], mine: new Set(), mode: "read" });
+  assert.deepEqual(trackRequest({ lineIds: [id.toUpperCase(), id] }), { lineIds: [id], mine: new Set(), mode: "read", skips: new Set() });
   assert.equal(trackRequest({ lineIds: [id], mine: [id], mode: "pause" }).mode, "pause");
+  assert.deepEqual([...trackRequest({ lineIds: [id], skips: [id.toUpperCase()] }).skips], [id]);
   assert.throws(() => trackRequest({ lineIds: [] }), /at least one/);
   assert.throws(() => trackRequest({ lineIds: ["nope"] }), /list of ids/);
   assert.throws(() => trackRequest({ lineIds: Array.from({ length: MAX_TRACK_LINES + 1 }, () => randomUUID()) }), /at most/);

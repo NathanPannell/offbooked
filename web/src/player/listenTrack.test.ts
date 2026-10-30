@@ -16,6 +16,7 @@ import {
   type Poll,
 } from "./listenTrack";
 import { TRACK_URL_FRESH_MS } from "./engine";
+import { planCues } from "./cuePlan";
 import { NO_PART, sameLines, samePart, type QueueLine } from "./queue";
 
 const queue: QueueLine[] = Array.from({ length: 10 }, (_, i) => ({ lineId: `l${i}`, sectionId: i < 5 ? "s1" : "s2", text: "Some words." }));
@@ -31,6 +32,40 @@ describe("the stretch asked for", () => {
     expect(trackWindow(queue, 2, part, 4)).toEqual({ lineIds: ["l2", "l3", "l4", "l5"], mine: ["l4"], mode: "pause" });
     // So the same stretch heard by someone with no lines in it is the same track.
     expect(trackWindow(queue, 5, part, 4)).toEqual({ lineIds: ["l5", "l6", "l7", "l8"], mine: [], mode: "read" });
+  });
+});
+
+describe("the stretch asked for with a plan", () => {
+  // Mine at the start and the end of 500 lines: everything between is left out.
+  const long: QueueLine[] = Array.from({ length: 500 }, (_, i) => ({ lineId: `l${i}`, sectionId: "s", text: "Some words." }));
+  const mine = new Set(["l1", "l498"]);
+  const part = { mine, mode: "pause" as const, plan: planCues(long, mine) };
+
+  it("is the lines that play, in one file, and names the jump", () => {
+    expect(trackWindow(long, 0, part)).toEqual({ lineIds: ["l0", "l1", "l497", "l498", "l499"], mine: ["l1", "l498"], mode: "pause", skips: ["l1"] });
+  });
+
+  it("is asked for once, from wherever the listener is, and leaves the skipped stretch alone", () => {
+    expect(stretchToAsk(null, long, part, 0, null)).toBe(0);
+    const asked = { queue: long, part, start: 0, at: Date.now() };
+    for (const index of [0, 1, 250, 497, 499]) expect(stretchToAsk(asked, long, part, index, 499)).toBeNull();
+  });
+
+  it("is asked for again when Everything is picked: the same lines, played differently", () => {
+    const asked = { queue: long, part, start: 0, at: Date.now() };
+    const all = { ...part, plan: planCues(long, mine, false) };
+    expect(samePart(part, all)).toBe(false);
+    expect(stretchToAsk(asked, long, all, 250, null)).toBe(0);
+    expect(trackWindow(long, 0, all).lineIds).toHaveLength(TRACK_LINES);
+    expect(trackWindow(long, 0, all).skips).toBeUndefined();
+  });
+
+  it("counts in lines that play, so a long part still moves to its next stretch near the end of this one", () => {
+    const every = new Set(long.map((l) => l.lineId).filter((_, i) => i % 2 === 0));
+    const busy = { mine: every, mode: "pause" as const, plan: planCues(long, every) };
+    const asked = { queue: long, part: busy, start: 0, at: Date.now() };
+    expect(stretchToAsk(asked, long, busy, 200, 299)).toBeNull();
+    expect(stretchToAsk(asked, long, busy, 260, 299)).toBe(260);
   });
 });
 
