@@ -208,6 +208,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     onTrack: state.onTrack,
     covered: engine?.trackReach(state.index) != null,
   });
+  const note = state.waiting && state.playing ? "Getting the next line…" : screenNote;
 
   const currentSegment = queue[state.index];
   const currentLine = currentSegment ? lineById.get(currentSegment.lineId) : undefined;
@@ -330,9 +331,9 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     engine.seekToSegment(index, state.playing);
     const n = myLineNumber(stops, index);
     const scene = sections.find((s) => s.id === queue[index]?.sectionId)?.title;
-    const note = `Your line ${n} of ${stops.length}${scene ? `, ${scene}` : ""}.`;
+    const said = `Your line ${n} of ${stops.length}${scene ? `, ${scene}` : ""}.`;
     // The same words twice are still read out: they differ by a trailing space.
-    setJumpNote((before) => (before === note ? `${note} ` : note));
+    setJumpNote((before) => (before === said ? `${said} ` : said));
   };
   const nextMineAt = hasAudio ? nextMine(stops, state.index) : null;
   const previousMineAt = hasAudio ? previousMine(stops, state.index) : null;
@@ -503,40 +504,43 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
         ))}
       </ol>
 
-      {held && (
-        <div className="held-prompt raised" role="group" aria-label="Long stretch ahead">
-          <p className="held-text">{heldText}</p>
-          <div className="held-actions">
-            <button type="button" className="btn btn-secondary" onClick={() => engine?.keepListening()}>
-              Keep listening
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => {
-                setFollowing(true);
-                engine?.play();
-              }}
-            >
-              Jump to my next cue
-            </button>
+      {/* The bar holds its note too ("Getting the next line…", the screen-lock notes), so the
+          script above it is never covered: the follow band ends at the bar's top. */}
+      <div className={`player-controls ${note ? "has-note" : ""}`} role="group" aria-label="Playback">
+        <p className="small muted player-note" role="status" aria-live="polite">
+          {note}
+        </p>
+        {held && (
+          <div className="held-prompt raised" role="group" aria-label="Long stretch ahead">
+            <p className="held-text">{heldText}</p>
+            <div className="held-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => engine?.keepListening()}>
+                Keep listening
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setFollowing(true);
+                  engine?.play();
+                }}
+              >
+                Jump to my next cue
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-
-      {!following && currentSegment && !held && (
-        <button
-          type="button"
-          className="back-to-current"
-          onClick={() => {
-            setFollowing(true);
-          }}
-        >
-          <Crosshair size={16} aria-hidden="true" /> Back to current line
-        </button>
-      )}
-
-      <div className="player-controls" role="group" aria-label="Playback">
+        )}
+        {!following && currentSegment && !held && (
+          <button
+            type="button"
+            className="back-to-current"
+            onClick={() => {
+              setFollowing(true);
+            }}
+          >
+            <Crosshair size={16} aria-hidden="true" /> Back to current line
+          </button>
+        )}
         {stops.length > 0 && (
           <MyLineNav
             number={myLineNumber(stops, state.index)}
@@ -567,10 +571,6 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
         {/* Balances the speed button, so play stays in the middle. */}
         <span className="controls-spacer" aria-hidden="true" />
       </div>
-
-      <p className="small muted player-waiting" role="status" aria-live="polite">
-        {state.waiting && state.playing ? "Getting the next line…" : screenNote}
-      </p>
 
       <p className="sr-only" aria-live="polite">
         {state.gap ? "Your line. Say it now." : held ? `Paused. ${heldText} Play jumps to your cue.` : ""}

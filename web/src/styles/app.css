@@ -3915,12 +3915,12 @@
   }
 }
 
+/* Floats just above the player bar (it lives in the bar), however tall the bar is. */
 .back-to-current {
-  position: fixed;
+  position: absolute;
   left: 50%;
-  bottom: calc(108px + var(--safe-bottom));
+  bottom: calc(100% + 16px);
   transform: translateX(-50%);
-  z-index: 26;
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
@@ -3932,6 +3932,7 @@
   color: #fff;
   font-weight: 600;
   box-shadow: var(--shadow-lg);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -3948,6 +3949,14 @@
   padding: var(--s-3) var(--s-4) calc(14px + var(--safe-bottom));
   background: var(--bg);
   border-top: 1px solid var(--line);
+}
+
+/* With a note, it is a row of its own on top of the controls: the bar grows upwards, the buttons
+   stay where the thumb is, and the follow band (follow.ts) ends above the note. */
+.player-controls.has-note {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding-top: var(--s-2);
 }
 
 /* Playback speed (SpeedButton): a labelled button ("SPEED" over "1×") that opens the speed sheet.
@@ -4066,11 +4075,16 @@
 }
 
 /* With a part picked: "My previous line" and "My next line" on their own row, on top of the play
-   controls, in reach of a thumb. The pills above the bar move up by that row. */
+   controls, in reach of a thumb, under the bar's note when it has one. */
 .has-my-lines .player-controls {
   flex-wrap: wrap;
   row-gap: 2px;
   padding-top: 4px;
+}
+
+.has-my-lines .player-controls.has-note {
+  row-gap: 4px;
+  padding-top: var(--s-2);
 }
 
 .my-line-nav {
@@ -4145,13 +4159,13 @@
   color: #fff;
 }
 
-/* Held before a long stretch: where the next line is, and the jump, above the player bar. */
+/* Held before a long stretch: where the next line is, and the jump. Floats just above the player
+   bar (it lives in the bar), however tall the bar is. */
 .held-prompt {
-  position: fixed;
+  position: absolute;
   left: 50%;
-  bottom: calc(150px + var(--safe-bottom));
-  z-index: 27;
-  width: min(440px, calc(100% - 32px));
+  bottom: calc(100% + 12px);
+  width: min(440px, calc(100vw - 32px));
   transform: translateX(-50%);
   padding: var(--s-4);
   border-radius: var(--radius-lg);
@@ -4181,38 +4195,20 @@
   }
 }
 
-.has-my-lines .back-to-current {
-  bottom: calc(154px + var(--safe-bottom));
-}
-
-.has-my-lines .player-waiting {
-  bottom: calc(132px + var(--safe-bottom));
-}
-
 .player.has-my-lines {
   padding-bottom: 46px;
 }
 
-/* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
-.player-waiting {
-  position: fixed;
-  left: 50%;
-  bottom: calc(86px + var(--safe-bottom));
-  transform: translateX(-50%);
-  z-index: 26;
+/* The bar's note: "Getting the next line…" while a clip is still on its way, and the screen-lock
+   notes (listenTrack.ts), a sentence or two that wraps on a phone. */
+.player-note {
+  flex: 0 0 100%;
   margin: 0;
-  padding: 3px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--bg);
-  box-shadow: var(--shadow-sm);
-  /* The screen-lock notes are a sentence or two: they wrap on a phone rather than run off it. */
-  width: max-content;
-  max-width: calc(100% - 32px);
+  line-height: 1.35;
   text-align: center;
 }
 
-.player-waiting:empty {
+.player-note:empty {
   display: none;
 }
 
@@ -4256,8 +4252,11 @@
     border-radius: var(--radius-lg);
   }
 
-  .step-panel .held-prompt {
-    bottom: 164px;
+  /* Two rows don't fit a pill: a rounded card as wide as the note needs. */
+  .step-panel .player-controls.has-note {
+    width: min(560px, calc(100% - 32px));
+    border-radius: var(--radius-lg);
+    padding-top: var(--s-2);
   }
 }
 
