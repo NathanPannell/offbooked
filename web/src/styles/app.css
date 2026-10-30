@@ -3915,12 +3915,12 @@
   }
 }
 
+/* Floats just above the player bar (it lives in the bar), however tall the bar is. */
 .back-to-current {
-  position: fixed;
+  position: absolute;
   left: 50%;
-  bottom: calc(108px + var(--safe-bottom));
+  bottom: calc(100% + 16px);
   transform: translateX(-50%);
-  z-index: 26;
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
@@ -3932,6 +3932,7 @@
   color: #fff;
   font-weight: 600;
   box-shadow: var(--shadow-lg);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -3948,6 +3949,14 @@
   padding: var(--s-3) var(--s-4) calc(14px + var(--safe-bottom));
   background: var(--bg);
   border-top: 1px solid var(--line);
+}
+
+/* With a note, it is a row of its own on top of the controls: the bar grows upwards, the buttons
+   stay where the thumb is, and the follow band (follow.ts) ends above the note. */
+.player-controls.has-note {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding-top: var(--s-2);
 }
 
 /* Playback speed (SpeedButton): a labelled button ("SPEED" over "1×") that opens the speed sheet.
@@ -4065,23 +4074,16 @@
   margin: var(--s-2) 0 0;
 }
 
-/* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
-.player-waiting {
-  position: fixed;
-  left: 50%;
-  bottom: calc(86px + var(--safe-bottom));
-  transform: translateX(-50%);
-  z-index: 26;
+/* The bar's note: "Getting the next line…" while a clip is still on its way, and the screen-lock
+   notes (listenTrack.ts), a sentence or two that wraps on a phone. */
+.player-note {
+  flex: 0 0 100%;
   margin: 0;
-  padding: 3px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--bg);
-  box-shadow: var(--shadow-sm);
-  white-space: nowrap;
+  line-height: 1.35;
+  text-align: center;
 }
 
-.player-waiting:empty {
+.player-note:empty {
   display: none;
 }
 
@@ -4118,6 +4120,13 @@
     border-radius: 999px;
     padding: 10px 24px;
     box-shadow: var(--shadow-lg);
+  }
+
+  /* Two rows don't fit a pill: a rounded card as wide as the note needs. */
+  .step-panel .player-controls.has-note {
+    width: min(560px, calc(100% - 32px));
+    border-radius: var(--radius-lg);
+    padding-top: var(--s-2);
   }
 }
 

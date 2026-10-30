@@ -34,9 +34,9 @@ export function trackWindow(queue: QueueLine[], index: number, part: Part, max =
 }
 
 /**
- * The line under the player's controls about the screen lock, on the website. `covered`: the
- * engine has a track for the current line. A track that failed, or one the engine dropped (it
- * wouldn't play), leaves this stretch line by line, which a locked phone may stop: say so.
+ * The player bar's note about the screen lock, on the website. `covered`: the engine has a track
+ * for the current line. A track that failed, or one the engine dropped (it wouldn't play), leaves
+ * this stretch line by line, which a locked phone may stop: say so.
  */
 export function lockNote(s: { playing: boolean; interrupted: boolean; status: TrackStatus; onTrack: boolean; covered: boolean }): string {
   if (s.interrupted && !s.playing) return "The phone stopped the play while the screen was off. Press play to carry on.";
