@@ -124,6 +124,8 @@ export class PlayerEngine {
   /** Tracks that failed to play, by key: never tried again on this screen. */
   private badTracks = new Set<string>();
   private frame = 0;
+  /** The next item boundary in the track, while it plays (see syncTrack). */
+  private boundary: ReturnType<typeof setTimeout> | undefined;
   private listeners = new Set<() => void>();
 
   constructor(
@@ -471,6 +473,7 @@ export class PlayerEngine {
   };
 
   private onPause = () => {
+    clearTimeout(this.boundary);
     const gap = this.state.gap;
     if (gap && this.phase?.kind === "track") this.set({ gap: { ...gap, endsAt: null } });
     if (gap && this.phase?.kind === "speak") {
@@ -594,6 +597,12 @@ export class PlayerEngine {
 
   /** The item playing now (or the last one before the gap that is playing). */
   private trackItem(): (TrackItem & { index: number }) | null {
+    const slot = this.trackSlot();
+    return slot === null ? null : this.current!.items[slot]!;
+  }
+
+  /** Where trackItem's item sits in the current track's items. */
+  private trackSlot(): number | null {
     const items = this.current?.items;
     if (!items?.length) return null;
     const ms = this.audio.currentTime * 1000;
@@ -604,14 +613,23 @@ export class PlayerEngine {
       if (items[mid]!.startMs <= ms) lo = mid;
       else hi = mid - 1;
     }
-    return items[lo]!;
+    return lo;
   }
 
-  /** Follows the track's time: the current line, the speed for it, and the listener's pause. */
+  /**
+   * Follows the track's time: the current line, the speed for it, and the listener's pause. Runs on
+   * timeupdate and animation frames, and once more at the next item boundary: with the phone
+   * locked there are no frames and timeupdate comes about 4 times a second, so at 4× up to a second
+   * of the next item would play at the wrong speed (the listener's pause cut short). The timer only
+   * changes the speed and the line shown; playback never waits on it.
+   */
   private syncTrack() {
+    clearTimeout(this.boundary);
+    this.boundary = undefined;
     if (this.phase?.kind !== "track") return;
-    const item = this.trackItem();
-    if (!item) return;
+    const slot = this.trackSlot();
+    if (slot === null) return;
+    const item = this.current!.items[slot]!;
     const ms = this.audio.currentTime * 1000;
     const inside = ms < item.startMs + item.durationMs;
     if (item.index !== this.phase.index || item.index !== this.state.index) {
@@ -629,6 +647,10 @@ export class PlayerEngine {
         this.set({ gap: { index: item.index, durationMs: item.durationMs, endsAt: playing ? performance.now() + remainingMs : null, remainingMs } });
       }
     } else if (gap) this.set({ gap: null });
+    const boundaryMs = inside ? item.startMs + item.durationMs : this.current!.items[slot + 1]?.startMs;
+    if (this.state.playing && boundaryMs !== undefined && boundaryMs > ms) {
+      this.boundary = setTimeout(() => this.syncTrack(), (boundaryMs - ms) / (this.audio.playbackRate || 1) + 1);
+    }
   }
 
   /** Near the end of the track, fetch the lines after it, in case no newer track is ready by then. */
@@ -679,6 +701,7 @@ export class PlayerEngine {
 
   destroy() {
     this.token++;
+    clearTimeout(this.boundary);
     if (this.frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.frame);
     this.audio.removeEventListener("timeupdate", this.onTimeUpdate);
     this.audio.removeEventListener("ended", this.onEnded);

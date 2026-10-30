@@ -405,6 +405,39 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     expect(audio.playbackRate).toBe(3);
   });
 
+  it("changes speed at each item boundary even with no timeupdate or frame (a locked phone)", async () => {
+    const { audio, engine } = setup();
+    engine.setPart({ mine: new Set(["b"]), mode: "pause" });
+    engine.setSpeed(4);
+    const track = trackOf(["a", "b", "c"], { speak: ["b"], pauseThenRead: true });
+    engine.addTrack(track);
+    await flush();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      engine.play();
+      tick(audio, 0.5);
+      expect(audio.playbackRate).toBe(4);
+      // The rest of a lasts 1.5 s of media, 375 ms at 4×: then the pause after it plays at 1×.
+      audio.currentTime = 2.0;
+      vi.advanceTimersByTime(376);
+      expect(audio.playbackRate).toBe(1);
+      // Into my speaking pause, and out of it into c, with no timeupdate on the way.
+      audio.currentTime = startOf(track, "b", "speak");
+      vi.advanceTimersByTime(351);
+      expect(engine.getState().gap).toMatchObject({ index: 1 });
+      expect(audio.playbackRate).toBe(1);
+      audio.currentTime = startOf(track, "c");
+      vi.advanceTimersByTime(startOf(track, "c") * 1000);
+      expect(engine.getState().index).toBe(2);
+      expect(audio.playbackRate).toBe(4);
+      // Paused: nothing is left waiting.
+      engine.pause();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a change of part drops the track and carries on line by line from the current line", async () => {
     const { audio, engine } = setup();
     const track = trackOf(["a", "b", "c", "d", "e", "f"]);
