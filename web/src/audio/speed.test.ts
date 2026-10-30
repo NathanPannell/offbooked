@@ -5,12 +5,12 @@ import {
   formatSpeed,
   getSpeed,
   msUntil,
-  nextSpeed,
   parseSpeed,
   resetSpeedForTests,
   setSpeed,
   snapSpeed,
   SPEED_KEY,
+  speedChoices,
   SPEEDS,
   subscribeSpeed,
 } from "./speed";
@@ -45,15 +45,30 @@ describe("playback speeds", () => {
     expect(formatSpeed(1.5)).toBe("1.5×");
   });
 
-  it("a tap steps up through every speed, then round again from the slowest", () => {
-    const seen = [1];
-    for (let i = 0; i < SPEEDS.length; i++) seen.push(nextSpeed(seen[seen.length - 1]!));
-    expect(seen).toEqual([1, 1.25, 1.5, 2, 3, 4, 0.5, 0.75, 1]);
-    // A rate between steps goes to the next one up; anything out of range is clamped first.
-    expect(nextSpeed(1.1)).toBe(1.25);
-    expect(nextSpeed(2.5)).toBe(3);
-    expect(nextSpeed(9)).toBe(0.5);
-    expect(nextSpeed(0.1)).toBe(0.75);
+  it("the picker shows every speed at once, the one in use marked", () => {
+    const choices = speedChoices(1);
+    expect(choices.map((c) => c.label)).toEqual(["0.5×", "0.75×", "1×", "1.25×", "1.5×", "2×", "3×", "4×"]);
+    expect(choices.filter((c) => c.selected).map((c) => c.speed)).toEqual([1]);
+    expect(choices.map((c) => c.hint)).toEqual(["Slowest", null, "Normal", null, null, null, null, "Fastest"]);
+    // 4× is one pick away, wherever you start.
+    expect(speedChoices(4).find((c) => c.selected)?.label).toBe("4×");
+    // A rate between steps marks the nearest; anything out of range the end it's beyond.
+    expect(speedChoices(2.4).find((c) => c.selected)?.speed).toBe(2);
+    expect(speedChoices(9).find((c) => c.selected)?.speed).toBe(4);
+    expect(speedChoices(0.1).find((c) => c.selected)?.speed).toBe(0.5);
+    expect(speedChoices(Number.NaN).find((c) => c.selected)?.speed).toBe(1);
+  });
+
+  it("picking a speed plays everything at it and remembers it on this device", () => {
+    const heard: number[] = [];
+    const off = subscribeSpeed(() => heard.push(getSpeed()));
+    for (const choice of speedChoices(getSpeed())) setSpeed(choice.speed);
+    expect(heard).toEqual([0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]);
+    expect(storage.map.get(SPEED_KEY)).toBe("4");
+    off();
+    // A reload reads it back.
+    resetSpeedForTests();
+    expect(getSpeed()).toBe(4);
   });
 
   it("clamps any rate to 0.5×–4×, and nonsense to 1×", () => {

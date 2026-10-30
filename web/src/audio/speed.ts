@@ -5,7 +5,7 @@ import { readStorage, writeStorage } from "../lib/storage";
 // back and the other takes on a recording screen), picked with SpeedButton and remembered on this
 // device. Voices keep their pitch at any speed.
 
-/** The speeds a tap on SpeedButton steps through, in order; after the last it starts again. */
+/** The speeds SpeedButton's picker offers, slowest first. */
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4] as const;
 export const MIN_SPEED = SPEEDS[0];
 export const MAX_SPEED = SPEEDS[SPEEDS.length - 1];
@@ -18,13 +18,20 @@ export function clampSpeed(value: unknown): number {
   return Math.min(MAX_SPEED, Math.max(MIN_SPEED, value));
 }
 
-/** The speed after `current` on a tap: the next step up, or the slowest after the fastest. */
-export function nextSpeed(current: number): number {
-  const up = SPEEDS.find((s) => s > clampSpeed(current) + 1e-9);
-  return up ?? SPEEDS[0];
-}
-
 export const formatSpeed = (speed: number) => `${speed}×`;
+
+export type SpeedChoice = { speed: number; label: string; hint: string | null; selected: boolean };
+
+/** The picker's choices: every speed at once, the one in use marked, the ends and 1× named. */
+export function speedChoices(current: number): SpeedChoice[] {
+  const selected = snapSpeed(current);
+  return SPEEDS.map((speed) => ({
+    speed,
+    label: formatSpeed(speed),
+    hint: speed === DEFAULT_SPEED ? "Normal" : speed === MAX_SPEED ? "Fastest" : speed === MIN_SPEED ? "Slowest" : null,
+    selected: speed === selected,
+  }));
+}
 
 /** The step nearest any rate (clamped first), so a speed set in code is always one offered. */
 export function snapSpeed(value: unknown): number {
