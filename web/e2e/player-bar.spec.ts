@@ -56,7 +56,7 @@ function linesAboveTheBar(page: Page) {
       const covered: string[] = [];
       for (const x of [line.left + 8, (line.left + line.right) / 2, line.right - 8]) {
         const hit = document.elementFromPoint(x, y);
-        if (hit && !text.closest(".lyric")!.contains(hit)) covered.push(hit.className || hit.tagName);
+        if (hit && !text.closest(".lyric")!.contains(hit)) covered.push(hit.getAttribute("class") ?? hit.tagName);
       }
       out.push({ text: text.textContent ?? "", line, bar: box(bar), note: box(note), covered });
     }
@@ -94,12 +94,23 @@ for (const part of ["Just listening", "HORATIO"]) {
       expect(c.covered, `nothing over "${c.text}"`).toEqual([]);
     }
 
-    // Scrolled away by hand: "Back to current line" floats above the taller bar, not over its note.
-    await page.evaluate(() => window.dispatchEvent(new WheelEvent("wheel")));
-    const back = page.getByRole("button", { name: "Back to current line" });
-    await expect(back).toBeVisible();
-    const backBox = (await back.boundingBox())!;
-    const barBox = (await page.locator(".player-controls").boundingBox())!;
-    expect(backBox.y + backBox.height).toBeLessThanOrEqual(barBox.y);
+    // Scrolled away by hand: "Back to current line" floats above the bar, on one row, both with the
+    // note (playing) and without it (paused, the desktop bar back to a pill). Each try scrolls "by
+    // hand" again, so the pill is up even when following has come back on.
+    const backToCurrent = () =>
+      page.evaluate(() => {
+        window.dispatchEvent(new WheelEvent("wheel"));
+        const back = document.querySelector(".back-to-current");
+        if (!back) return { above: false, oneRow: false };
+        const r = back.getBoundingClientRect();
+        return { above: r.bottom <= document.querySelector(".player-controls")!.getBoundingClientRect().top, oneRow: r.height < 48 };
+      });
+    await expect.poll(backToCurrent).toEqual({ above: true, oneRow: true });
+    // Paused (or, at the end of the short scene, stopped on its last line): no note.
+    const pause = controls.getByRole("button", { name: "Pause", exact: true });
+    if (await pause.isVisible()) await pause.click();
+    await expect(note).toBeHidden();
+    await expect.poll(backToCurrent).toEqual({ above: true, oneRow: true });
+    await expect(page.getByRole("button", { name: "Back to current line" })).toBeVisible();
   });
 }

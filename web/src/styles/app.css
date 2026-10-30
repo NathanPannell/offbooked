@@ -3932,6 +3932,7 @@
   color: #fff;
   font-weight: 600;
   box-shadow: var(--shadow-lg);
+  white-space: nowrap;
   cursor: pointer;
 }
 
