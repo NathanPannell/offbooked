@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LineAudio, LineAudioApi, TrackItem } from "../api/types";
+import { SPEEDS } from "../audio/speed";
 import { ClipLoader } from "./clips";
 import { PlayerEngine } from "./engine";
 import type { Part, QueueLine } from "./queue";
@@ -206,6 +207,21 @@ describe("my role", () => {
     await playTo(audio, "f");
     const rates = Object.fromEntries(audio.played.filter((p) => p.src.startsWith("clip:")).map((p) => [p.src.slice(5), p.rate]));
     expect(rates).toEqual({ a: 3, b: 1, c: 3, d: 3, e: 1, f: 3 });
+  });
+
+  it.each(SPEEDS)("at %s× (every speed the picker offers), other people's lines play at it and mine at 1×", async (speed) => {
+    const { audio, engine } = setup();
+    engine.setPart(mine("read"));
+    engine.setSpeed(speed);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "f");
+    const clips = audio.played.filter((p) => p.src.startsWith("clip:"));
+    expect(Object.fromEntries(clips.map((p) => [p.src.slice(5), p.rate]))).toEqual({ a: speed, b: 1, c: speed, d: speed, e: 1, f: speed });
+    // The gaps between lines stay at 1×, and the voices keep their pitch.
+    expect(audio.played.filter((p) => isSilence(p.src)).every((p) => p.rate === 1)).toBe(true);
+    expect(audio.preservesPitch).toBe(true);
   });
 
   it("every new clip keeps the chosen speed, from 0.5× to 4×, with the voice's pitch kept", async () => {
@@ -436,6 +452,21 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it.each(SPEEDS)("at %s× on a track, other people's lines play at it; my pause and my line at 1×", async (speed) => {
+    const { audio, engine } = setup();
+    engine.setPart({ mine: new Set(["c"]), mode: "pause" });
+    engine.setSpeed(speed);
+    const track = trackOf(["a", "b", "c", "d"], { speak: ["c"], pauseThenRead: true });
+    engine.addTrack(track);
+    await flush();
+    engine.play();
+    const rateIn = (id: string, kind: TrackItem["kind"] = "line") => {
+      tick(audio, startOf(track, id, kind) + 0.5);
+      return audio.playbackRate;
+    };
+    expect([rateIn("a"), rateIn("b"), rateIn("c", "speak"), rateIn("c"), rateIn("d")]).toEqual([speed, speed, 1, 1, speed]);
   });
 
   it("a change of part drops the track and carries on line by line from the current line", async () => {

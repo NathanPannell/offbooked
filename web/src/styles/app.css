@@ -3950,42 +3950,119 @@
   border-top: 1px solid var(--line);
 }
 
-/* Playback speed (SpeedButton): tap to cycle 0.5× to 4×. In the player bar, balanced on the right by a spacer. */
+/* Playback speed (SpeedButton): a labelled button ("SPEED" over "1×") that opens the speed sheet.
+   In the player bar, balanced on the right by a spacer of the same width. */
 .speed-btn {
-  display: inline-grid;
-  place-items: center;
+  --speed-w: 56px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   flex: none;
-  width: var(--tap);
-  height: var(--tap);
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--muted);
-  font: 600 14px/1 var(--font-sans);
-  font-variant-numeric: tabular-nums;
+  width: var(--speed-w);
+  min-height: var(--tap);
+  padding: 4px 0;
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  font: 600 15px/1 var(--font-sans);
   cursor: pointer;
   transition:
     background var(--fast) var(--ease),
-    color var(--fast) var(--ease);
+    border-color var(--fast) var(--ease);
 }
 
 .speed-btn:hover {
-  background: var(--paper-deep);
-  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--edge-strong);
 }
 
-/* Beside Listen back on a take: as wide as its label, still a full tap target. */
+.speed-btn-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Off 1×, the speed shows in the accent, so a scene playing fast says so. */
+.speed-btn.is-changed .speed-btn-value {
+  color: var(--accent-text);
+}
+
+/* Beside Listen back on a take: the same label over the speed, borderless, as narrow as a tap
+   target so Listen back, Redo and Delete still share one row on a phone. */
 .speed-btn-sm {
   width: auto;
   min-width: var(--tap);
-  padding: 0 6px;
+  padding: 4px var(--s-1);
+  border-color: transparent;
+  background: transparent;
   font-size: var(--text-sm);
+}
+
+.speed-btn-sm:hover {
+  background: var(--paper-deep);
+  border-color: transparent;
 }
 
 .controls-spacer {
   flex: none;
-  width: var(--tap);
+  width: 56px;
+}
+
+/* The speed sheet: every speed at once, four to a row. */
+.speed-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-2);
+}
+
+.speed-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
+  padding: var(--s-2) var(--s-1);
+  border: var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  font: 600 var(--text-md) / 1 var(--font-sans);
+  cursor: pointer;
+  transition:
+    background var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+
+.speed-option:hover {
+  background: var(--paper);
+  border-color: var(--edge-strong);
+}
+
+.speed-option.is-selected {
+  border: 2px solid var(--ink);
+  background: var(--paper-deep);
+}
+
+.speed-option-hint {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.speed-note {
+  margin: var(--s-4) 0 0;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+
+.speed-remembered {
+  margin: var(--s-2) 0 0;
 }
 
 /* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
@@ -4151,6 +4228,21 @@
 
   .player-controls {
     gap: 12px;
+  }
+}
+
+/* The narrowest phones: the speed button and its spacer shrink so the bar still fits. */
+@media (max-width: 360px) {
+  .player-controls {
+    gap: 6px;
+  }
+
+  .player-controls .speed-btn {
+    --speed-w: 52px;
+  }
+
+  .player-controls .controls-spacer {
+    width: 52px;
   }
 }
 

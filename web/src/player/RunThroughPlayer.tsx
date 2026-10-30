@@ -465,7 +465,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
       )}
 
       <div className="player-controls" role="group" aria-label="Playback">
-        <SpeedButton label={hasRole ? "Speed of other people's lines" : "Speed"} />
+        <SpeedButton note={hasRole ? "Only other people's lines change speed. Your own lines, and the pauses to say them, stay at 1×." : undefined} />
         <button type="button" className="icon-btn" onClick={() => engine?.previous()} disabled={!hasAudio} aria-label="Previous line">
           <SkipBack size={24} />
         </button>
