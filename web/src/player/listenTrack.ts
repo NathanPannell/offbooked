@@ -87,6 +87,7 @@ interface Job extends Poll {
   /** It ends at a "Skip to my cues" stop: the stretch after the jump is asked for separately. */
   stop: Jump | null;
   ready?: boolean;
+  failed?: boolean;
 }
 
 /**
@@ -152,6 +153,7 @@ export function useListenTrack(opts: {
           if (box.job === job) setStatus("ready");
         },
         failed: () => {
+          job.failed = true;
           if (box.job === job) setStatus("failed");
         },
       });
@@ -174,7 +176,7 @@ export function useListenTrack(opts: {
       if (same(ahead) && ahead.start === index) {
         box.job = ahead;
         box.ahead = null;
-        setStatus(ahead.ready ? "ready" : "building");
+        setStatus(ahead.ready ? "ready" : ahead.failed ? "failed" : "building");
         return;
       }
       box.job = start(index, true);

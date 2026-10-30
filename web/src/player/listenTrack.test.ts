@@ -20,7 +20,7 @@ describe("the stretch asked for", () => {
 });
 
 describe("the stretch asked for, with Skip to my cues", () => {
-  const gap = { lines: 4, ms: 90_000, scenes: 0 };
+  const gap = { lines: 4, audioMs: 90_000, pauseMs: 1_400, scenes: 0 };
   // Mine: l0, l5, l9. After l0 a skip lands on l4 (l5's cue); after l5 a stop before l9 (cue l8).
   const part: Part = {
     mine: new Set(["l0", "l5", "l9"]),

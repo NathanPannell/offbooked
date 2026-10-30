@@ -19,7 +19,7 @@ import { PlayerEngine, type PlayerState } from "./engine";
 import { followLine } from "./follow";
 import { lockNote, useListenTrack } from "./listenTrack";
 import { LineText, LiveText, type CueSpan } from "./LiveText";
-import { aheadText, planJumps, sameJumps, type Jump } from "./autoSkip";
+import { aheadText, listeningMs, planJumps, sameJumps, type Jump } from "./autoSkip";
 import { myLineNumber, myStops, nextMine, previousMine } from "./myLines";
 import { MyLineNav } from "./MyLineNav";
 import { NO_PART, placeholderMs, type MyLineMode, type Part, type QueueLine } from "./queue";
@@ -117,16 +117,16 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   const stops = useMemo(() => (hasRole ? myStops(queue, mine) : []), [hasRole, queue, mine]);
   const [jumpNote, setJumpNote] = useState("");
 
-  // "Skip to my cues": what happens after each of the listener's lines (autoSkip.ts), measured in
-  // listening time at the playback speed, from recorded takes' lengths where the server knows them
-  // and the words elsewhere. An unchanged plan keeps its object, so no listen track is rebuilt.
+  // "Skip to my cues": what happens after each of the listener's lines (autoSkip.ts), measured at
+  // 1× from recorded takes' lengths where the server knows them and the words elsewhere. An
+  // unchanged plan keeps its object, so no listen track is rebuilt.
   const speed = usePlaybackSpeed();
   const autoSkip = hasRole && settings.autoSkip === true;
   const plannedJumps = useMemo(() => {
     if (!autoSkip) return undefined;
     const durations = data?.durations ?? {};
-    return planJumps(queue, stops, (id) => durations[id], speed);
-  }, [autoSkip, data, queue, stops, speed]);
+    return planJumps(queue, stops, (id) => durations[id]);
+  }, [autoSkip, data, queue, stops]);
   const [jumpsBox] = useState<{ jumps: ReadonlyMap<number, Jump> | undefined }>(() => ({ jumps: undefined }));
   if (!sameJumps(jumpsBox.jumps, plannedJumps)) jumpsBox.jumps = plannedJumps;
   const jumps = jumpsBox.jumps;
@@ -282,7 +282,7 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
   // Held before a long stretch ("Skip to my cues"): where the listener's next line is.
   const held = state.held;
   const heldScene = held ? data?.sections.find((s) => s.id === queue[held.next]?.sectionId)?.title : undefined;
-  const heldText = held ? `Your next line is in ${heldScene ?? "a later scene"}, ${aheadText(held.gap.ms)} ahead.` : "";
+  const heldText = held ? `Your next line is in ${heldScene ?? "a later scene"}, ${aheadText(listeningMs(held.gap, speed))} ahead.` : "";
 
   useEffect(() => {
     if (!data) return;

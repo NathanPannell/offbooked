@@ -743,7 +743,7 @@ describe("with the phone locked", () => {
 });
 
 describe("Skip to my cues", () => {
-  const gap = { lines: 4, ms: 90_000, scenes: 0 };
+  const gap = { lines: 4, audioMs: 90_000, pauseMs: 1_400, scenes: 0 };
   // Mine: a and e. After a, a skip lands on d (e's cue), with the fast-forward sound in between.
   const skipPart: Part = { mine: new Set(["a", "e"]), mode: "read", jumps: new Map([[0, { kind: "skip", from: 0, to: 3, next: 4, gap }]]) };
   // Mine: b and f. After b, a stop before the stretch to f; the jump lands on e (f's cue).
@@ -864,5 +864,62 @@ describe("Skip to my cues", () => {
     await flush();
     expect(audio.current.src).toBe("track:1");
     expect(audio.currentTime).toBeCloseTo(2);
+  });
+});
+
+describe("Skip to my cues: the reviewer's cases", () => {
+  const gap = { lines: 4, audioMs: 90_000, pauseMs: 1_400, scenes: 0 };
+  const skipPart: Part = { mine: new Set(["a", "e"]), mode: "read", jumps: new Map([[0, { kind: "skip", from: 0, to: 3, next: 4, gap }]]) };
+  const stopPart: Part = { mine: new Set(["b", "f"]), mode: "read", jumps: new Map([[1, { kind: "stop", from: 1, to: 4, next: 5, gap }]]) };
+  // The stretch from a with the skip: a, the sound, d, e.
+  const skipTrack = {
+    url: "track:1",
+    items: [
+      { lineId: "a", kind: "line" as const, startMs: 0, durationMs: 2000 },
+      { lineId: "d", kind: "line" as const, startMs: 2700, durationMs: 2000 },
+      { lineId: "e", kind: "line" as const, startMs: 5050, durationMs: 2000 },
+    ],
+  };
+
+  it("a skipped line played by hand doesn't enter the track inside the sound before the cue", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(skipPart);
+    engine.addTrack(skipTrack);
+    await flush();
+    // c is one of the lines the skip leaves out: tapped, it plays line by line.
+    engine.seekToSegment(2);
+    await flush();
+    expect(audio.current.src).toBe("clip:c");
+    audio.finish();
+    await flush();
+    // The track has a, not c, before d: the pause plays line by line.
+    expect(audio.current.src).not.toBe("track:1");
+    expect(isSilence(audio.current.src)).toBe(true);
+  });
+
+  it("Previous line while stopped plays my line again", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    engine.previous();
+    expect(engine.getState()).toMatchObject({ index: 1, held: null });
+  });
+
+  it("stopped, and the stretch is now a skip: moves to where the skip lands, still paused", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    engine.setPart({ ...stopPart, jumps: new Map([[1, { kind: "skip", from: 1, to: 4, next: 5, gap }]]) });
+    expect(engine.getState()).toMatchObject({ index: 4, playing: false, held: null });
   });
 });

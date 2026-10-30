@@ -108,7 +108,7 @@ describe("silence", () => {
 });
 
 describe("Skip to my cues", () => {
-  const gap = { lines: 4, ms: 90_000, scenes: 0 };
+  const gap = { lines: 4, audioMs: 90_000, pauseMs: 1_400, scenes: 0 };
   const skipping: Part = { ...part("read"), jumps: new Map([[1, { kind: "skip", from: 1, to: 4, next: 5, gap }]]) };
   const stopping: Part = { ...part("read"), jumps: new Map([[1, { kind: "stop", from: 1, to: 4, next: 5, gap }]]) };
 
@@ -122,6 +122,10 @@ describe("Skip to my cues", () => {
   it("a stop doesn't skip: the engine stops there and asks", () => {
     expect(nextIndex(lines, 1, stopping)).toBe(2);
     expect(pauseBetweenMs(lines, 1, 2, stopping)).toBe(LINE_GAP_MS);
+  });
+
+  it("at a stop, fetches ahead from where the jump lands", () => {
+    expect(prefetchWindow(lines, 0, 3, stopping)).toEqual(["a", "b", "e"]);
   });
 
   it("fetches ahead along the skip", () => {

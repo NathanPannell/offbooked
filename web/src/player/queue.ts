@@ -105,11 +105,14 @@ export function stepFor(lines: QueueLine[], index: number, part: Part, recordedM
 }
 
 /** The line IDs to have ready, in playback order from `index` (included). My lines in "skip" are
- * fetched too: a recorded take times their silence. */
+ * fetched too: a recorded take times their silence. At a "Skip to my cues" stop it goes on from
+ * where the jump lands, which is what usually plays next. */
 export function prefetchWindow(lines: QueueLine[], index: number, count: number, part: Part = NO_PART): string[] {
   const out: string[] = [];
-  for (let i = playableFrom(lines, index, part); i !== null && out.length < count; i = nextIndex(lines, i, part)) {
+  for (let i = playableFrom(lines, index, part); i !== null && out.length < count;) {
     out.push(lines[i]!.lineId);
+    const jump = part.jumps?.get(i);
+    i = jump?.kind === "stop" ? playableFrom(lines, jump.to, part) : nextIndex(lines, i, part);
   }
   return out;
 }

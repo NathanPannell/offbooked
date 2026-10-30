@@ -182,9 +182,11 @@ export class PlayerEngine {
     if (!samePart(before, part) && this.tracks.length) this.clearTracks();
     const phase = this.phase;
     if (!phase) return;
-    // Held, and the stretch no longer stops ("Skip to my cues" turned off): on to the next line, paused.
+    // Held, and the stretch no longer stops ("Skip to my cues" turned off): on to the next line, or
+    // where a skip now lands, paused.
     if (phase.kind === "held") {
-      if (part.jumps?.get(phase.index)?.kind !== "stop") this.startLine(phase.index + 1, false);
+      const jump = part.jumps?.get(phase.index);
+      if (jump?.kind !== "stop") this.startLine(jump?.kind === "skip" ? jump.to : phase.index + 1, false);
       return;
     }
     if (phase.kind === "track") {
@@ -351,7 +353,13 @@ export class PlayerEngine {
   previous() {
     const phase = this.phase;
     const elapsed =
-      phase?.kind === "track" ? this.trackElapsedMs() : phase?.kind === "line" ? this.audio.currentTime * 1000 : phase?.kind === "pause" ? Infinity : 0;
+      phase?.kind === "track"
+        ? this.trackElapsedMs()
+        : phase?.kind === "line"
+          ? this.audio.currentTime * 1000
+          : phase?.kind === "pause" || phase?.kind === "held"
+            ? Infinity
+            : 0;
     const index = previousIndex(this.state.index, elapsed);
     this.seekToSegment(index, this.state.playing);
   }
@@ -596,7 +604,11 @@ export class PlayerEngine {
   private enterTrackBefore(from: number, next: number): boolean {
     const track = this.trackFor(next);
     if (!track) return false;
-    const atMs = track.items[track.first.get(next)!]!.startMs - pauseBetweenMs(this.lines, from, next, this.part);
+    const slot = track.first.get(next)!;
+    // Only where the track has `from` just before `next`: a skip makes the track jump where line by
+    // line doesn't (or the other way round), and its pause is then another one.
+    if (track.items[slot - 1]?.index !== from) return false;
+    const atMs = track.items[slot]!.startMs - pauseBetweenMs(this.lines, from, next, this.part);
     if (atMs < 0) return false;
     ++this.token;
     this.playTrackAt(next, track, atMs);
