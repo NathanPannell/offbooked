@@ -158,6 +158,8 @@ export interface RunThrough {
   render: Render;
   /** Where each dialogue line's audio comes from, by line ID. Missing on older servers. */
   sources?: Record<string, AudioSource>;
+  /** How long each line with a recorded take plays, by line ID. Missing on older servers. */
+  durations?: Record<string, number>;
   myCharacterIds: string[];
 }
 
@@ -210,6 +212,8 @@ export interface ListenTrackRequest {
   /** The listener's own lines, and what happens on them. */
   mine: string[];
   mode: "read" | "skip" | "pause";
+  /** Lines after which "Skip to my cues" leaves lines out: the fast-forward sound plays before the next listed one. */
+  skips?: string[];
 }
 
 /** Line audio calls, scoped to a director's production or an actor's invite. */

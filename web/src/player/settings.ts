@@ -17,6 +17,8 @@ export interface PlayerSettings {
    * saves the mode in force, and that one (an old default, say) shouldn't stick.
    */
   modePicked?: boolean;
+  /** "Skip to my cues": past long stretches without the listener's lines (player/autoSkip.ts). Off unless turned on. */
+  autoSkip?: boolean;
 }
 
 const MODES: MyLineMode[] = ["read", "skip", "pause"];
@@ -49,6 +51,7 @@ export function parseSettings(raw: string | null, fallback: PlayerSettings, role
       role: typeof v.role === "string" && (v.role === "" || roles.has(v.role)) ? v.role : fallback.role,
       mode: picked ? (v.mode as MyLineMode) : fallback.mode,
       ...(picked ? { modePicked: true } : {}),
+      ...(v.autoSkip === true ? { autoSkip: true } : {}),
     };
   } catch {
     return fallback;

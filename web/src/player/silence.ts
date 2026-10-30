@@ -7,22 +7,27 @@ const RATE = 8000;
 const cache = new Map<number, string>();
 
 export function silenceWav(ms: number): Uint8Array<ArrayBuffer> {
-  const samples = Math.max(1, Math.round((ms * RATE) / 1000));
-  const bytes = new Uint8Array(44 + samples * 2);
+  return wav(new Int16Array(Math.max(1, Math.round((ms * RATE) / 1000))), RATE);
+}
+
+/** A mono 16-bit WAV file of these samples. */
+export function wav(samples: Int16Array, rate: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(44 + samples.length * 2);
   const view = new DataView(bytes.buffer);
   const text = (offset: number, s: string) => [...s].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
   text(0, "RIFF");
-  view.setUint32(4, 36 + samples * 2, true);
+  view.setUint32(4, 36 + samples.length * 2, true);
   text(8, "WAVEfmt ");
   view.setUint32(16, 16, true);
   view.setUint16(20, 1, true); // PCM
   view.setUint16(22, 1, true); // mono
-  view.setUint32(24, RATE, true);
-  view.setUint32(28, RATE * 2, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
   view.setUint16(32, 2, true);
   view.setUint16(34, 16, true);
   text(36, "data");
-  view.setUint32(40, samples * 2, true);
+  view.setUint32(40, samples.length * 2, true);
+  samples.forEach((sample, i) => view.setInt16(44 + i * 2, sample, true));
   return bytes;
 }
 

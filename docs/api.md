@@ -298,6 +298,7 @@ interface LineAudio {
 interface RunThrough {
   // ...as before, plus:
   sources: Record<string, AudioSource>; // each dialogue line's source, without making anything
+  durations: Record<string, number>; // ms each line with a normalized current take plays for (the player's "Skip to my cues" measures gaps with it)
 }
 ```
 
@@ -453,7 +454,7 @@ On a locked phone the website's line-by-line playback stops: it gives its `<audi
 | POST | `/api/productions/:id/listen-track` | director (own production) | `{ track: ListenTrack }` |
 | POST | `/api/invite/listen-track` | actor | Same, for any line of the actor's production. |
 
-Body: `{ lineIds: string[]; mine?: string[]; mode?: "read" | "skip" | "pause" }`. `lineIds` are dialogue lines and stage directions in playback order, at most 300 (`MAX_TRACK_LINES`); lines that aren't playable lines of that production are left out, and none left is 400. `mine` are the listener's own lines and `mode` what happens on them, as in the player (default `"read"`). Bad ids or mode are 400.
+Body: `{ lineIds: string[]; mine?: string[]; mode?: "read" | "skip" | "pause"; skips?: string[] }`. `lineIds` are dialogue lines and stage directions in playback order, at most 300 (`MAX_TRACK_LINES`); lines that aren't playable lines of that production are left out, and none left is 400. `mine` are the listener's own lines and `mode` what happens on them, as in the player (default `"read"`). `skips` are lines after which the listener's "Skip to my cues" leaves lines out: the next listed line is where the skip lands, and a 700 ms fast-forward sound (`track/fastForward.ts`) takes the place of the pause before it. Bad ids or mode are 400.
 
 ```ts
 type ListenTrack =
