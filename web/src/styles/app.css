@@ -4019,12 +4019,12 @@
 }
 
 @media (hover: hover) {
-  .my-line-btn:hover:not(:disabled) {
+  .my-line-btn:hover:not([aria-disabled="true"]) {
     background: var(--paper-deep);
   }
 }
 
-.my-line-btn:disabled {
+.my-line-btn[aria-disabled="true"] {
   color: var(--muted);
   opacity: 0.5;
   cursor: not-allowed;

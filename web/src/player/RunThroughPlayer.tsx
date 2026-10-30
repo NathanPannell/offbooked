@@ -305,7 +305,9 @@ export function RunThroughPlayer({ load, audio, initialMode = "full", initialRol
     engine.seekToSegment(index, state.playing);
     const n = myLineNumber(stops, index);
     const scene = sections.find((s) => s.id === queue[index]?.sectionId)?.title;
-    setJumpNote(`Your line ${n} of ${stops.length}${scene ? `, ${scene}` : ""}.`);
+    const note = `Your line ${n} of ${stops.length}${scene ? `, ${scene}` : ""}.`;
+    // The same words twice are still read out: they differ by a trailing space.
+    setJumpNote((before) => (before === note ? `${note} ` : note));
   };
   const nextMineAt = hasAudio ? nextMine(stops, state.index) : null;
   const previousMineAt = hasAudio ? previousMine(stops, state.index) : null;

@@ -24,8 +24,8 @@ test("following one part, a tap goes to my next line's cue, past others' lines a
   await page.getByRole("button", { name: "Listen", exact: true }).click();
 
   const controls = page.getByRole("group", { name: "Playback" });
-  const next = controls.getByRole("button", { name: "Next line of mine" });
-  const previous = controls.getByRole("button", { name: "Previous line of mine" });
+  const next = controls.getByRole("button", { name: "My next line" });
+  const previous = controls.getByRole("button", { name: "My previous line" });
   const current = page.locator('.lyric[aria-current="true"]');
   await expect(controls.getByRole("button", { name: "Play", exact: true })).toBeEnabled();
 
