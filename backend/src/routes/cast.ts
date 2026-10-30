@@ -7,6 +7,7 @@ import { body, idOf, optionalEmail, optionalString, requiredString, uuidList } f
 import { partsRecordedBy, topRecorders } from "../recorders.ts";
 import { inferInBackground } from "../shared.ts";
 import { castMemberView, castRows } from "../views.ts";
+import { prebuildTracks } from "../track/prebuild.ts";
 
 async function ownedActor(sql: Sql, user: Director, actorId: string): Promise<{ id: string; productionId: string }> {
   const [a] = await sql<{ id: string; productionId: string }[]>`
@@ -56,6 +57,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
       await assignCharacters(tx, p.id, row!.id, characterIds);
       return row!.id;
     });
+    if (characterIds.length) prebuildTracks(ctx, p.id, "part");
     return { member: await member(p.id, actorId) };
   });
 
@@ -73,6 +75,7 @@ export function castRoutes(app: FastifyInstance, ctx: Ctx) {
       if (phone !== undefined) await tx`update actors set phone = ${phone} where id = ${actor.id}`;
       if (characterIds) await assignCharacters(tx, actor.productionId, actor.id, characterIds);
     });
+    if (characterIds) prebuildTracks(ctx, actor.productionId, "part");
     return { member: await member(actor.productionId, actor.id) };
   });
 

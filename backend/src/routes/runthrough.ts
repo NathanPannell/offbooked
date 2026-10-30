@@ -6,6 +6,7 @@ import { scheduleRender } from "../render/queue.ts";
 import { renderView } from "../render/view.ts";
 import { runThrough } from "../runthrough.ts";
 import { lineAudio, oneLineAudio, playPriority, warmIds } from "../linestream.ts";
+import { prebuildTracks } from "../track/prebuild.ts";
 import { listenTrack } from "../track/track.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
 
@@ -13,6 +14,8 @@ export function runthroughRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get("/api/productions/:id/runthrough", async (req) => {
     const user = await requireDirector(ctx, req);
     const p = await viewableProduction(ctx, user, idOf(req.params));
+    // About to listen: the usual tracks are built now if anything is missing (track/prebuild.ts).
+    prebuildTracks(ctx, p.id, "open");
     return runThrough(ctx, p, []);
   });
 

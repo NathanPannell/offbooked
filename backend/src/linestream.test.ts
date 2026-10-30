@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -53,6 +54,18 @@ async function until(cond: () => boolean, what: string, ms = 10_000) {
     await tick();
   }
 }
+
+test("the priority pool frees a background slot even when the work is raised just as it starts", async () => {
+  const pool = new PriorityPool(2);
+  const t = pool.ticket(TTS_PRIORITY.render);
+  const first = pool.use(t, async () => "first");
+  // Started (its slot counted as background) but not yet resumed: a listener asks for the same thing.
+  pool.raise(t, TTS_PRIORITY.play);
+  assert.equal(await first, "first");
+  // The one background slot is free again: more background work runs.
+  const next = pool.use(pool.ticket(TTS_PRIORITY.render), async () => "next");
+  assert.equal(await Promise.race([next, delay(1000).then(() => "stuck")]), "next");
+});
 
 test("the priority pool runs urgent work first and keeps a slot free of background work", async () => {
   const pool = new PriorityPool(2);

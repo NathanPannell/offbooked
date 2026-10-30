@@ -5,6 +5,7 @@ import { createSql, migrate } from "./db.ts";
 import { recoverScriptParses } from "./parse/job.ts";
 import { recoverRenders, startRenderWorker } from "./render/queue.ts";
 import { stopNormalizing } from "./render/takeaudio.ts";
+import { stopPrebuilding } from "./track/prebuild.ts";
 import { startRetentionWorker } from "./retention.ts";
 
 const config = loadConfig();
@@ -46,6 +47,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     await worker.stop();
     await retention.stop();
     stopNormalizing(ctx);
+    stopPrebuilding(ctx);
     await ctx.jobs.idle();
     await ctx.tts?.close();
     await ctx.aligner?.close();

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { inferInBackground } from "../shared.ts";
+import { prebuildTracks } from "../track/prebuild.ts";
 import type { Ctx } from "../context.ts";
 import type { Tx } from "../db.ts";
 import { ScriptInputError } from "./pdf.ts";
@@ -70,7 +71,10 @@ export async function runScriptParse(ctx: Ctx, scriptId: string): Promise<void> 
       await tx`update productions set script_status = 'ready', script_error = null where id = ${script.productionId}`;
       return true;
     });
-    if (current) inferInBackground(ctx, script.productionId);
+    if (current) {
+      inferInBackground(ctx, script.productionId);
+      prebuildTracks(ctx, script.productionId, "script");
+    }
     if (!current) await ctx.sql`update scripts set status = 'failed', error = 'Replaced by a newer upload', completed_at = now() where id = ${scriptId}`;
   } catch (err) {
     const message = err instanceof ScriptInputError ? err.message : "Something went wrong while reading the script. Try again.";

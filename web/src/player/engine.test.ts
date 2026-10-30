@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LineAudio, LineAudioApi, TrackItem } from "../api/types";
 import { SPEEDS } from "../audio/speed";
 import { ClipLoader } from "./clips";
-import { PlayerEngine } from "./engine";
+import { PlayerEngine, TRACK_URL_FRESH_MS } from "./engine";
 import { fastForwardUrl } from "./fastForward";
-import type { Part, QueueLine } from "./queue";
+import { pollTrack, stopToFetch, stretchToAsk, trackWindow, windowSpan } from "./listenTrack";
+import { NO_PART, type Part, type QueueLine } from "./queue";
 
 // A stand-in for <audio>: records what plays and at what rate; tests end each clip by hand.
 class FakeAudio extends EventTarget {
@@ -381,6 +382,69 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     expect(audio.current.src).toBe("track:1");
     expect(audio.currentTime).toBe(0);
     expect(engine.getState().onTrack).toBe(true);
+  });
+
+  it("with the track built ahead and asked for when the player opens, the first play is on it and waits for no line", async () => {
+    const { audio, engine, calls } = setup();
+    const track = trackOf(["a", "b", "c", "d", "e", "f"]);
+    // What useListenTrack does on open, before play: the opening stretch, ready at the first ask.
+    const start = stretchToAsk(null, lines, NO_PART, 0, engine.trackReach(0));
+    expect(start).toBe(0);
+    const req = trackWindow(lines, start!, NO_PART);
+    const ask = vi.fn(() => Promise.resolve({ track: { status: "ready" as const, durationMs: 14_000, ...track } }));
+    pollTrack({ cancelled: false }, ask, req, { ready: (t) => engine.addTrack(t), failed: () => {} });
+    await flush();
+    expect(ask).toHaveBeenCalledOnce();
+    expect(ask).toHaveBeenCalledWith({ lineIds: ["a", "b", "c", "d", "e", "f"], mine: [], mode: "read" });
+    const fetchedOnOpen = calls.length;
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    expect(engine.getState()).toMatchObject({ index: 0, onTrack: true, playing: true });
+    audio.currentTime = startOf(track, "c");
+    audio.dispatchEvent(new Event("timeupdate"));
+    expect(engine.getState().index).toBe(2);
+    // Only the opening lines fetched ahead on open, in case the track wasn't ready; nothing since.
+    expect(calls.filter((c) => !c.prefetch)).toEqual([]);
+    expect(calls.length).toBe(fetchedOnOpen);
+    expect(new Set(audio.played.map((p) => p.src))).toEqual(new Set(["track:1"]));
+  });
+
+  it("with Skip to my cues on but nothing to skip, the first play is on the same prebuilt track", async () => {
+    const { audio, engine } = setup();
+    const part: Part = { mine: new Set(["b"]), mode: "pause", jumps: new Map() };
+    engine.setPart(part);
+    const track = trackOf(["a", "b", "c", "d", "e", "f"], { speak: ["b"], pauseThenRead: true });
+    const req = trackWindow(lines, stretchToAsk(null, lines, part, 0, null)!, part);
+    expect(req).toEqual({ lineIds: ["a", "b", "c", "d", "e", "f"], mine: ["b"], mode: "pause" });
+    engine.addTrack(track);
+    await flush();
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    expect(engine.getState()).toMatchObject({ index: 0, onTrack: true, playing: true });
+  });
+
+  it("doesn't start a track whose URL is too old, and takes the fresh one when it comes back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { audio, engine } = setup();
+      engine.addTrack(trackOf(["a", "b", "c", "d", "e", "f"], { url: "track:1?sig=old" }));
+      await flush();
+      // The player sat open for longer than the link lasts.
+      vi.setSystemTime(Date.now() + TRACK_URL_FRESH_MS + 1000);
+      expect(engine.trackReach(0)).toBeNull();
+      engine.play();
+      await flush();
+      expect(audio.current.src).toBe("clip:a");
+      // Asked again on play: the same file, a fresh link, entered at the next line.
+      engine.addTrack(trackOf(["a", "b", "c", "d", "e", "f"], { url: "track:1?sig=new" }));
+      expect(engine.trackReach(0)).toBe(5);
+      audio.finish();
+      await flush();
+      expect(audio.current.src).toBe("track:1?sig=new");
+      expect(engine.getState().onTrack).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports the line's time inside the track for highlighting, and 'after' in the pause", async () => {
@@ -842,6 +906,43 @@ describe("Skip to my cues", () => {
     audio.finish();
     await flush();
     expect(engine.getState()).toMatchObject({ index: 1, playing: false, onTrack: false, held: { to: 4 } });
+  });
+
+  it("the stretch asked for on open and the one fetched ahead of its stop are both there at the stop", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    // On open, before play: the stretch to the stop, then (it is near) the stretch after the jump.
+    const from = stretchToAsk(null, lines, stopPart, 0, null)!;
+    const req = trackWindow(lines, from, stopPart);
+    expect(req.lineIds).toEqual(["a", "b"]);
+    const asked = { queue: lines, part: stopPart, ...windowSpan(lines, from, stopPart, req), at: Date.now() };
+    expect(stopToFetch(asked, 0)).toBe(4);
+    engine.addTrack({
+      url: "track:1",
+      items: [
+        { lineId: "a", kind: "line", startMs: 0, durationMs: 2000 },
+        { lineId: "b", kind: "line", startMs: 2350, durationMs: 2000 },
+      ],
+    });
+    engine.addTrack({
+      url: "track:2",
+      items: [
+        { lineId: "e", kind: "line", startMs: 0, durationMs: 2000 },
+        { lineId: "f", kind: "line", startMs: 2350, durationMs: 2000 },
+      ],
+    });
+    await flush();
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    audio.currentTime = 3;
+    audio.finish();
+    await flush();
+    expect(engine.getState()).toMatchObject({ index: 1, playing: false, held: { to: 4 } });
+    // Held: the player's index is where the jump lands, which is the stretch already fetched.
+    expect(stretchToAsk(asked, lines, stopPart, 4, engine.trackReach(4))).toBe(4);
+    engine.play();
+    expect(audio.current.src).toBe("track:2");
+    expect(engine.getState()).toMatchObject({ index: 4, onTrack: true, playing: true, held: null });
   });
 
   it("from a line that ends line by line, enters a track at the start of the fast-forward sound before the cue", async () => {

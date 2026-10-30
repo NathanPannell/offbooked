@@ -8,6 +8,7 @@ import { inviteToken, inviteUrl, joinUrl, parseJoinToken } from "../invite.ts";
 import { castFacingName } from "../names.ts";
 import { enforce, LIMITS } from "../ratelimit.ts";
 import { topRecorders, type TopRecorder } from "../recorders.ts";
+import { prebuildTracks } from "../track/prebuild.ts";
 
 export interface PartCard {
   id: string;
@@ -94,6 +95,7 @@ export function joinRoutes(app: FastifyInstance, ctx: Ctx) {
       if (characterIds.length) await tx`insert into actor_characters ${tx(characterIds.map((characterId) => ({ actorId: actor!.id, characterId })))}`;
       return actor!.id;
     });
+    if (characterIds.length) prebuildTracks(ctx, p.id, "part");
     return { inviteToken: inviteToken(config.inviteSecret, actorId, 1), inviteUrl: inviteUrl(config.appUrl, config.inviteSecret, actorId, 1) };
   });
 

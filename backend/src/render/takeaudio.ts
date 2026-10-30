@@ -5,7 +5,7 @@ import type { Ctx } from "../context.ts";
 import { ContentDeletedError, sweepIfDeleted } from "../retention.ts";
 import { alignLine, type LineAlignment } from "../align/ctc.ts";
 import { flattenStretches } from "../taketiming.ts";
-import { TTS_PRIORITY } from "../tts/service.ts";
+import { PriorityPool, TTS_PRIORITY, type Ticket } from "../tts/service.ts";
 import { encodeCue, normalizeClipCut } from "./ffmpeg.ts";
 
 export interface TakeAudioRow {
@@ -57,7 +57,8 @@ export function normalizeSoon(ctx: Ctx, productionId: string, take: TakeAudioRow
       // As it is now: a listener or the render may have normalized it while it waited.
       const [row] = await ctx.sql<TakeAudioRow[]>`
         select id, storage_key, normalized_key, normalized_samples, stream_key from takes where id = ${take.id} and deleted_at is null`;
-      if (row) await normalizedTake(ctx, productionId, row, { stream: true });
+      // Ahead of the render's and the listen tracks' backlog (render priority): someone just recorded it.
+      if (row) await normalizedTake(ctx, productionId, row, { stream: true, priority: TTS_PRIORITY.cue });
     } catch (err) {
       if (!(err instanceof ContentDeletedError)) ctx.log.error({ err, takeId: take.id }, "take normalization failed");
     }
@@ -80,8 +81,24 @@ export function stopNormalizing(ctx: Ctx): void {
   if (q) q.waiting.length = 0;
 }
 
-// Concurrent requests for the same take (a render and a listener) share one ffmpeg run.
-const inflight = new Map<string, Promise<NormalizedTake>>();
+// Concurrent requests for the same take (a render and a listener) share one ffmpeg run, and a
+// listener waiting for it raises its place in the queue.
+const inflight = new Map<string, { promise: Promise<NormalizedTake>; ticket: Ticket }>();
+
+/**
+ * Takes normalized at once, per server. Each one runs ffmpeg twice; a listen track asks for up to
+ * 300 lines at a time, and before this cap every take still on an older version (all of them,
+ * after a NORMALIZE_VERSION bump) started its ffmpeg together: production ran out of processes
+ * (`spawn ffmpeg EAGAIN`, 116 takes in six minutes on 2026-10-30) and those lines played as silence.
+ * By priority, so a line someone is waiting to hear goes before a track's or the render's.
+ */
+export const NORMALIZE_CONCURRENCY = 4;
+const pools = new WeakMap<Ctx, PriorityPool>();
+const poolFor = (ctx: Ctx) => {
+  let pool = pools.get(ctx);
+  if (!pool) pools.set(ctx, (pool = new PriorityPool(NORMALIZE_CONCURRENCY)));
+  return pool;
+};
 
 // A take's normalized audio, made and cached in storage on first use. The render passes `flacTo` to
 // get the FLAC written to its work directory; line playback passes `stream` to also get the .m4a.
@@ -100,12 +117,16 @@ export async function normalizedTake(
     if (opts.flacTo) await writeFile(opts.flacTo, await storage.get(have.normalizedKey));
     return { ...have, streamKey: take.streamKey };
   }
+  const priority = opts.priority ?? TTS_PRIORITY.render;
   let running = inflight.get(take.id);
-  if (!running) {
-    running = make(ctx, productionId, take, have, opts.priority ?? TTS_PRIORITY.render).finally(() => inflight.delete(take.id));
-    inflight.set(take.id, running);
+  if (running) poolFor(ctx).raise(running.ticket, priority);
+  else {
+    const pool = poolFor(ctx);
+    const ticket = pool.ticket(priority);
+    const promise = pool.use(ticket, () => make(ctx, productionId, take, have, ticket)).finally(() => inflight.delete(take.id));
+    inflight.set(take.id, (running = { promise, ticket }));
   }
-  const done = await running;
+  const done = await running.promise;
   if (opts.flacTo) await writeFile(opts.flacTo, await storage.get(done.normalizedKey));
   return done;
 }
@@ -132,7 +153,7 @@ async function make(
   productionId: string,
   take: TakeAudioRow,
   have: { normalizedKey: string; samples: number } | null,
-  priority: number,
+  ticket: Ticket,
 ): Promise<NormalizedTake> {
   const { storage, sql } = ctx;
   const dir = await mkdtemp(path.join(tmpdir(), "offbooked-take-"));
@@ -157,7 +178,7 @@ async function make(
     let aligned: number[] | null = null;
     const align = line
       ? async (pcm: Int16Array) => {
-          const found = await findLine(ctx, take.id, line.text, pcm, priority);
+          const found = await findLine(ctx, take.id, line.text, pcm, ticket.priority);
           aligned = found?.wordStartsMs ?? null;
           return found;
         }

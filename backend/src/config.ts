@@ -32,6 +32,9 @@ export interface Config {
   renderDebounceMs: number;
   /** Normalize each take as soon as it is uploaded (its cut, levelled clip and re-timed words), one at a time. */
   normalizeOnUpload: boolean;
+  /** Build the usual listen tracks ahead of time (track/prebuild.ts), and how long after a take or an edit. */
+  prebuildTracks: boolean;
+  prebuildQuietMs: number;
   tts: TtsConfig;
   align: AlignConfig;
   /** Accounts that may open the admin area (src/admin.ts), lowercased. Empty: nobody. */
@@ -107,6 +110,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     storage,
     renderDebounceMs: Number(env.RENDER_DEBOUNCE_MS ?? 15_000),
     normalizeOnUpload: env.NORMALIZE_ON_UPLOAD?.trim() !== "0",
+    prebuildTracks: env.PREBUILD_TRACKS?.trim() !== "0",
+    prebuildQuietMs: Math.max(0, Number(env.TRACK_PREBUILD_QUIET_MS ?? 120_000)),
     tts: {
       driver: env.TTS_DRIVER?.trim() === "off" ? "off" : "piper",
       piperBin: env.PIPER_BIN?.trim() || "/opt/piper/piper",
