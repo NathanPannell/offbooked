@@ -58,6 +58,13 @@ export function nativeNowPlaying(plugin = OffbookedNative): NowPlaying {
   };
 }
 
+/**
+ * The lock screen's buttons on the website. Next and previous move by line; no seek handlers, so
+ * iOS shows them as track buttons rather than skip-15-seconds. "stop" (some Android headsets and
+ * notifications) pauses.
+ */
+const WEB_ACTIONS = { play: "play", pause: "pause", stop: "pause", nexttrack: "next", previoustrack: "previous" } as const;
+
 /** On the website: the Media Session API, where the browser has it. */
 export function webNowPlaying(nav: Navigator = navigator): NowPlaying {
   const session = "mediaSession" in nav ? nav.mediaSession : null;
@@ -69,10 +76,24 @@ export function webNowPlaying(nav: Navigator = navigator): NowPlaying {
     },
     connect(controls) {
       if (!session) return () => {};
-      const actions = { play: "play", pause: "pause", nexttrack: "next", previoustrack: "previous" } as const;
-      for (const [action, command] of Object.entries(actions)) session.setActionHandler(action as MediaSessionAction, () => applyCommand(controls, command));
+      for (const [action, command] of Object.entries(WEB_ACTIONS)) {
+        try {
+          session.setActionHandler(action as MediaSessionAction, () => applyCommand(controls, command));
+        } catch {
+          // An action this browser doesn't know ("stop" in older Safari) throws; the rest still work.
+        }
+      }
       return () => {
-        for (const action of Object.keys(actions)) session.setActionHandler(action as MediaSessionAction, null);
+        for (const action of Object.keys(WEB_ACTIONS)) {
+          try {
+            session.setActionHandler(action as MediaSessionAction, null);
+          } catch {
+            // Never set (see above).
+          }
+        }
+        // Off the player: nothing is playing, so the lock screen shouldn't name a line.
+        session.metadata = null;
+        session.playbackState = "none";
       };
     },
   };

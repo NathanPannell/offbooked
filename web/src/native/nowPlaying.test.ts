@@ -71,12 +71,40 @@ describe("lock screen controls", () => {
     expect((session.metadata as { init: object }).init).toEqual({ title: "T", artist: "A", album: "B" });
     handlers.get("nexttrack")!();
     handlers.get("play")!();
-    expect(c.calls).toEqual(["next", "play"]);
+    handlers.get("previoustrack")!();
+    handlers.get("pause")!();
+    handlers.get("stop")!();
+    expect(c.calls).toEqual(["next", "play", "previous", "pause", "pause"]);
+    // No seek buttons: iOS shows next and previous instead of skipping 15 seconds.
+    expect([...handlers.keys()].some((a) => a.startsWith("seek"))).toBe(false);
+    np.show({ title: "T", artist: "A", album: "B", playing: true });
+    expect(session.playbackState).toBe("playing");
     close();
     expect([...handlers.values()].every((h) => h === null)).toBe(true);
+    // Leaving the player clears the lock screen.
+    expect(session.metadata).toBeNull();
+    expect(session.playbackState).toBe("none");
 
     const none = webNowPlaying({} as Navigator);
     expect(() => none.show({ title: "T", artist: "A", album: "B", playing: true })).not.toThrow();
     none.connect(c)();
+  });
+
+  it("on the website, an action the browser doesn't know doesn't stop the others", () => {
+    const handlers = new Map<string, (() => void) | null>();
+    const session = {
+      metadata: null as unknown,
+      playbackState: "none",
+      setActionHandler: (action: string, handler: (() => void) | null) => {
+        if (action === "stop") throw new TypeError("not supported");
+        handlers.set(action, handler);
+      },
+    };
+    const c = controls();
+    const close = webNowPlaying({ mediaSession: session } as unknown as Navigator).connect(c);
+    expect([...handlers.keys()].sort()).toEqual(["nexttrack", "pause", "play", "previoustrack"]);
+    handlers.get("nexttrack")!();
+    expect(c.calls).toEqual(["next"]);
+    expect(() => close()).not.toThrow();
   });
 });
