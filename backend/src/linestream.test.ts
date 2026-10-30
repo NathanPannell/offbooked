@@ -386,9 +386,12 @@ describe("line-by-line playback", { skip: dbSkip }, () => {
     const [row] = await t.ctx.sql<{ normalizedKey: string; streamKey: string }[]>`
       select normalized_key, stream_key from takes where line_id = ${own.id} order by created_at desc limit 1`;
     assert.ok(row!.normalizedKey && row!.streamKey, "the render's normalized FLAC is cached with the .m4a");
-    const sources = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json().sources;
-    assert.equal(sources[own.id], "actor");
-    assert.equal(sources[partner.id], "director");
+    const runthrough = (await get(`/api/productions/${pid}/runthrough`, bearer(alice))).json();
+    assert.equal(runthrough.sources[own.id], "actor");
+    assert.equal(runthrough.sources[partner.id], "director");
+    // The normalized take's length, for the player's skips; lines without one aren't listed.
+    assert.equal(runthrough.durations[own.id], mine.durationMs);
+    assert.ok(Object.keys(runthrough.durations).every((id) => id === own.id || id === partner.id));
   });
 });
 

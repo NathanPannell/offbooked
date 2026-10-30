@@ -3,7 +3,8 @@ import type { LineAudio, LineAudioApi, TrackItem } from "../api/types";
 import { SPEEDS } from "../audio/speed";
 import { ClipLoader } from "./clips";
 import { PlayerEngine, TRACK_URL_FRESH_MS } from "./engine";
-import { pollTrack, stretchToAsk, trackWindow } from "./listenTrack";
+import { fastForwardUrl } from "./fastForward";
+import { pollTrack, stopToFetch, stretchToAsk, trackWindow, windowSpan } from "./listenTrack";
 import { NO_PART, type Part, type QueueLine } from "./queue";
 
 // A stand-in for <audio>: records what plays and at what rate; tests end each clip by hand.
@@ -408,6 +409,20 @@ describe("listen tracks: one file, so it plays on with the phone locked", () => 
     expect(new Set(audio.played.map((p) => p.src))).toEqual(new Set(["track:1"]));
   });
 
+  it("with Skip to my cues on but nothing to skip, the first play is on the same prebuilt track", async () => {
+    const { audio, engine } = setup();
+    const part: Part = { mine: new Set(["b"]), mode: "pause", jumps: new Map() };
+    engine.setPart(part);
+    const track = trackOf(["a", "b", "c", "d", "e", "f"], { speak: ["b"], pauseThenRead: true });
+    const req = trackWindow(lines, stretchToAsk(null, lines, part, 0, null)!, part);
+    expect(req).toEqual({ lineIds: ["a", "b", "c", "d", "e", "f"], mine: ["b"], mode: "pause" });
+    engine.addTrack(track);
+    await flush();
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    expect(engine.getState()).toMatchObject({ index: 0, onTrack: true, playing: true });
+  });
+
   it("doesn't start a track whose URL is too old, and takes the fresh one when it comes back", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -788,5 +803,224 @@ describe("with the phone locked", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("Skip to my cues", () => {
+  const gap = { lines: 4, audioMs: 90_000, pauseMs: 1_400, scenes: 0 };
+  // Mine: a and e. After a, a skip lands on d (e's cue), with the fast-forward sound in between.
+  const skipPart: Part = { mine: new Set(["a", "e"]), mode: "read", jumps: new Map([[0, { kind: "skip", from: 0, to: 3, next: 4, gap }]]) };
+  // Mine: b and f. After b, a stop before the stretch to f; the jump lands on e (f's cue).
+  const stopPart: Part = { mine: new Set(["b", "f"]), mode: "read", jumps: new Map([[1, { kind: "stop", from: 1, to: 4, next: 5, gap }]]) };
+
+  it("after my line, plays the fast-forward sound, then the cue of my next line", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(skipPart);
+    await flush();
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("clip:a");
+    audio.finish();
+    await flush();
+    expect(audio.current.src).toBe(fastForwardUrl());
+    expect(audio.current.rate).toBe(1);
+    audio.finish();
+    await flush();
+    expect(audio.current.src).toBe("clip:d");
+    await playTo(audio, "e");
+  });
+
+  it("the line-by-line buttons still go line by line", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(skipPart);
+    await flush();
+    engine.play();
+    await flush();
+    engine.next();
+    await flush();
+    expect(audio.current.src).toBe("clip:b");
+  });
+
+  it("stops before a very long stretch, and play makes the jump", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    expect(engine.getState()).toMatchObject({ index: 1, playing: false, interrupted: false, held: { from: 1, to: 4, next: 5 } });
+    const played = audio.played.length;
+    await flush();
+    expect(audio.played.length).toBe(played);
+    // A play, here or on the lock screen, goes to the cue.
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("clip:e");
+    expect(engine.getState()).toMatchObject({ index: 4, playing: true, held: null });
+  });
+
+  it("or plays on through it, with Keep listening", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    engine.keepListening();
+    await flush();
+    expect(audio.current.src).toBe("clip:c");
+    expect(engine.getState().held).toBeNull();
+  });
+
+  it("turned off while stopped: moves on to the next line, still paused", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    engine.setPart({ ...stopPart, jumps: undefined });
+    expect(engine.getState()).toMatchObject({ index: 2, playing: false, held: null });
+  });
+
+  it("a listen track that ends before the stretch stops there too", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    engine.addTrack({
+      url: "track:1",
+      items: [
+        { lineId: "a", kind: "line", startMs: 0, durationMs: 2000 },
+        { lineId: "b", kind: "line", startMs: 2350, durationMs: 2000 },
+      ],
+    });
+    await flush();
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    audio.currentTime = 3;
+    audio.finish();
+    await flush();
+    expect(engine.getState()).toMatchObject({ index: 1, playing: false, onTrack: false, held: { to: 4 } });
+  });
+
+  it("the stretch asked for on open and the one fetched ahead of its stop are both there at the stop", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    // On open, before play: the stretch to the stop, then (it is near) the stretch after the jump.
+    const from = stretchToAsk(null, lines, stopPart, 0, null)!;
+    const req = trackWindow(lines, from, stopPart);
+    expect(req.lineIds).toEqual(["a", "b"]);
+    const asked = { queue: lines, part: stopPart, ...windowSpan(lines, from, stopPart, req), at: Date.now() };
+    expect(stopToFetch(asked, 0)).toBe(4);
+    engine.addTrack({
+      url: "track:1",
+      items: [
+        { lineId: "a", kind: "line", startMs: 0, durationMs: 2000 },
+        { lineId: "b", kind: "line", startMs: 2350, durationMs: 2000 },
+      ],
+    });
+    engine.addTrack({
+      url: "track:2",
+      items: [
+        { lineId: "e", kind: "line", startMs: 0, durationMs: 2000 },
+        { lineId: "f", kind: "line", startMs: 2350, durationMs: 2000 },
+      ],
+    });
+    await flush();
+    engine.play();
+    expect(audio.current.src).toBe("track:1");
+    audio.currentTime = 3;
+    audio.finish();
+    await flush();
+    expect(engine.getState()).toMatchObject({ index: 1, playing: false, held: { to: 4 } });
+    // Held: the player's index is where the jump lands, which is the stretch already fetched.
+    expect(stretchToAsk(asked, lines, stopPart, 4, engine.trackReach(4))).toBe(4);
+    engine.play();
+    expect(audio.current.src).toBe("track:2");
+    expect(engine.getState()).toMatchObject({ index: 4, onTrack: true, playing: true, held: null });
+  });
+
+  it("from a line that ends line by line, enters a track at the start of the fast-forward sound before the cue", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(skipPart);
+    await flush();
+    engine.play();
+    await flush();
+    expect(audio.current.src).toBe("clip:a");
+    // The stretch from a, as the server lays it out: a, the sound (700 ms), d, e.
+    engine.addTrack({
+      url: "track:1",
+      items: [
+        { lineId: "a", kind: "line", startMs: 0, durationMs: 2000 },
+        { lineId: "d", kind: "line", startMs: 2700, durationMs: 2000 },
+        { lineId: "e", kind: "line", startMs: 5050, durationMs: 2000 },
+      ],
+    });
+    audio.finish();
+    await flush();
+    expect(audio.current.src).toBe("track:1");
+    expect(audio.currentTime).toBeCloseTo(2);
+  });
+});
+
+describe("Skip to my cues: the reviewer's cases", () => {
+  const gap = { lines: 4, audioMs: 90_000, pauseMs: 1_400, scenes: 0 };
+  const skipPart: Part = { mine: new Set(["a", "e"]), mode: "read", jumps: new Map([[0, { kind: "skip", from: 0, to: 3, next: 4, gap }]]) };
+  const stopPart: Part = { mine: new Set(["b", "f"]), mode: "read", jumps: new Map([[1, { kind: "stop", from: 1, to: 4, next: 5, gap }]]) };
+  // The stretch from a with the skip: a, the sound, d, e.
+  const skipTrack = {
+    url: "track:1",
+    items: [
+      { lineId: "a", kind: "line" as const, startMs: 0, durationMs: 2000 },
+      { lineId: "d", kind: "line" as const, startMs: 2700, durationMs: 2000 },
+      { lineId: "e", kind: "line" as const, startMs: 5050, durationMs: 2000 },
+    ],
+  };
+
+  it("a skipped line played by hand doesn't enter the track inside the sound before the cue", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(skipPart);
+    engine.addTrack(skipTrack);
+    await flush();
+    // c is one of the lines the skip leaves out: tapped, it plays line by line.
+    engine.seekToSegment(2);
+    await flush();
+    expect(audio.current.src).toBe("clip:c");
+    audio.finish();
+    await flush();
+    // The track has a, not c, before d: the pause plays line by line.
+    expect(audio.current.src).not.toBe("track:1");
+    expect(isSilence(audio.current.src)).toBe(true);
+  });
+
+  it("Previous line while stopped plays my line again", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    engine.previous();
+    expect(engine.getState()).toMatchObject({ index: 1, held: null });
+  });
+
+  it("stopped, and the stretch is now a skip: moves to where the skip lands, still paused", async () => {
+    const { audio, engine } = setup();
+    engine.setPart(stopPart);
+    await flush();
+    engine.play();
+    await flush();
+    await playTo(audio, "b");
+    audio.finish();
+    await flush();
+    engine.setPart({ ...stopPart, jumps: new Map([[1, { kind: "skip", from: 1, to: 4, next: 5, gap }]]) });
+    expect(engine.getState()).toMatchObject({ index: 4, playing: false, held: null });
   });
 });

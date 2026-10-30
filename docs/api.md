@@ -298,6 +298,7 @@ interface LineAudio {
 interface RunThrough {
   // ...as before, plus:
   sources: Record<string, AudioSource>; // each dialogue line's source, without making anything
+  durations: Record<string, number>; // ms each line with a normalized current take plays for (the player's "Skip to my cues" measures gaps with it)
 }
 ```
 
@@ -453,7 +454,7 @@ On a locked phone the website's line-by-line playback stops: it gives its `<audi
 | POST | `/api/productions/:id/listen-track` | director (own production) | `{ track: ListenTrack }` |
 | POST | `/api/invite/listen-track` | actor | Same, for any line of the actor's production. |
 
-Body: `{ lineIds: string[]; mine?: string[]; mode?: "read" | "skip" | "pause" }`. `lineIds` are dialogue lines and stage directions in playback order, at most 300 (`MAX_TRACK_LINES`); lines that aren't playable lines of that production are left out, and none left is 400. `mine` are the listener's own lines and `mode` what happens on them, as in the player (default `"read"`). Bad ids or mode are 400.
+Body: `{ lineIds: string[]; mine?: string[]; mode?: "read" | "skip" | "pause"; skips?: string[] }`. `lineIds` are dialogue lines and stage directions in playback order, at most 300 (`MAX_TRACK_LINES`); lines that aren't playable lines of that production are left out, and none left is 400. `mine` are the listener's own lines and `mode` what happens on them, as in the player (default `"read"`). `skips` are lines after which the listener's "Skip to my cues" leaves lines out: the next listed line is where the skip lands, and a 700 ms fast-forward sound (`track/fastForward.ts`) takes the place of the pause before it. Bad ids or mode are 400.
 
 ```ts
 type ListenTrack =
@@ -476,7 +477,7 @@ interface TrackItem {
 
 - Layout matches the player (`track/plan.ts`, kept in step with `web/src/player/queue.ts` and `timing.ts`): 350 ms between lines in a section, 1200 ms at a section change; on the listener's lines, `"skip"` is a `speak` item instead of the line and `"pause"` a `speak` item followed by the line. A `speak` item lasts a take's length plus 15% (at least 500 ms more), else the spoken words at 150 a minute, never under 1 s. The time between items is the pause between lines.
 - Built in-process, one at a time per server, from the same `.m4a` clips `LineAudio` serves (synthesizing whatever isn't made yet at the render's background priority, so listeners' own lines come first; waiting up to 5 minutes), each cut or padded to its exact length, then encoded once (AAC, 64 kb/s, 48 kHz mono, faststart). Stored at `productions/<id>/tracks/<hash>.m4a` and recorded in `listen_tracks` (migration `021`), keyed by a hash of the lines, the listener's lines and mode, each line's text, speaker, voices, current take and newest take change, and the TTS engine and settings, so a new take or an edited line makes a new track. A request goes before the tracks waiting to be built ahead.
-- Built ahead (`track/prebuild.ts`, migration `022`): the stretches the web player asks for start every 260 lines (`TRACK_STRIDE`; the last one runs to the end of the play, `trackStart`), and for each one the server keeps the full read (no `mine`, `"read"`) and each cast member's default (the parts they picked, `"pause"`, where the stretch has their lines) built, so the player's first ask usually answers `ready`. Anything else (another part, another mode, a request from another line) is built when first asked for. Prebuilt tracks are `prebuilt` and stay while current; one no listener was given is deleted as soon as a pass finds it out of date, one that was is left to the 12-hour rule below.
+- Built ahead (`track/prebuild.ts`, migration `022`): the stretches the web player asks for start every 260 lines (`TRACK_STRIDE`; the last one runs to the end of the play, `trackStart`), and for each one the server keeps the full read (no `mine`, `"read"`) and each cast member's default (the parts they picked, `"pause"`, where the stretch has their lines) built, so the player's first ask usually answers `ready`. Anything else (another part, another mode, a request from another line, any request with `skips`) is built when first asked for. Prebuilt tracks are `prebuilt` and stay while current; one no listener was given is deleted as soon as a pass finds it out of date, one that was is left to the 12-hour rule below.
 - The URL is signed for 6 hours. Tracks nobody has asked for in 12 hours (not the current prebuilt ones) are deleted, rows and files, whenever another track of the production is built; the retention job deletes the rest with the production's content.
 
 # Additions (2026-10-27): the admin area

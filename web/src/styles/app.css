@@ -3915,12 +3915,12 @@
   }
 }
 
+/* Floats just above the player bar (it lives in the bar), however tall the bar is. */
 .back-to-current {
-  position: fixed;
+  position: absolute;
   left: 50%;
-  bottom: calc(108px + var(--safe-bottom));
+  bottom: calc(100% + 16px);
   transform: translateX(-50%);
-  z-index: 26;
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
@@ -3932,6 +3932,7 @@
   color: #fff;
   font-weight: 600;
   box-shadow: var(--shadow-lg);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -3948,6 +3949,14 @@
   padding: var(--s-3) var(--s-4) calc(14px + var(--safe-bottom));
   background: var(--bg);
   border-top: 1px solid var(--line);
+}
+
+/* With a note, it is a row of its own on top of the controls: the bar grows upwards, the buttons
+   stay where the thumb is, and the follow band (follow.ts) ends above the note. */
+.player-controls.has-note {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding-top: var(--s-2);
 }
 
 /* Playback speed (SpeedButton): a labelled button ("SPEED" over "1×") that opens the speed sheet.
@@ -4065,23 +4074,141 @@
   margin: var(--s-2) 0 0;
 }
 
-/* "Getting the next line…" while a clip is still on its way. Sits on the controls' top edge. */
-.player-waiting {
-  position: fixed;
-  left: 50%;
-  bottom: calc(86px + var(--safe-bottom));
-  transform: translateX(-50%);
-  z-index: 26;
-  margin: 0;
-  padding: 3px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--bg);
-  box-shadow: var(--shadow-sm);
+/* With a part picked: "My previous line" and "My next line" on their own row, on top of the play
+   controls, in reach of a thumb, under the bar's note when it has one. */
+.has-my-lines .player-controls {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  padding-top: 4px;
+}
+
+.has-my-lines .player-controls.has-note {
+  row-gap: 4px;
+  padding-top: var(--s-2);
+}
+
+.my-line-nav {
+  display: flex;
+  flex: 0 0 100%;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-4);
+}
+
+.my-line-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--tap);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink);
+  font: 600 var(--text-sm) / 1 var(--font-sans);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .my-line-btn:hover:not([aria-disabled="true"]) {
+    background: var(--paper-deep);
+  }
+}
+
+.my-line-btn[aria-disabled="true"] {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.my-line-count {
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.player-waiting:empty {
+.my-line-count strong {
+  color: var(--ink);
+}
+
+/* "Skip to my cues": a toggle in the pinned row, beside the part and mode pickers. On, it is ink. */
+.skip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 4px 12px;
+  border: 1.5px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+  font: 600 var(--text-sm) / 1.2 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+
+.skip-toggle:hover {
+  border-color: var(--edge-strong);
+}
+
+.skip-toggle[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+/* Held before a long stretch: where the next line is, and the jump. Floats just above the player
+   bar (it lives in the bar), however tall the bar is. */
+.held-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  width: min(440px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  padding: var(--s-4);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+.held-text {
+  margin: 0 0 var(--s-3);
+  font-family: var(--font-serif);
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.held-actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.held-actions .btn {
+  flex: 1;
+}
+
+/* On a phone the two don't fit side by side: the jump on top, in reach. */
+@media (max-width: 520px) {
+  .held-actions {
+    flex-direction: column-reverse;
+  }
+}
+
+.player.has-my-lines {
+  padding-bottom: 46px;
+}
+
+/* The bar's note: "Getting the next line…" while a clip is still on its way, and the screen-lock
+   notes (listenTrack.ts), a sentence or two that wraps on a phone. */
+.player-note {
+  flex: 0 0 100%;
+  margin: 0;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.player-note:empty {
   display: none;
 }
 
@@ -4118,6 +4245,18 @@
     border-radius: 999px;
     padding: 10px 24px;
     box-shadow: var(--shadow-lg);
+  }
+
+  .step-panel .has-my-lines .player-controls {
+    width: 480px;
+    border-radius: var(--radius-lg);
+  }
+
+  /* Two rows don't fit a pill: a rounded card as wide as the note needs. */
+  .step-panel .player-controls.has-note {
+    width: min(560px, calc(100% - 32px));
+    border-radius: var(--radius-lg);
+    padding-top: var(--s-2);
   }
 }
 

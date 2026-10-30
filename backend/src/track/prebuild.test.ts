@@ -13,8 +13,8 @@ import { NORMALIZE_CONCURRENCY } from "../render/takeaudio.ts";
 import { bearer, createTestApp, dbSkip, invite, productionWithScript, signIn, type TestApp } from "../test/helpers.ts";
 import { FakeSynthesizer } from "../test/tts.ts";
 import { TTS_PRIORITY } from "../tts/service.ts";
-import { plannedTracks, prebuildTracks, stopPrebuilding } from "./prebuild.ts";
-import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, trackStart } from "./track.ts";
+import { plannedTracks, prebuildPass, prebuildTracks, stopPrebuilding } from "./prebuild.ts";
+import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, trackRequest, trackStart, type LineRow } from "./track.ts";
 
 const line = (i: number, characterId: string | null, voiceIds: string[] | null = null) => ({
   id: `line-${i}`,
@@ -66,6 +66,28 @@ test("the tracks built ahead are the stretches the player asks for, read through
     for (const start of built.slice(1)) assert.equal(trackStart(start, count), start);
   }
   assert.equal(TRACK_STRIDE, MAX_TRACK_LINES - 40);
+});
+
+test("what the player asks for with Skip to my cues off hashes the same as what is built ahead; with skips it doesn't", () => {
+  const anna = randomUUID();
+  const rows: LineRow[] = Array.from({ length: 6 }, (_, i) => ({
+    id: randomUUID(),
+    sectionId: "s",
+    kind: "dialogue",
+    text: `Line ${i}.`,
+    characterId: i % 2 ? anna : randomUUID(),
+    voiceIds: null,
+    currentTakeId: null,
+    takesAt: null,
+  }));
+  for (const { req } of plannedTracks(rows, [[anna]])) {
+    const built = trackIdentity(rows, req, "piper").hash;
+    const body = { lineIds: req.lineIds, mine: [...req.mine], mode: req.mode };
+    // The player leaves `skips` out when there are none (trackWindow).
+    assert.equal(trackIdentity(rows, trackRequest(body), "piper").hash, built);
+    assert.equal(trackIdentity(rows, trackRequest({ ...body, skips: [] }), "piper").hash, built);
+    assert.notEqual(trackIdentity(rows, trackRequest({ ...body, skips: [rows[1]!.id] }), "piper").hash, built);
+  }
 });
 
 interface Row {
@@ -222,13 +244,28 @@ describe("listen tracks built ahead", { skip: dbSkip }, () => {
     assert.equal((await ask("director")).json().track.status, "ready");
   });
 
+  test("a track with Skip to my cues' skips isn't built ahead: it is built when asked for, and a pass leaves it alone", async () => {
+    const lineIds = playable().map((l) => l.id);
+    const asked = () =>
+      t.app.inject({ method: "POST", url: `/api/productions/${pid}/listen-track`, headers: bearer(alice), payload: { lineIds, skips: [lineIds[0]] } });
+    assert.deepEqual((await asked()).json(), { track: { status: "building" } });
+    await t.ctx.jobs.idle();
+    const track = (await asked()).json().track;
+    assert.equal(track.status, "ready");
+    const key = new URL(track.url).pathname;
+    await prebuildPass(t.ctx, pid);
+    const again = (await asked()).json().track;
+    assert.equal(again.status, "ready");
+    assert.equal(new URL(again.url).pathname, key, "kept: it isn't out of date, just not one of the usual tracks");
+  });
+
   test("a listener's request is built before the ones waiting to be built ahead", async () => {
     const all = await trackLines(t.ctx, pid);
     const engine = await t.ctx.tts!.engine();
-    const ahead = [0, 1, 2].map((i) => trackIdentity(all, { lineIds: [all[i]!.id, all[i + 1]!.id], mine: new Set(), mode: "read" }, engine));
+    const ahead = [0, 1, 2].map((i) => trackIdentity(all, { lineIds: [all[i]!.id, all[i + 1]!.id], mine: new Set(), mode: "read", skips: new Set() }, engine));
     const claims = [];
     for (const a of ahead)
-      claims.push(await claimTrack(t.ctx, pid, a.hash, a.lines, { lineIds: a.lines.map((l) => l.id), mine: new Set(), mode: "read" }, false));
+      claims.push(await claimTrack(t.ctx, pid, a.hash, a.lines, { lineIds: a.lines.map((l) => l.id), mine: new Set(), mode: "read", skips: new Set() }, false));
     const asked = await t.app.inject({
       method: "POST",
       url: `/api/productions/${pid}/listen-track`,

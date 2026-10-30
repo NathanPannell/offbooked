@@ -12,7 +12,8 @@ import { claimTrack, MAX_TRACK_LINES, TRACK_STRIDE, trackIdentity, trackLines, t
 // What is built: every stretch the player asks for (tracks start every TRACK_STRIDE lines) for the
 // full read with no part, and for each cast member's default listen, "Pause, then read" on the
 // parts they picked, for the stretches with their lines in them (the rest are the full read, as in
-// the player). Other parts and modes are built when first asked for, as before. Each stretch's
+// the player). Other parts and modes, and "Skip to my cues" (its stretches leave lines out and are
+// the listener's own), are built when first asked for, as before. Each stretch's
 // voices and takes are made ready first, outside the build queue, so a listener's own request
 // never waits behind a slow synthesis.
 //
@@ -125,11 +126,11 @@ export function plannedTracks(lines: Pick<LineRow, "id" | "kind" | "characterId"
   for (let start = 0; start < lines.length; start += TRACK_STRIDE) {
     const stretch = lines.slice(start, start + MAX_TRACK_LINES);
     const lineIds = stretch.map((l) => l.id);
-    out.push({ start, req: { lineIds, mine: new Set(), mode: "read" } });
+    out.push({ start, req: { lineIds, mine: new Set(), mode: "read", skips: new Set() } });
     for (const ids of casts) {
       // As the player's saysLine: the line's speaker, or one of the voices of a shared line.
       const mine = stretch.filter((l) => l.kind === "dialogue" && ((l.characterId && ids.has(l.characterId)) || (l.voiceIds ?? []).some((v) => ids.has(v))));
-      if (mine.length) out.push({ start, req: { lineIds, mine: new Set(mine.map((l) => l.id)), mode: "pause" } });
+      if (mine.length) out.push({ start, req: { lineIds, mine: new Set(mine.map((l) => l.id)), mode: "pause", skips: new Set() } });
     }
     if (start + MAX_TRACK_LINES >= lines.length) break;
   }
