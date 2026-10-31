@@ -4,7 +4,7 @@ import { headTags, pageFor, PAGES, SITE_URL, structuredData } from "./seo";
 
 describe("marketing page metadata", () => {
   it("gives every page a title, description, canonical URL and link-preview tags", () => {
-    expect(PAGES.map((p) => p.path)).toEqual(["/", "/pricing", "/privacy", "/terms"]);
+    expect(PAGES.map((p) => p.path)).toEqual(["/", "/pricing", "/director", "/privacy", "/terms"]);
     for (const page of PAGES) {
       const head = headTags(page);
       expect(head).toContain(`<title>${page.title}</title>`);

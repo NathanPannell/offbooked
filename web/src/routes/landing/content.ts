@@ -35,6 +35,19 @@ export const FAQ: Faq[] = [
   },
 ];
 
+/** The director's page: the questions that stop a director trying it with their cast. */
+export const DIRECTOR_FAQ: Faq[] = [
+  {
+    q: "How much of my time does it take?",
+    a: "Upload the script and share the link. Your cast does the rest, and you can see who has recorded what.",
+  },
+  {
+    q: "What if an actor never records?",
+    a: "A computer voice reads their lines until they do, so everyone else can still run the scene.",
+  },
+  ...FAQ.filter((f) => f.q !== "What devices does it work on?"),
+];
+
 export interface Plan {
   name: string;
   /** What it costs at the founder price. */

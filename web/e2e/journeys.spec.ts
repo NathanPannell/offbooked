@@ -57,6 +57,7 @@ test("the marketing pages are real HTML before any script runs, and the app's pa
   for (const [path, heading] of [
     ["/", "Run lines with your cast, not a robot."],
     ["/pricing", "Free during public beta."],
+    ["/director", "Get your cast off book, between rehearsals."],
     ["/privacy", "Your script, your voices, your cast"],
     ["/terms", "The house rules"],
   ]) {
@@ -113,6 +114,33 @@ test("the landing page's recording demo records line after line by itself", asyn
   await expect(recorder.getByText("5 of 5 recorded")).toBeVisible();
   await page.getByRole("button", { name: "Play the recording demo again" }).click();
   await expect(recorder.getByText("0 of 5 recorded")).toBeVisible();
+});
+
+test("someone in a cast makes a link, and the director it reaches is greeted by name", async ({ page, context }) => {
+  await page.goto("/");
+  await page.getByRole("link", { name: "In a cast? Send this to your director" }).click();
+  await expect(page).toHaveURL(/\/director#send$/);
+  await expect(page).toHaveTitle("For directors · Offbooked");
+  await page.getByLabel("Your first name").fill("Maya");
+  await page.getByLabel("The show").fill("Macbeth");
+  await expect(page.locator(".mk-ticket")).toContainText("Macbeth");
+  await expect(page.locator(".mk-ticket")).toContainText("with thanks from Maya");
+  await expect(page.getByRole("link", { name: "Email it" })).toHaveAttribute("href", /from%3DMaya%26show%3DMacbeth/);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.getByRole("button", { name: "Copy the message" }).click();
+  await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("/director?from=Maya&show=Macbeth");
+
+  await page.goto("/director?from=Maya&show=Macbeth");
+  await expect(page.getByText("Maya, from your Macbeth cast, sent you this.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "In the cast? Send this to your director." })).toHaveCount(0);
+  await page.getByRole("link", { name: "Try free in public beta" }).first().click();
+  await expect(page).toHaveURL(/\/signin$/);
+
+  // Words nobody chose for the director stay plain, and a web address doesn't get shown at all.
+  await page.goto("/director?from=evil.com&show=%3Cb%3EFree%3C%2Fb%3E");
+  await expect(page.getByText("For your b Free b cast.")).toBeVisible();
+  await expect(page.locator(".mk-note b")).toHaveCount(0);
 });
 
 test("the pricing page is free in the beta and shows the founder prices", async ({ page }) => {

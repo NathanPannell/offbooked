@@ -63,6 +63,9 @@ export function MarketingLayout({ path, children, navCta = true }: { path: strin
             <Link to="/pricing">Pricing</Link>
           </li>
           <li>
+            <Link to="/director">For directors</Link>
+          </li>
+          <li>
             <a href={mailto("Offbooked")}>{CONTACT_EMAIL}</a>
           </li>
           <li>

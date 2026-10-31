@@ -9,6 +9,7 @@
   "rewrites": [
     { "source": "/", "destination": "/index.html" },
     { "source": "/pricing", "destination": "/pricing.html" },
+    { "source": "/director", "destination": "/director.html" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/((?!assets/|models/|\\.well-known/|robots\\.txt|revision\\.txt|sitemap\\.xml|og\\.png|favicon\\.svg).*)", "destination": "/shell.html" }

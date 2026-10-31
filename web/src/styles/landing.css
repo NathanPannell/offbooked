@@ -965,3 +965,158 @@
 .mk-legal a {
   overflow-wrap: anywhere;
 }
+
+/* The director's page */
+
+/* Who sent the link, above the headline. */
+.mk-note {
+  margin: 0;
+  padding: var(--s-1) var(--s-3);
+  border-radius: var(--radius-pill);
+  background: var(--sun-soft);
+  color: var(--ink-soft);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-style: italic;
+  overflow-wrap: anywhere;
+  animation: mk-note-in 0.4s ease both;
+}
+
+@keyframes mk-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mk-note {
+    animation: none;
+  }
+}
+
+.mk-send-link {
+  margin-top: var(--s-3);
+  color: var(--ink-soft);
+  text-underline-offset: 4px;
+}
+
+.mk-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+
+.mk-steps li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  column-gap: var(--s-2);
+}
+
+.mk-steps li::before {
+  content: counter(step);
+  grid-row: span 2;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: 1;
+  font-style: italic;
+  color: var(--accent-text);
+}
+
+.mk-steps h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+
+.mk-steps p {
+  margin: var(--s-1) 0 0;
+}
+
+.mk-send {
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+}
+
+.mk-send-grid {
+  display: grid;
+  gap: var(--s-6);
+  align-items: center;
+}
+
+@media (min-width: 640px) {
+  .mk-send-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.mk-send-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-width: 0;
+}
+
+/* The programme card: it updates as they type, with a little of a theatre programme's double rule. */
+.mk-ticket {
+  margin: 0;
+  min-width: 0;
+  padding: var(--s-6) var(--s-5);
+  text-align: center;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  outline: 1px solid var(--edge);
+  outline-offset: -7px;
+  border-radius: var(--radius-sm);
+  transform: rotate(-1deg);
+}
+
+.mk-ticket p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mk-ticket .mk-ticket-show {
+  margin-top: var(--s-3);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-style: italic;
+  line-height: 1.1;
+  color: var(--accent-text);
+}
+
+.mk-ticket .mk-ticket-from {
+  margin-top: var(--s-2);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  color: var(--ink-soft);
+}
+
+.mk-ticket .mk-ticket-url {
+  margin-top: var(--s-4);
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line-strong);
+  color: var(--muted);
+}
+
+.mk-send-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  justify-content: center;
+}
+
+.mk-send-status {
+  min-height: 1.5em;
+  margin: 0;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
