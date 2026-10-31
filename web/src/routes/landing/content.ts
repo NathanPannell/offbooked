@@ -27,7 +27,7 @@ export const FAQ: Faq[] = [
   },
   {
     q: "Who can hear our recordings?",
-    a: "Only people with your show's link, and we never train AI on them. Everything is deleted 7 days after your final performance.",
+    a: "People with your show's link, and the people who run Offbooked. We never train AI on them, and everything is deleted 7 days after your final performance.",
   },
   {
     q: "What devices does it work on?",
@@ -47,7 +47,7 @@ export const DIRECTOR_FAQ: Faq[] = [
   },
   {
     q: "Does my licence allow this?",
-    a: "Check its rules on recordings and copies. Only people with your show's link can open it, and scripts and recordings are deleted 7 days after your final performance.",
+    a: "Check its rules on recordings and copies. Your show opens only with its link, or for the people who run Offbooked, and scripts and recordings are deleted 7 days after your final performance.",
   },
   ...FAQ.filter((f) => f.q !== "What devices does it work on?"),
 ];

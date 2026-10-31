@@ -90,7 +90,7 @@ export function Director() {
   );
 }
 
-/** For someone in a cast: their name and the show make the link, shown as the card their director will get. */
+/** For someone in a cast: their name and the show make the link, with a note card that updates as they type. */
 function SendToDirector() {
   const [from, setFrom] = useState("");
   const [show, setShow] = useState("");

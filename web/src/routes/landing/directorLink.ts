@@ -10,26 +10,30 @@ export interface DirectorLink {
   show: string;
 }
 
+const MAX_DIGITS = 6;
+
 // Tested with combining marks removed, so an invisible one can't hide "evil.com".
-const UNSAFE = [
-  /[\p{L}\p{N}]\.\p{L}{2,}/u, // evil.com
-  /\.\s*(?:com|net|org|ca|io|co|app|info|link|xyz)\b/iu, // evil . com
-  /\d+\.\d+\.\d+/u, // 192.168.1.1
-  /(?:\d[ .-]?){6}/u, // a phone number
-  /offbooked/iu,
-];
+const looksUnsafe = (text: string): boolean => {
+  const bare = text.normalize("NFD").replace(/\p{M}/gu, "");
+  if (/\.\p{L}/u.test(bare) || /\s\.\s*\p{L}/u.test(bare) || /\d+\.\d+\.\d+/u.test(bare)) return true; // an address
+  if ((bare.match(/\p{Nd}/gu) ?? []).length > MAX_DIGITS) return true; // a phone number
+  return bare
+    .toLowerCase()
+    .replace(/0/g, "o")
+    .replace(/[^\p{L}]/gu, "")
+    .includes("offbooked");
+};
 
 const clean = (raw: string | null, max: number): string => {
   const text = (raw ?? "")
-    .normalize("NFC")
+    .normalize("NFKC")
     .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
-    .replace(/[^\p{L}\p{M}\p{N} '’\-&,.!?]/gu, " ")
+    .replace(/[^\p{L}\p{M}\p{N} '’\-&,.:!?]/gu, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, max)
     .trim();
-  const bare = text.normalize("NFD").replace(/\p{M}/gu, "");
-  return UNSAFE.some((pattern) => pattern.test(bare)) ? "" : text;
+  return looksUnsafe(text) ? "" : text;
 };
 
 /** Ends a sentence on a title, which may already have its own punctuation. */

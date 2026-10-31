@@ -30,6 +30,16 @@ describe("the link a cast member sends their director", () => {
     expect(cleanLink(null, "your refund, call 250 555 0199").show).toBe("");
     expect(cleanLink("The Offbooked team", null).from).toBe("");
     expect(cleanLink(null, "Twelve Angry Men 1957").show).toBe("Twelve Angry Men 1957");
+    expect(cleanLink(null, "Macbeth 2025-26").show).toBe("Macbeth 2025-26");
+    expect(cleanLink(null, "Bat Boy: The Musical").show).toBe("Bat Boy: The Musical");
+    expect(cleanLink("J. Smith", "Annie Jr. Co").from).toBe("J. Smith");
+    expect(cleanLink(null, "refund, call 250 - 555 - 0199").show).toBe("");
+    expect(cleanLink(null, "２５０５５５０１９９").show).toBe("");
+    expect(cleanLink("evil .shop", null).from).toBe("");
+    expect(cleanLink("evil . ru", null).from).toBe("");
+    expect(cleanLink("Off booked support", null).from).toBe("");
+    expect(cleanLink("0ffbooked", null).from).toBe("");
+    expect(cleanLink("ｏｆｆｂｏｏｋｅｄ", null).from).toBe("");
   });
 
   it("caps what the page will show", () => {

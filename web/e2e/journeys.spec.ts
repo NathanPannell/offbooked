@@ -135,6 +135,10 @@ test("someone in a cast makes a link, and the director it reaches is greeted by 
   await page.goto("/director?from=Maya&show=Macbeth");
   await expect(page.getByText("Maya sent you this for Macbeth.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "In the cast? Send this to your director." })).toHaveCount(0);
+  // The footer's link to the plain page drops the greeting, and brings the form back.
+  await page.getByRole("contentinfo").getByRole("link", { name: "For directors" }).click();
+  await expect(page.getByRole("heading", { name: "In the cast? Send this to your director." })).toBeVisible();
+  await expect(page.locator(".mk-note")).toHaveCount(0);
   await page.getByRole("link", { name: "Try free in public beta" }).first().click();
   await expect(page).toHaveURL(/\/signin$/);
 
