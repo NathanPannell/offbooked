@@ -125,7 +125,7 @@ test("someone in a cast makes a link, and the director it reaches is greeted by 
   await page.getByLabel("Your first name").fill("Maya");
   await page.getByLabel("The show").fill("Macbeth");
   await expect(page.locator(".mk-ticket")).toContainText("Macbeth");
-  await expect(page.locator(".mk-ticket")).toContainText("with thanks from Maya");
+  await expect(page.locator(".mk-ticket")).toContainText("from Maya");
   await expect(page.getByRole("link", { name: "Email it" })).toHaveAttribute("href", /from%3DMaya%26show%3DMacbeth/);
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.getByRole("button", { name: "Copy the message" }).click();

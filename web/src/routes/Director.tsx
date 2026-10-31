@@ -1,13 +1,13 @@
 import { ArrowRight, Check, Copy, Mail, Share2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { Demo } from "./landing/Demo";
 import { cleanLink, directorMessage, directorUrl, greeting, readDirectorLink, type DirectorLink } from "./landing/directorLink";
 import { DIRECTOR_FAQ } from "./landing/content";
 import { MarketingLayout, useCta } from "./landing/MarketingLayout";
 
 const STEPS = [
-  { title: "You upload the script.", line: "A PDF or Word file. Offbooked finds every part." },
+  { title: "You upload the script.", line: "A PDF or .docx file. Offbooked finds every part." },
   { title: "You share one link.", line: "Actors pick their part and record on their phone. No account, no app." },
   { title: "Everyone runs the play.", line: "Each line in the voice of the castmate who recorded it, whoever missed rehearsal." },
 ];
@@ -19,7 +19,8 @@ const STEPS = [
 export function Director() {
   const cta = useCta();
   const [link, setLink] = useState<DirectorLink>({ from: "", show: "" });
-  useEffect(() => setLink(readDirectorLink(window.location.search)), []);
+  const { search } = useLocation();
+  useEffect(() => setLink(readDirectorLink(search)), [search]);
   const hello = greeting(link);
 
   return (
@@ -54,9 +55,9 @@ export function Director() {
       <section className="mk-section mk-showcase" id="demo" aria-labelledby="demo-title">
         <div className="mk-showcase-copy">
           <h2 id="demo-title" className="mk-title">
-            Hear what your cast will hear.
+            See how it plays, line by line.
           </h2>
-          <p className="muted">Press play: each line in the voice of the castmate who recorded it.</p>
+          <p className="muted">With your cast recorded, each line plays in the voice of the castmate who said it.</p>
         </div>
         <Demo />
       </section>
@@ -136,7 +137,7 @@ function SendToDirector() {
         <h2 id="send-title" className="mk-title">
           In the cast? Send this to your director.
         </h2>
-        <p className="muted">Your name and the show make the page greet them.</p>
+        <p className="muted">Add your name and the show, and the page greets them with both.</p>
       </div>
       <div className="mk-send-grid">
         <div className="mk-send-form">
@@ -149,10 +150,10 @@ function SendToDirector() {
             <input className="input" value={show} onChange={edit(setShow)} maxLength={60} autoComplete="off" placeholder="Macbeth" />
           </label>
         </div>
-        <figure className="mk-ticket" aria-label="What your director will see">
-          <figcaption className="eyebrow">For the director</figcaption>
+        <figure className="mk-ticket" aria-label="Your note to the director">
+          <figcaption className="eyebrow">A note for the director</figcaption>
           <p className="mk-ticket-show">{link.show || "Your next show"}</p>
-          <p className="mk-ticket-from">{link.from ? `with thanks from ${link.from}` : "from someone in your cast"}</p>
+          <p className="mk-ticket-from">{link.from ? `from ${link.from}` : "from someone in your cast"}</p>
           <p className="mk-ticket-url small">{url.replace(/^https?:\/\//, "").split("?")[0]}</p>
         </figure>
       </div>

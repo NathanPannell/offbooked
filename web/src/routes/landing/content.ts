@@ -47,7 +47,7 @@ export const DIRECTOR_FAQ: Faq[] = [
   },
   {
     q: "Does my licence allow this?",
-    a: "Check its rules on recordings and copies. Each production stays private to its cast, and everything is deleted 7 days after your final performance.",
+    a: "Check its rules on recordings and copies. Only people with your show's link can open it, and scripts and recordings are deleted 7 days after your final performance.",
   },
   ...FAQ.filter((f) => f.q !== "What devices does it work on?"),
 ];

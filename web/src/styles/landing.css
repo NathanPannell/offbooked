@@ -1062,7 +1062,6 @@
   outline: 1px solid var(--edge);
   outline-offset: -7px;
   border-radius: var(--radius-sm);
-  transform: rotate(-1deg);
 }
 
 .mk-ticket p {

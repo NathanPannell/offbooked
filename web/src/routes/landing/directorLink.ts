@@ -1,6 +1,6 @@
 // The link a cast member sends their director: who sent it and which show, carried in the URL, so
 // the page can greet the director without a backend. Anyone can write these words into a link, so
-// what the page shows is short plain text and never something that reads as a web address.
+// what the page shows is short plain text, and never reads as a web address, a phone number or us.
 
 const MAX_NAME = 40;
 const MAX_SHOW = 60;
@@ -10,16 +10,30 @@ export interface DirectorLink {
   show: string;
 }
 
+// Tested with combining marks removed, so an invisible one can't hide "evil.com".
+const UNSAFE = [
+  /[\p{L}\p{N}]\.\p{L}{2,}/u, // evil.com
+  /\.\s*(?:com|net|org|ca|io|co|app|info|link|xyz)\b/iu, // evil . com
+  /\d+\.\d+\.\d+/u, // 192.168.1.1
+  /(?:\d[ .-]?){6}/u, // a phone number
+  /offbooked/iu,
+];
+
 const clean = (raw: string | null, max: number): string => {
   const text = (raw ?? "")
     .normalize("NFC")
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, "")
     .replace(/[^\p{L}\p{M}\p{N} '’\-&,.!?]/gu, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, max)
     .trim();
-  return /[\p{L}\p{N}]\.\p{L}{2,}/u.test(text) ? "" : text;
+  const bare = text.normalize("NFD").replace(/\p{M}/gu, "");
+  return UNSAFE.some((pattern) => pattern.test(bare)) ? "" : text;
 };
+
+/** Ends a sentence on a title, which may already have its own punctuation. */
+const stop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
 
 export const cleanLink = (from: string | null, show: string | null): DirectorLink => ({ from: clean(from, MAX_NAME), show: clean(show, MAX_SHOW) });
 
@@ -39,7 +53,7 @@ export function directorUrl(origin: string, { from, show }: DirectorLink): strin
 
 /** The line above the page's headline, or null on a plain visit. */
 export function greeting({ from, show }: DirectorLink): string | null {
-  if (from && show) return `${from} sent you this for ${show}.`;
+  if (from && show) return stop(`${from} sent you this for ${show}`);
   if (from) return `${from}, from your cast, sent you this.`;
   if (show) return `Sent with ${show} in mind.`;
   return null;
@@ -47,7 +61,7 @@ export function greeting({ from, show }: DirectorLink): string | null {
 
 /** The message the cast member sends with the link. */
 export function directorMessage(link: DirectorLink, url: string): string {
-  const show = link.show ? ` for ${link.show}` : "";
+  const opening = stop(`Found something that could help us get off book${link.show ? ` for ${link.show}` : ""}`);
   const signoff = link.from ? `\n\n${link.from}` : "";
-  return `Found something that could help us get off book${show}. We each record our lines on our phones, then the whole cast can run the scenes in each other's voices between rehearsals. No accounts for the cast, and it's free right now. Worth two minutes?\n\n${url}${signoff}`;
+  return `${opening} We each record our lines on our phones, then the whole cast can run the scenes in each other's voices between rehearsals. No accounts for the cast, and it's free right now. Worth two minutes?\n\n${url}${signoff}`;
 }

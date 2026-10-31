@@ -22,6 +22,16 @@ describe("the link a cast member sends their director", () => {
     expect(cleanLink("!!!", null).from).toBe("!!!");
   });
 
+  it("isn't fooled by invisible marks, numbers or our own name", () => {
+    expect(cleanLink("evil.c\u034Fom", null).from).toBe("");
+    expect(cleanLink("evil\uFE0F.com", null).from).toBe("");
+    expect(cleanLink("evil . com", null).from).toBe("");
+    expect(cleanLink("192.168.1.1", null).from).toBe("");
+    expect(cleanLink(null, "your refund, call 250 555 0199").show).toBe("");
+    expect(cleanLink("The Offbooked team", null).from).toBe("");
+    expect(cleanLink(null, "Twelve Angry Men 1957").show).toBe("Twelve Angry Men 1957");
+  });
+
   it("caps what the page will show", () => {
     expect(cleanLink("a".repeat(100), "b".repeat(100))).toEqual({ from: "a".repeat(40), show: "b".repeat(60) });
   });
@@ -38,6 +48,7 @@ describe("the link a cast member sends their director", () => {
     expect(greeting({ from: "Maya", show: "" })).toBe("Maya, from your cast, sent you this.");
     expect(greeting({ from: "", show: "Macbeth" })).toBe("Sent with Macbeth in mind.");
     expect(greeting({ from: "", show: "" })).toBeNull();
+    expect(greeting({ from: "Maya", show: "Who's Afraid of Virginia Woolf?" })).toBe("Maya sent you this for Who's Afraid of Virginia Woolf?");
   });
 
   it("writes a message that carries the link and only what was given", () => {
@@ -46,5 +57,6 @@ describe("the link a cast member sends their director", () => {
     expect(named).toContain("https://offbooked.com/director?x");
     expect(named.endsWith("Maya")).toBe(true);
     expect(directorMessage({ from: "", show: "" }, "u")).toContain("off book. We each");
+    expect(directorMessage({ from: "", show: "Oklahoma!" }, "u")).toContain("for Oklahoma! We each");
   });
 });
