@@ -19,7 +19,7 @@ function dropUnusedOrtWasm(): Plugin {
 
 /**
  * `vite preview` serves the build the way vercel.json does: the pre-rendered marketing pages at /,
- * /pricing, /privacy and /terms, and the plain app shell (dist/shell.html) for every other page, so the e2e
+ * /pricing, /director, /privacy and /terms, and the plain app shell (dist/shell.html) for every other page, so the e2e
  * journeys see what production serves.
  */
 function serveLikeVercel(): Plugin {
