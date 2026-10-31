@@ -5,6 +5,7 @@ import { ToastProvider } from "./components/Toast";
 import { NativeLinks } from "./native/NativeLinks";
 import { isNativeApp } from "./native/platform";
 import { Landing } from "./routes/Landing";
+import { Director } from "./routes/Director";
 import { Pricing } from "./routes/Pricing";
 import { NotFound } from "./routes/NotFound";
 import { Privacy } from "./routes/Privacy";
@@ -43,6 +44,7 @@ export function App({ location }: { location?: string }) {
           <Routes>
             <Route path="/" element={isNativeApp() ? <NativeHome /> : <Landing />} />
             <Route path="/pricing" element={<Pricing />} />
+            <Route path="/director" element={<Director />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/signin" element={<SignIn />} />

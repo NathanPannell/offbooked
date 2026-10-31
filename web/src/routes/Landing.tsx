@@ -21,6 +21,9 @@ export function Landing() {
           {cta.label} <ArrowRight size={20} aria-hidden="true" />
         </Link>
         <p className="mk-social small">{SOCIAL_PROOF}</p>
+        <a className="mk-send-link small" href="/director#send">
+          In a cast? Send this to your director
+        </a>
       </header>
 
       <section className="mk-section mk-showcase" id="demo" aria-labelledby="demo-title">

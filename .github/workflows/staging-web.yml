@@ -48,7 +48,7 @@ jobs:
           exit 1
       - name: Pages load
         run: |
-          for path in / /pricing /privacy /terms /signin /app; do
+          for path in / /pricing /director /privacy /terms /signin /app; do
             code=$(curl -sS -o page.html -w '%{http_code}' -H "x-vercel-protection-bypass: $BYPASS" "$SITE$path")
             echo "$path $code"
             if [ "$code" != 200 ] || ! grep -q 'id="root"' page.html; then echo "$SITE$path did not load" >&2; exit 1; fi

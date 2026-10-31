@@ -27,12 +27,29 @@ export const FAQ: Faq[] = [
   },
   {
     q: "Who can hear our recordings?",
-    a: "Only people with your show's link, and we never train AI on them. Everything is deleted 7 days after your final performance.",
+    a: "People with your show's link, and the people who run Offbooked. We never train AI on them, and everything is deleted 7 days after your final performance.",
   },
   {
     q: "What devices does it work on?",
     a: "Any phone, tablet or laptop with a browser: iPhone, Android and Chromebooks included.",
   },
+];
+
+/** The director's page: the questions that stop a director trying it with their cast. */
+export const DIRECTOR_FAQ: Faq[] = [
+  {
+    q: "How much of my time does it take?",
+    a: "Upload the script and share the link. Your cast does the rest, and you can see who has recorded what.",
+  },
+  {
+    q: "What if an actor never records?",
+    a: "A computer voice reads their lines until they do, so everyone else can still run the scene.",
+  },
+  {
+    q: "Does my licence allow this?",
+    a: "Check its rules on recordings and copies. Your show opens only with its link, or for the people who run Offbooked, and scripts and recordings are deleted 7 days after your final performance.",
+  },
+  ...FAQ.filter((f) => f.q !== "What devices does it work on?"),
 ];
 
 export interface Plan {

@@ -33,6 +33,13 @@ export const PAGES: PageMeta[] = [
       "Offbooked is free during the public beta. After launch the director pays per production: C$79, or C$39 at the founder price, locked in for life. The cast is always free.",
   },
   {
+    path: "/director",
+    file: "director.html",
+    title: "For directors · Offbooked",
+    description:
+      "Get your cast off book between rehearsals. Upload the script, share one link, and your actors record their lines and run the play in each other's voices. Free during the beta.",
+  },
+  {
     path: "/privacy",
     file: "privacy.html",
     title: "Privacy policy · Offbooked",
