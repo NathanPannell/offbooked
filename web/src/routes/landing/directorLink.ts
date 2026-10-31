@@ -39,9 +39,9 @@ export function directorUrl(origin: string, { from, show }: DirectorLink): strin
 
 /** The line above the page's headline, or null on a plain visit. */
 export function greeting({ from, show }: DirectorLink): string | null {
-  if (from && show) return `${from}, from your ${show} cast, sent you this.`;
+  if (from && show) return `${from} sent you this for ${show}.`;
   if (from) return `${from}, from your cast, sent you this.`;
-  if (show) return `For your ${show} cast.`;
+  if (show) return `Sent with ${show} in mind.`;
   return null;
 }
 

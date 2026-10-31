@@ -99,6 +99,8 @@ function SendToDirector() {
   useEffect(() => {
     setCanShare(typeof navigator.share === "function");
     setOrigin(window.location.origin);
+    // The web fonts move the page after the browser has jumped to the link's #send.
+    if (window.location.hash === "#send") void document.fonts.ready.then(() => document.getElementById("send")?.scrollIntoView());
   }, []);
 
   const link = useMemo(() => cleanLink(from, show), [from, show]);
@@ -151,7 +153,7 @@ function SendToDirector() {
           <figcaption className="eyebrow">For the director</figcaption>
           <p className="mk-ticket-show">{link.show || "Your next show"}</p>
           <p className="mk-ticket-from">{link.from ? `with thanks from ${link.from}` : "from someone in your cast"}</p>
-          <p className="mk-ticket-url small">{url.replace(/^https?:\/\//, "")}</p>
+          <p className="mk-ticket-url small">{url.replace(/^https?:\/\//, "").split("?")[0]}</p>
         </figure>
       </div>
       <div className="mk-send-actions">

@@ -121,6 +121,7 @@ test("someone in a cast makes a link, and the director it reaches is greeted by 
   await page.getByRole("link", { name: "In a cast? Send this to your director" }).click();
   await expect(page).toHaveURL(/\/director#send$/);
   await expect(page).toHaveTitle("For directors · Offbooked");
+  await expect(page.getByLabel("Your first name")).toBeInViewport();
   await page.getByLabel("Your first name").fill("Maya");
   await page.getByLabel("The show").fill("Macbeth");
   await expect(page.locator(".mk-ticket")).toContainText("Macbeth");
@@ -132,14 +133,14 @@ test("someone in a cast makes a link, and the director it reaches is greeted by 
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("/director?from=Maya&show=Macbeth");
 
   await page.goto("/director?from=Maya&show=Macbeth");
-  await expect(page.getByText("Maya, from your Macbeth cast, sent you this.")).toBeVisible();
+  await expect(page.getByText("Maya sent you this for Macbeth.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "In the cast? Send this to your director." })).toHaveCount(0);
   await page.getByRole("link", { name: "Try free in public beta" }).first().click();
   await expect(page).toHaveURL(/\/signin$/);
 
   // Words nobody chose for the director stay plain, and a web address doesn't get shown at all.
   await page.goto("/director?from=evil.com&show=%3Cb%3EFree%3C%2Fb%3E");
-  await expect(page.getByText("For your b Free b cast.")).toBeVisible();
+  await expect(page.getByText("Sent with b Free b in mind.")).toBeVisible();
   await expect(page.locator(".mk-note b")).toHaveCount(0);
 });
 

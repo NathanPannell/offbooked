@@ -34,9 +34,9 @@ describe("the link a cast member sends their director", () => {
   });
 
   it("greets the director with what it knows", () => {
-    expect(greeting({ from: "Maya", show: "Macbeth" })).toBe("Maya, from your Macbeth cast, sent you this.");
+    expect(greeting({ from: "Maya", show: "Macbeth" })).toBe("Maya sent you this for Macbeth.");
     expect(greeting({ from: "Maya", show: "" })).toBe("Maya, from your cast, sent you this.");
-    expect(greeting({ from: "", show: "Macbeth" })).toBe("For your Macbeth cast.");
+    expect(greeting({ from: "", show: "Macbeth" })).toBe("Sent with Macbeth in mind.");
     expect(greeting({ from: "", show: "" })).toBeNull();
   });
 

@@ -979,20 +979,6 @@
   font-size: var(--text-md);
   font-style: italic;
   overflow-wrap: anywhere;
-  animation: mk-note-in 0.4s ease both;
-}
-
-@keyframes mk-note-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mk-note {
-    animation: none;
-  }
 }
 
 .mk-send-link {

@@ -23,7 +23,7 @@ function dropUnusedOrtWasm(): Plugin {
  * journeys see what production serves.
  */
 function serveLikeVercel(): Plugin {
-  const pages = new Set(["/", "/pricing", "/privacy", "/terms"]);
+  const pages = new Set(["/", "/pricing", "/director", "/privacy", "/terms"]);
   // What vercel.json leaves to the files themselves. Not "anything with a dot": invite tokens have dots.
   const files = /^\/(assets\/|models\/|\.well-known\/|robots\.txt|revision\.txt|sitemap\.xml|og\.png|favicon\.svg|\w+\.html)/;
   return {
